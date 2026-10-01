@@ -1,19 +1,49 @@
 import type { Config } from 'tailwindcss';
 
+// The black-and-white design: the approved mockup's colours. Rules and borders are hairline unless a class says ink.
+const colors = {
+  paper: '#ffffff',
+  ink: '#0a0a0a',
+  graphite: '#555555', // secondary text
+  mist: '#737373', // captions: 4.6:1 on white
+  hairline: '#e7e7e7', // rules and borders
+  wash: '#f4f4f4', // image placeholders and quiet surfaces
+  error: '#b42318', // a readable red on white
+};
+
 export default {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
   theme: {
+    // No rounded corners and no shadows: only `rounded-none` and `shadow-none` exist, so a stray `rounded-lg` or
+    // `shadow-md` draws nothing. (The booking sheet's grab handle, the one rounded thing allowed, can take an arbitrary
+    // value.)
+    borderRadius: { none: '0px' },
+    boxShadow: { none: 'none' },
+    // Self-hosted from @fontsource (app/layout.tsx), so nothing comes from a CDN: the app works inside LINE and offline
+    // on stage. Jost for everything Latin, Zen Kaku Gothic New for Japanese. There's no serif: `font-serif` draws
+    // nothing, so the text stays in Jost.
+    fontFamily: {
+      sans: ['Jost', '"Zen Kaku Gothic New"', '"Hiragino Sans"', 'system-ui', 'sans-serif'],
+      // Tool names and the agent view's log. Japanese in them (an argument, a note) takes the app's Japanese face.
+      mono: ['ui-monospace', '"SF Mono"', 'Menlo', '"Zen Kaku Gothic New"', 'monospace'],
+    },
     extend: {
       colors: {
-        ink: '#1c1c1c',
-        ivory: '#f7f4ee',
-        gold: '#b89b5e',
-        mist: '#8a8a8a',
+        ...colors,
+        // Retired, and white, not cream. Only screens that Task RD2 rebuilds still say `ivory` (app/page.tsx among them,
+        // which this task leaves alone); without it their buttons' text would be ink on ink. RD2 deletes this line.
+        ivory: colors.paper,
       },
-      fontFamily: {
-        // Self-hosted from @fontsource (app/layout.tsx), so nothing is downloaded at build or run time.
-        serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
-        sans: ['"Hiragino Sans"', '"Noto Sans JP"', 'system-ui', 'sans-serif'],
+      borderColor: { DEFAULT: colors.hairline },
+      // The type scale, from the mockup: [size, { lineHeight, letterSpacing, fontWeight }].
+      fontSize: {
+        wordmark: ['17px', { lineHeight: '1', letterSpacing: '0.42em', fontWeight: '500' }],
+        nav: ['11px', { lineHeight: '1.4', letterSpacing: '0.14em' }], // the header's link and EN/JA
+        eyebrow: ['11px', { lineHeight: '1.4', letterSpacing: '0.18em' }], // eyebrows and labels
+        button: ['12px', { lineHeight: '1', letterSpacing: '0.2em', fontWeight: '500' }],
+        body: ['14px', { lineHeight: '1.6' }],
+        title: ['24px', { lineHeight: '1.25', letterSpacing: '0.01em', fontWeight: '400' }], // a product's name
+        headline: ['31px', { lineHeight: '1.15', letterSpacing: '-0.01em', fontWeight: '300' }], // a page's headline
       },
       screens: {
         // The stage laptop: a wide screen with a mouse or trackpad, where the app sits in a phone-sized frame
