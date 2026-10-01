@@ -9,7 +9,7 @@ import { ProductImage } from '@/components/product-grid';
 import { Screen } from '@/components/screen';
 import { StatusNote } from '@/components/status-note';
 import { COPY } from '@/lib/copy';
-import { yen } from '@/lib/format';
+import { personalizationKind, yen } from '@/lib/format';
 import type { Product } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
 
@@ -32,15 +32,16 @@ export default function ProductPage() {
             <div>
               {item.collection && <p className="text-xs uppercase tracking-widest text-mist">{item.collection.name}</p>}
               <h1 className="font-serif text-4xl leading-tight">{item.name}</h1>
-              <p className="mt-1 text-lg">{yen(item.priceJpy)}</p>
+              <p className="mt-1 text-lg">{yen(item.priceJpy, locale)}</p>
             </div>
             <p className="whitespace-pre-line text-sm leading-relaxed">{item.description}</p>
-            {item.craftStory && <p className="border-l-2 border-gold pl-3 font-serif text-lg italic">{item.craftStory}</p>}
+            {/* Italic in English only: Japanese type has no italic, so the browser would slant the glyphs. */}
+            {item.craftStory && <p className={`border-l-2 border-gold pl-3 font-serif text-lg ${locale === 'en' ? 'italic' : ''}`}>{item.craftStory}</p>}
             {item.personalization.offered && (
               <section>
                 <h2 className="text-xs uppercase tracking-widest text-mist">{t.personalization}</h2>
                 <p className="text-sm">
-                  {item.personalization.kinds.map((kind) => kind.replace(/-/g, ' ')).join(' · ')}
+                  {item.personalization.kinds.map((kind) => personalizationKind(kind, locale)).join(' · ')}
                   {item.personalization.leadDays ? ` · ${t.leadDays(item.personalization.leadDays)}` : ''}
                 </p>
               </section>

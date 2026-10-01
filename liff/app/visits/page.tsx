@@ -10,7 +10,7 @@ import { Screen } from '@/components/screen';
 import { Spinner } from '@/components/spinner';
 import { StatusNote } from '@/components/status-note';
 import { COPY } from '@/lib/copy';
-import { visitTime } from '@/lib/format';
+import { listOf, visitTime } from '@/lib/format';
 import { requestSentFor, statusLabel } from '@/lib/status';
 import type { Appointment } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
@@ -40,7 +40,7 @@ function Visits() {
               </p>
               <p className="mt-1 font-serif text-xl">{visit.boutique.name}</p>
               <p className="text-sm">{visitTime(visit.requestedFor, locale)}</p>
-              <p className="text-xs text-ink/70">{visit.products.map((product) => product.name).join('、')}</p>
+              <p className="text-xs text-ink/70">{listOf(visit.products.map((product) => product.name), locale)}</p>
             </Link>
           </li>
         ))}

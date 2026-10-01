@@ -1,13 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRealDate, mediaUrl, nextSaturday, timeSlots, tomorrow, visitTime, yen } from './format';
+import { isRealDate, listOf, mediaUrl, nextSaturday, personalizationKind, timeSlots, tomorrow, visitTime, yen } from './format';
 
 // Every date below is an instant, so the results don't depend on the machine's time zone. The suite passes under
 // TZ=America/Los_Angeles and TZ=Asia/Tokyo alike. Tokyo is UTC+9 all year: noon in Tokyo is 03:00Z.
 describe('format', () => {
-  it('formats yen and Tokyo visit times', () => {
-    expect(yen(385000)).toBe('￥385,000');
+  it("formats yen in the customer's language, and Tokyo visit times", () => {
+    expect(yen(385000, 'ja')).toBe('￥385,000'); // ja-JP, as Node's ICU and Chrome write it (Safari: ¥385,000)
+    expect(yen(385000, 'en')).toBe('¥385,000');
     expect(visitTime('2026-10-10T14:00:00+09:00', 'ja')).toContain('14:00');
     expect(visitTime('2026-10-10T05:00:00.000Z', 'en')).toContain('14:00');
+  });
+
+  it("joins names the way the customer's language does", () => {
+    expect(listOf(['Weekender 50', 'Cabin Case 55', 'Passport Cover'], 'en')).toBe('Weekender 50, Cabin Case 55 and Passport Cover');
+    expect(listOf(['Weekender 50', 'Cabin Case 55'], 'en')).toBe('Weekender 50 and Cabin Case 55');
+    expect(listOf(['ウィークエンダー 50', 'キャビン・ケース 55', 'パスポートカバー'], 'ja')).toBe('ウィークエンダー 50、キャビン・ケース 55、パスポートカバー');
+    expect(listOf(['Weekender 50'], 'en')).toBe('Weekender 50');
+    expect(listOf([], 'ja')).toBe('');
+  });
+
+  it("names the catalog's personalization kinds in both languages", () => {
+    expect(personalizationKind('initials-hot-stamp', 'en')).toBe('Hot-stamped initials');
+    expect(personalizationKind('initials-hot-stamp', 'ja')).toBe('イニシャルの箔押し');
+    for (const kind of ['initials-hot-stamp', 'hand-painted-stripes', 'monogram-color']) {
+      for (const locale of ['ja', 'en'] as const) expect(personalizationKind(kind, locale)).not.toBe(kind.replace(/-/g, ' '));
+    }
+  });
+
+  it('shows a kind it has no name for as its slug, with spaces', () => {
+    expect(personalizationKind('laser-etching', 'ja')).toBe('laser etching');
+    expect(personalizationKind('constructor', 'en')).toBe('constructor');
   });
 
   it('picks the next Saturday at least two days away', () => {

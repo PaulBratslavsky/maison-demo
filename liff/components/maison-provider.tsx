@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { config } from '@/lib/config';
-import { toLocale } from '@/lib/liff';
+import { readStoredLocale, resolveLocale, storeLocale } from '@/lib/locale';
 import { getMaison, onToolCall, type Maison } from '@/lib/maison';
 import type { ToolCallRecord } from '@/lib/mcp';
 import { errorOf, type ScreenError } from '@/lib/status';
@@ -21,10 +21,13 @@ interface MaisonContext {
   /** A failed sign-in as the screens show it (errorText), with any wait the server named, or null. */
   signInError: ScreenError | null;
   maison: Maison | null;
+  /** The screens' language: the switch's choice, else LINE's language, else the demo default (lib/locale.ts). */
   locale: Locale;
   calls: ToolCallRecord[];
   agentView: boolean;
   setAgentView: (on: boolean) => void;
+  /** The header's language switch: every screen's copy and tool calls follow, and this device remembers it. */
+  setLocale: (locale: Locale) => void;
   retrySignIn: () => void;
 }
 
@@ -33,11 +36,21 @@ type SignIn = Pick<MaisonContext, 'status' | 'signInError' | 'maison'>;
 const Context = createContext<MaisonContext | null>(null);
 const AGENT_VIEW_KEY = 'maison.agentView';
 
+/** The browser's localStorage, or null where even reaching it throws (blocked storage). */
+const browserStorage = (): Storage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
 export function MaisonProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SignIn>({ status: 'starting', signInError: null, maison: null });
   const [attempt, setAttempt] = useState(0);
   const [calls, setCalls] = useState<ToolCallRecord[]>([]);
   const [agentView, setAgentViewState] = useState(false);
+  const [localeOverride, setLocaleOverride] = useState<Locale | null>(null);
 
   useEffect(() => {
     try {
@@ -45,6 +58,8 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
     } catch {
       // storage unavailable: start with the agent view off
     }
+    // Read after the first render, like the agent view, so the server's HTML and the first client render match.
+    setLocaleOverride(readStoredLocale(browserStorage()));
     return onToolCall((record) => setCalls((previous) => [...previous.slice(-49), record]));
   }, []);
 
@@ -73,6 +88,10 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
       // not remembered this time
     }
   }, []);
+  const setLocale = useCallback((locale: Locale) => {
+    setLocaleOverride(locale);
+    storeLocale(browserStorage(), locale);
+  }, []);
   const retrySignIn = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<MaisonContext>(
@@ -80,14 +99,22 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
       ...state,
       error: state.signInError?.message ?? null,
       errorCode: state.signInError?.code ?? null,
-      locale: state.maison?.locale ?? toLocale(config.demoLocale),
+      locale: resolveLocale({ override: localeOverride, signedIn: state.maison?.locale ?? null, demo: config.demoLocale }),
       calls,
       agentView,
       setAgentView,
+      setLocale,
       retrySignIn,
     }),
-    [state, calls, agentView, setAgentView, retrySignIn]
+    [state, localeOverride, calls, agentView, setAgentView, setLocale, retrySignIn]
   );
+
+  // Screen readers and the browser's font choice follow the language. The server renders lang="ja" (app/layout.tsx);
+  // this runs right after the first paint.
+  useEffect(() => {
+    document.documentElement.lang = value.locale;
+  }, [value.locale]);
+
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

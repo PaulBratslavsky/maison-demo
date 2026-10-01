@@ -24,7 +24,7 @@ export function ProductGrid({ products, locale }: { products: ProductCard[]; loc
             {/* Decorative: the link's name is the product name below it. */}
             <ProductImage url={product.imageUrl} alt="" className="aspect-square w-full" />
             <p className="mt-2 font-serif text-lg leading-tight">{product.name}</p>
-            <p className="text-xs text-mist">{yen(product.priceJpy)}</p>
+            <p className="text-xs text-mist">{yen(product.priceJpy, locale)}</p>
             {product.personalizable && <p className="mt-1 text-[10px] uppercase tracking-wider text-gold">{COPY[locale].personalizable}</p>}
           </Link>
         </li>

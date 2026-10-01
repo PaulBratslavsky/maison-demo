@@ -9,5 +9,5 @@ export const config = {
   demoLineUserId:
     process.env.NEXT_PUBLIC_DEMO_LINE_USER_ID ||
     'U4af4980629c1a7b3f1e2d3c4b5a69788',
-  demoLocale: process.env.NEXT_PUBLIC_DEMO_LOCALE || 'ja',
+  demoLocale: process.env.NEXT_PUBLIC_DEMO_LOCALE || 'en',
 };

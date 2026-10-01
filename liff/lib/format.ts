@@ -1,8 +1,27 @@
 import { config } from './config';
+import { COPY } from './copy';
 import type { Locale } from './types';
 
-const yenFormat = new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' });
-export const yen = (value: number) => yenFormat.format(value);
+const yenFormats: Record<Locale, Intl.NumberFormat> = {
+  ja: new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }),
+  // en-GB writes JP¥. Every price here is in yen, so the narrow symbol, ¥, is clear.
+  en: new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'JPY', currencyDisplay: 'narrowSymbol' }),
+};
+/** A price in the customer's language: ja-JP's own format (￥385,000 in Chrome), or ¥385,000 in English. */
+export const yen = (value: number, locale: Locale) => yenFormats[locale].format(value);
+
+const listFormats: Record<Locale, Intl.ListFormat> = {
+  ja: new Intl.ListFormat('ja', { type: 'conjunction' }),
+  en: new Intl.ListFormat('en-GB', { type: 'conjunction' }),
+};
+/** Names joined the way the customer's language joins them: "A、B、C", or "A, B and C". */
+export const listOf = (items: string[], locale: Locale) => listFormats[locale].format(items);
+
+/** A personalization kind (a slug) in the customer's language. A kind with no name yet shows as its slug, with spaces. */
+export const personalizationKind = (kind: string, locale: Locale): string => {
+  const names: Readonly<Record<string, string>> = COPY[locale].personalizationKinds;
+  return Object.hasOwn(names, kind) ? names[kind] : kind.replace(/-/g, ' ');
+};
 
 /** A visit's start in Tokyo time, e.g. "10月10日(土) 14:00" or "Sat 10 Oct, 14:00". */
 export const visitTime = (iso: string, locale: Locale) =>
