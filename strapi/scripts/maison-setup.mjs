@@ -6,10 +6,12 @@
 //      oauth-mcp-manager allows one active LINE client, so any other active one is deactivated first.
 //   5. writes the app's Strapi URL and client ID to liff/.env, and the ops token to strapi/.tmp/maison-ops-token
 // Usage from the repo root: npm run setup (Strapi at STRAPI_URL, or on PORT from strapi/.env).
-// Never prints a secret.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// Never prints a secret. Importing this file runs nothing (scripts/maison-setup.test.mjs imports it).
+import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { writeEnv as writeEnvKeys } from '../../scripts/line-mode.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 // `||`, not `??`: a key left empty in .env counts as unset.
@@ -21,8 +23,11 @@ const HINTS = {
   '/maison/demo/seed': 'The Maison plugin is not loaded. Check config/plugins.ts, then run npm install in strapi/.',
   '/strapi-oauth-mcp-manager/overview': 'oauth-mcp-manager is not loaded. Check config/plugins.ts and strapi/package.json.',
 };
+// For a sign-in that fails with anything but 429, which has its own message.
+const SIGN_IN_HINT =
+  "The demo admin (DEMO_ADMIN_EMAIL and DEMO_ADMIN_PASSWORD in strapi/.env) may not be this database's first admin: setup registers it only on a fresh database. See \"Start over with a clean database\" in README.md.";
 
-const call = async (method, path, body, jwt) => {
+export const call = async (method, path, body, jwt) => {
   let response;
   try {
     response = await fetch(`${STRAPI_URL}${path}`, {
@@ -44,26 +49,22 @@ const call = async (method, path, body, jwt) => {
     if (response.status === 429) {
       throw new Error(`${method} ${path} answered 429: Strapi allows 5 admin sign-ins per 5 minutes. Wait, or restart Strapi.`);
     }
-    const hint = response.status === 404 && HINTS[path] ? ` ${HINTS[path]}` : '';
+    const hint = path === '/admin/login' ? ` ${SIGN_IN_HINT}` : response.status === 404 && HINTS[path] ? ` ${HINTS[path]}` : '';
     throw new Error(`${method} ${path} failed with ${response.status}: ${JSON.stringify(json.error ?? json)}${hint}`);
   }
   return json.data ?? json;
 };
 
-/** Sets KEY=value lines in an env file, creating it from .env.example when missing. Leaves it readable by you only. */
-const writeEnv = (file, values) => {
+/**
+ * Sets KEY=value in an env file with npm run mode's writer (scripts/line-mode.mjs): every line that sets the key, in any
+ * form dotenv reads, takes the value as it is, and a missing key is added at the end. A missing file starts as a copy of
+ * its .env.example. Leaves the file readable by you only.
+ */
+export const writeEnv = (file, values) => {
   mkdirSync(dirname(file), { recursive: true });
   const example = file.replace(/\.env$/, '.env.example');
-  const created = !existsSync(file);
-  let text = !created ? readFileSync(file, 'utf8') : existsSync(example) ? readFileSync(example, 'utf8') : '';
-  for (const [key, value] of Object.entries(values)) {
-    const line = `${key}=${value}`;
-    const pattern = new RegExp(`^${key}=.*$`, 'm');
-    text = pattern.test(text) ? text.replace(pattern, line) : `${text.replace(/\n*$/, '\n')}${line}\n`;
-  }
-  // `mode` applies only when the file is created, so tighten an existing one too (it may hold an API key).
-  if (!created) chmodSync(file, 0o600);
-  writeFileSync(file, text, { mode: 0o600 });
+  if (!existsSync(file) && existsSync(example)) copyFileSync(example, file);
+  writeEnvKeys(file, values);
 };
 
 /**
@@ -217,10 +218,13 @@ const main = async () => {
   console.log('Wrote the "Maison ops" token to strapi/.tmp/maison-ops-token (README: "Claude Desktop, the ops agent").');
 };
 
-try {
-  await main();
-} catch (error) {
-  // One line, with the fix, rather than a stack trace.
-  console.error(`Setup failed: ${error.message}`);
-  process.exitCode = 1;
+// Only when run as a script (npm run setup), not when imported.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    // One line, with the fix, rather than a stack trace.
+    console.error(`Setup failed: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
