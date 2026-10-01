@@ -3,10 +3,13 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { expect, test } from '@playwright/test';
 
 import { createSession } from '../lib/session';
+import { requireLocalMode, strapiOrigin } from '../lib/strapi-proxy';
 import type { Appointment } from '../lib/types';
 import { nextWeekday } from './support';
 
-const strapiUrl = (process.env.NEXT_PUBLIC_STRAPI_URL ?? 'http://localhost:1338').replace(/\/+$/, '');
+// Local mode only, and Strapi on this machine: in LINE mode NEXT_PUBLIC_STRAPI_URL is the tunnel.
+requireLocalMode();
+const strapiUrl = strapiOrigin();
 const clientId = process.env.NEXT_PUBLIC_MAISON_CLIENT_ID ?? '';
 const asAdmin = () => ({ Authorization: `Bearer ${process.env.MAISON_E2E_ADMIN_JWT}` });
 

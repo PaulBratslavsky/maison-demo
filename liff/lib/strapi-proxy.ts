@@ -6,9 +6,15 @@
  *   /uploads/*                                    catalog images
  * Responses stream through as Strapi writes them: an MCP answer is a server-sent event stream. Only the request
  * headers those calls use reach Strapi: no cookies, no Origin, nothing hop-by-hop. A request body is read whole, up to
- * MAX_BODY_BYTES, before any of it is passed on.
+ * MAX_BODY_BYTES, before any of it is passed on. And only what the phone sends: on /mcp a customer session or no
+ * Authorization at all, and on the token endpoint the token exchange.
+ * Only LINE mode's build serves it. In any other build every path answers 404, so a tunnel left open after
+ * `npm run mode:local` can't reach a Strapi that trusts the verify mock, where anyone could mint a customer session.
  */
 const PROXIED = /^(\/mcp|\/api\/strapi-oauth-mcp-manager\/oauth\/token|\/uploads\/[^?#]+)$/;
+const TOKEN_PATH = '/api/strapi-oauth-mcp-manager/oauth/token';
+const TOKEN_EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
+const FORM = 'application/x-www-form-urlencoded';
 const REQUEST_HEADERS = [
   'accept',
   'authorization',
@@ -64,9 +70,10 @@ const namedByConnection = (headers: Headers) =>
 
 /**
  * The request's body, or null when it's longer than `limit` bytes: by its Content-Length, before reading any of it, or
- * as it arrives, for a body that has none (chunked) or is longer than it says.
+ * as it arrives, for a body that has none (chunked) or is longer than it says. It throws when the body can't be read to
+ * its end (the caller went away).
  */
-const readBody = async (request: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | null> => {
+export const readBody = async (request: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | null> => {
   if (Number(request.headers.get('content-length')) > limit) return null;
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
@@ -90,13 +97,49 @@ const readBody = async (request: Request, limit: number): Promise<Uint8Array<Arr
 export const strapiOrigin = (env: Record<string, string | undefined> = process.env) =>
   (env.STRAPI_URL || 'http://127.0.0.1:1338').replace(/\/+$/, '');
 
+/**
+ * Refuses to go on in LINE mode, for the e2e and live tests: they sign in with the verify mock's ID tokens, as the demo
+ * admin, and delete or create the demo's appointments. They reach Strapi with strapiOrigin().
+ */
+export const requireLocalMode = (env: Record<string, string | undefined> = process.env): void => {
+  if (env.NEXT_PUBLIC_LIFF_MOCK === 'false') {
+    throw new Error('These tests need local mode: run npm run mode:local, then restart Strapi and the app.');
+  }
+};
+
+/** A customer's session, as the token exchange issues it: the only credential the app sends. The concierge's rule too. */
+export const isCustomerSession = (authorization: string | null): boolean => /^Bearer mcp_at_\S+$/.test(authorization ?? '');
+
+/**
+ * A token endpoint body as the phone sends it: a form whose grant_type is the token exchange. The form that goes on to
+ * Strapi, encoded again, or null for anything else. A key sent twice, or with brackets, is refused rather than read two
+ * ways: Strapi reads `grant_type=…&grant_type[]=…` as one array. And Strapi gets the form this has checked, as a form:
+ * nothing it would read another way, such as JSON or another charset.
+ */
+const tokenExchange = (contentType: string | null, body: Uint8Array): Uint8Array<ArrayBuffer> | null => {
+  if ((contentType ?? '').split(';')[0].trim().toLowerCase() !== FORM) return null;
+  const form = new URLSearchParams(new TextDecoder().decode(body));
+  const keys = [...form.keys()];
+  const flat = new Set(keys).size === keys.length && !keys.some((key) => /[[\]]/.test(key));
+  return flat && form.get('grant_type') === TOKEN_EXCHANGE ? new TextEncoder().encode(form.toString()) : null;
+};
+
 export async function proxyToStrapi(
   request: Request,
   path: string,
   { strapiUrl = strapiOrigin(), fetchImpl = fetch }: { strapiUrl?: string; fetchImpl?: typeof fetch } = {}
 ): Promise<Response> {
-  if (!PROXIED.test(path) || climbs(path)) {
+  // Inlined when the app is built: 'false' only in LINE mode's build (npm run start:line), the one behind the tunnel.
+  if (process.env.NEXT_PUBLIC_LIFF_MOCK !== 'false' || !PROXIED.test(path) || climbs(path)) {
     return Response.json({ error: 'not_found' }, { status: 404 });
+  }
+  // No Authorization goes on, so Strapi answers 401 with its resource metadata. Anything but a session, such as an
+  // admin token, has no business on the public origin.
+  if (path === '/mcp' && request.headers.has('authorization') && !isCustomerSession(request.headers.get('authorization'))) {
+    return Response.json(
+      { error: 'invalid_token', error_description: 'Only a customer session is accepted here.' },
+      { status: 401, headers: { 'WWW-Authenticate': 'Bearer error="invalid_token"' } }
+    );
   }
   const hopByHop = namedByConnection(request.headers);
   const headers = new Headers();
@@ -116,6 +159,12 @@ export async function proxyToStrapi(
       return Response.json({ error: 'invalid_request', error_description: 'The request body is over 1 MB.' }, { status: 413 });
     }
     body = read;
+  }
+  if (path === TOKEN_PATH) {
+    const exchange = tokenExchange(request.headers.get('content-type'), body ?? new Uint8Array(0));
+    if (exchange === null) return Response.json({ error: 'unsupported_grant_type' }, { status: 400 });
+    body = exchange;
+    headers.set('content-type', FORM);
   }
   let upstream: Response;
   try {

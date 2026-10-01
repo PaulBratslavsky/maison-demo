@@ -1,9 +1,13 @@
+import { requireLocalMode, strapiOrigin } from '../lib/strapi-proxy';
+
 /**
  * Signs in as the demo admin, deletes demo appointments so each run starts clean (a customer may only have three
  * open requests), and hands the admin session to the API tests. Workers start after this and inherit process.env.
+ * Only in local mode, and on this machine: never through NEXT_PUBLIC_STRAPI_URL, which in LINE mode is the tunnel.
  */
 export default async function globalSetup() {
-  const strapiUrl = (process.env.NEXT_PUBLIC_STRAPI_URL ?? 'http://localhost:1338').replace(/\/+$/, '');
+  requireLocalMode();
+  const strapiUrl = strapiOrigin();
   const email = process.env.DEMO_ADMIN_EMAIL;
   const password = process.env.DEMO_ADMIN_PASSWORD;
   if (!email || !password) {

@@ -1,6 +1,10 @@
 import { spawn } from 'node:child_process';
 
-export const STRAPI_URL = (process.env.NEXT_PUBLIC_STRAPI_URL ?? 'http://localhost:1338').replace(/\/+$/, '');
+import { requireLocalMode, strapiOrigin } from '../lib/strapi-proxy';
+
+// Local mode only, and Strapi on this machine: in LINE mode NEXT_PUBLIC_STRAPI_URL is the tunnel.
+requireLocalMode();
+export const STRAPI_URL = strapiOrigin();
 
 /** Whether anything answers a GET to `url` within two seconds (any status counts). */
 export const reachable = async (url: string): Promise<boolean> => {

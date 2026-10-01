@@ -2,6 +2,7 @@ import { createMCPClient } from '@ai-sdk/mcp';
 
 import { handleConcierge } from '@/lib/concierge';
 import { conciergeModel } from '@/lib/model';
+import { strapiOrigin } from '@/lib/strapi-proxy';
 
 export const maxDuration = 60;
 
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
     model,
     modelLabel: label,
     createMcpClient: createMCPClient,
-    strapiUrl: (process.env.STRAPI_URL ?? process.env.NEXT_PUBLIC_STRAPI_URL ?? 'http://localhost:1338').replace(/\/+$/, ''),
+    // Strapi on this machine, as the proxy reaches it: never NEXT_PUBLIC_STRAPI_URL, which in LINE mode is the tunnel.
+    strapiUrl: strapiOrigin(),
   });
 }

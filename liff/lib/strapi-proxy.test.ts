@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { afterEach, describe, expect, it } from 'vitest';
-import { proxyToStrapi } from './strapi-proxy';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { proxyToStrapi, requireLocalMode, strapiOrigin } from './strapi-proxy';
 
 type Seen = { method: string; url: string; headers: IncomingMessage['headers']; body: string };
 
@@ -25,8 +25,46 @@ const fakeStrapi = async (handle: (req: IncomingMessage, res: ServerResponse, bo
 afterEach(() => upstreams.splice(0).forEach((upstream) => upstream.close()));
 
 const PUBLIC = 'https://maison.example';
+const TOKEN_PATH = '/api/strapi-oauth-mcp-manager/oauth/token';
+const TOKEN_EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
+/** A token exchange as the app sends it (lib/session.ts): a form. */
+const exchangeForm = () =>
+  new URLSearchParams({
+    grant_type: TOKEN_EXCHANGE,
+    client_id: 'mcp_client_test',
+    subject_token: `valid.U${'0'.repeat(32)}`,
+    subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+    resource: `${PUBLIC}/mcp`,
+  });
+const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
-describe('proxyToStrapi', () => {
+// NEXT_PUBLIC_LIFF_MOCK is inlined when the app is built: false only in LINE mode's build, the one with a public origin.
+afterEach(() => vi.unstubAllEnvs());
+
+describe('proxyToStrapi in a build for the LIFF mock, or for no mode at all', () => {
+  it.each([['true'], [''], [undefined]])(
+    "answers 404 for every path with NEXT_PUBLIC_LIFF_MOCK=%s, and reaches nothing on Strapi: a tunnel left open can't mint a session",
+    async (liffMock) => {
+      vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', liffMock);
+      const { strapiUrl, seen } = await fakeStrapi((_req, res) => res.end('reached'));
+      for (const [path, init] of [
+        ['/mcp', { method: 'POST', headers: { Authorization: 'Bearer mcp_at_customer' }, body: '{}' }],
+        ['/mcp', { method: 'POST', body: '{}' }],
+        [TOKEN_PATH, { method: 'POST', headers: FORM, body: exchangeForm() }],
+        ['/uploads/weekender_50.png', {}],
+      ] as Array<[string, RequestInit]>) {
+        const response = await proxyToStrapi(new Request(`${PUBLIC}${path}`, init), path, { strapiUrl });
+        expect(response.status, path).toBe(404);
+        expect(await response.json()).toEqual({ error: 'not_found' });
+      }
+      expect(seen).toEqual([]);
+    }
+  );
+});
+
+describe('proxyToStrapi in the LINE build', () => {
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'false'));
+
   it('forwards an MCP call with only the headers it needs, and passes the answer back', async () => {
     const { strapiUrl, seen } = await fakeStrapi((_req, res) => {
       res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer resource_metadata="x"', 'Set-Cookie': 'koa.sess=1' });
@@ -215,5 +253,102 @@ describe('proxyToStrapi', () => {
     const response = await proxyToStrapi(new Request(`${PUBLIC}/mcp`, { method: 'POST', body: '{}' }), '/mcp', { strapiUrl });
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ error: 'temporarily_unavailable' });
+  });
+
+  // The public origin takes what the phone sends, and nothing else of Strapi's: a customer session on /mcp, and the token
+  // exchange on the token endpoint. The concierge's rule for a session (lib/concierge.ts).
+  it('refuses /mcp with any Authorization but a customer session, with 401 and invalid_token, and reaches nothing on Strapi', async () => {
+    const { strapiUrl, seen } = await fakeStrapi((_req, res) => res.end('reached'));
+    for (const authorization of ['Bearer an-admin-token', 'Basic dXNlcjpwYXNz', 'Bearer mcp_at_', 'Bearer mcp_at_a b', 'bearer mcp_at_customer', 'mcp_at_customer', '']) {
+      for (const method of ['POST', 'GET', 'DELETE']) {
+        const init: RequestInit = { method, headers: { Authorization: authorization }, ...(method === 'POST' ? { body: '{}' } : {}) };
+        const response = await proxyToStrapi(new Request(`${PUBLIC}/mcp`, init), '/mcp', { strapiUrl });
+        expect(response.status, `${method} ${JSON.stringify(authorization)}`).toBe(401);
+        expect(response.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+        expect(await response.json()).toMatchObject({ error: 'invalid_token' });
+      }
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it("forwards /mcp without an Authorization header, so Strapi answers 401 with its resource metadata", async () => {
+    const { strapiUrl, seen } = await fakeStrapi((_req, res) => {
+      res.writeHead(401, { 'WWW-Authenticate': `Bearer resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource"` });
+      res.end();
+    });
+    const response = await proxyToStrapi(new Request(`${PUBLIC}/mcp`, { method: 'POST', body: '{}' }), '/mcp', { strapiUrl });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain('resource_metadata=');
+    expect(seen).toHaveLength(1);
+    expect(seen[0].headers).not.toHaveProperty('authorization');
+  });
+
+  it("forwards a token exchange, as a form, with the parameters the app sent", async () => {
+    const { strapiUrl, seen } = await fakeStrapi((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '5' });
+      res.end('{"error":"temporarily_unavailable"}');
+    });
+    for (const contentType of ['application/x-www-form-urlencoded', 'application/x-www-form-urlencoded;charset=UTF-8']) {
+      const request = new Request(`${PUBLIC}${TOKEN_PATH}`, { method: 'POST', headers: { 'Content-Type': contentType }, body: exchangeForm().toString() });
+      const response = await proxyToStrapi(request, TOKEN_PATH, { strapiUrl });
+      expect(response.status, contentType).toBe(503);
+      expect(response.headers.get('retry-after')).toBe('5');
+    }
+    expect(seen).toHaveLength(2);
+    for (const { url, headers, body } of seen) {
+      expect(url).toBe(TOKEN_PATH);
+      expect(headers['content-type']).toBe('application/x-www-form-urlencoded');
+      expect([...new URLSearchParams(body)]).toEqual([...exchangeForm()]);
+    }
+  });
+
+  it('refuses any other grant, or a body that is not a plain form, with 400 unsupported_grant_type, and reaches nothing on Strapi', async () => {
+    const { strapiUrl, seen } = await fakeStrapi((_req, res) => res.end('reached'));
+    const form = (entries: Array<[string, string]>) => new URLSearchParams(entries).toString();
+    const exchange = [...exchangeForm()];
+    for (const [label, headers, body] of [
+      ['authorization_code', FORM, form([['grant_type', 'authorization_code'], ['code', 'x'], ['client_id', 'mcp_client_test']])],
+      ['refresh_token', FORM, form([['grant_type', 'refresh_token'], ['refresh_token', 'x']])],
+      ['client_credentials', FORM, form([['grant_type', 'client_credentials']])],
+      ['no grant_type', FORM, form(exchange.filter(([key]) => key !== 'grant_type'))],
+      ['an empty body', FORM, ''],
+      // Strapi reads a repeated key, or one with brackets, as an array: refused, not read two ways.
+      ['grant_type twice', FORM, form([...exchange, ['grant_type', 'authorization_code']])],
+      ['grant_type[]', FORM, form([...exchange, ['grant_type[]', 'authorization_code']])],
+      ['a key twice', FORM, form([...exchange, ['client_id', 'another']])],
+      // Any other body Strapi would read its own way: JSON, or text.
+      ['JSON', { 'Content-Type': 'application/json' }, JSON.stringify(Object.fromEntries(exchange))],
+      ['a form sent as JSON', { 'Content-Type': 'application/json' }, form(exchange)],
+      ['a form sent as text (fetch makes a string body text/plain)', {}, form(exchange)],
+    ] as Array<[string, Record<string, string>, string]>) {
+      const response = await proxyToStrapi(new Request(`${PUBLIC}${TOKEN_PATH}`, { method: 'POST', headers, body }), TOKEN_PATH, { strapiUrl });
+      expect(response.status, label).toBe(400);
+      expect(await response.json(), label).toEqual({ error: 'unsupported_grant_type' });
+    }
+    expect(seen).toEqual([]);
+  });
+});
+
+describe('strapiOrigin (where the server, and code that reaches Strapi as tests do, finds it)', () => {
+  it('is STRAPI_URL, without a trailing slash', () => {
+    expect(strapiOrigin({ STRAPI_URL: 'http://127.0.0.1:1339/' })).toBe('http://127.0.0.1:1339');
+  });
+
+  it("is Strapi's default address otherwise, and never NEXT_PUBLIC_STRAPI_URL, which in LINE mode is the public origin", () => {
+    expect(strapiOrigin({})).toBe('http://127.0.0.1:1338');
+    expect(strapiOrigin({ STRAPI_URL: '' })).toBe('http://127.0.0.1:1338');
+    expect(strapiOrigin({ NEXT_PUBLIC_STRAPI_URL: `${PUBLIC}` })).toBe('http://127.0.0.1:1338');
+  });
+});
+
+describe('requireLocalMode (the e2e and live tests)', () => {
+  it("refuses LINE mode: the tests sign in with the verify mock's ID tokens, and change the demo's appointments", () => {
+    expect(() => requireLocalMode({ NEXT_PUBLIC_LIFF_MOCK: 'false' })).toThrow(
+      new Error('These tests need local mode: run npm run mode:local, then restart Strapi and the app.')
+    );
+  });
+
+  it('lets them run in local mode, the LIFF mock', () => {
+    for (const liffMock of ['true', '', undefined]) expect(() => requireLocalMode({ NEXT_PUBLIC_LIFF_MOCK: liffMock })).not.toThrow();
   });
 });

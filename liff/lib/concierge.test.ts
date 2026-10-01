@@ -124,6 +124,69 @@ describe('handleConcierge', () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
+  it('reads at most 1 MB of the body, by its Content-Length or as it arrives, and answers 413 over it, before connecting to anything', async () => {
+    const { createMcpClient } = fakeMcp();
+    const model = replyModel();
+    const ONE_MB = 1024 * 1024;
+    const padded = JSON.stringify({ ...hello, pad: 'x'.repeat(ONE_MB) });
+    const inChunks = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 17; i++) controller.enqueue(new Uint8Array(64 * 1024).fill(0x20)); // JSON whitespace
+        controller.close();
+      },
+    });
+    for (const [how, init] of [
+      ['says it is', { headers: { 'Content-Length': String(2 * ONE_MB) }, body: JSON.stringify(hello) }],
+      ['without a length', { body: padded }],
+      ['in chunks', { body: inChunks, duplex: 'half' }],
+    ] as Array<[string, RequestInit]>) {
+      const request = new Request('http://localhost:3003/api/concierge', {
+        ...init,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer mcp_at_x', ...(init.headers as Record<string, string>) },
+      });
+      const response = await handleConcierge(request, deps({ createMcpClient, model }));
+      expect(response.status, how).toBe(413);
+    }
+    expect(createMcpClient).not.toHaveBeenCalled();
+    expect(model.doStreamCalls).toHaveLength(0);
+  });
+
+  it("answers 400, not 500, when a message or a text part isn't what the app sends, or the body can't be read", async () => {
+    const { createMcpClient } = fakeMcp();
+    const user = (parts: unknown) => ({ messages: [{ id: 'u1', role: 'user', parts }], locale: 'en' });
+    for (const body of [
+      user([{ type: 'text', text: 42 }]),
+      user([{ type: 'text', text: null }]),
+      user([{ type: 'text' }]),
+      user([{ type: 'text', text: { value: 'hi' } }]),
+      user([null]),
+      user('hello'),
+      user(undefined),
+      { messages: [null], locale: 'en' },
+      { messages: ['hello'], locale: 'en' },
+      // The concierge's own earlier reply is checked the same way.
+      { messages: [{ id: 'a1', role: 'assistant', parts: [{ type: 'text', text: ['x'] }] }, hello.messages[0]], locale: 'en' },
+    ]) {
+      const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient }));
+      expect(response.status, JSON.stringify(body)).toBe(400);
+    }
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"messages":'));
+        controller.error(new Error('the connection closed'));
+      },
+    });
+    const request = new Request('http://localhost:3003/api/concierge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer mcp_at_x' },
+      body: broken,
+      duplex: 'half',
+    } as RequestInit);
+    expect((await handleConcierge(request, deps({ createMcpClient }))).status).toBe(400);
+    expect(createMcpClient).not.toHaveBeenCalled();
+  });
+
   it("tells the model today's date in Tokyo and the reply language", async () => {
     const { createMcpClient } = fakeMcp();
     const model = replyModel();

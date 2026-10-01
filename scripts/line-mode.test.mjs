@@ -92,6 +92,14 @@ test('switches to LINE mode and back, and a second run of either changes nothing
   assert.equal(run(['require-line'], root).code, 1);
 });
 
+test('back in local mode, says to stop ngrok first: a tunnel left open would reach the app on the LIFF mock', () => {
+  const root = demo(INPUTS);
+  run(['line'], root);
+  const { code, out } = run(['local'], root);
+  assert.equal(code, 0);
+  assert.match(out, /^Stop ngrok first \(Ctrl-C in its terminal\)\./m);
+});
+
 // Strapi reads strapi/.env with dotenv, which also takes CRLF lines, `export KEY=…`, spaces around `=` and `KEY: value`,
 // and lets a later line override an earlier one. The switch reads and rewrites the files the same way.
 const DOTENV_FORMS = {

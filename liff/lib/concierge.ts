@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import { tokyoDays } from './format';
 import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
+import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
 
 /** Tells the Maison plugin a call came from the concierge. Informational; never used for identity. */
 export const SURFACE_HEADER = 'x-maison-surface';
@@ -129,19 +130,49 @@ export const describeModelError = (error: unknown, modelLabel?: string): string 
   return message;
 };
 
+/** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
+const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string } | null => {
+  try {
+    return JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    return null;
+  }
+};
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * A message as the app sends it: an object with a list of parts, each an object, and a text part's text a string.
+ * Anything else is the caller's mistake, a 400. A number as the text otherwise reached the model call, and the SDK
+ * refused the whole prompt there, after the reply had begun.
+ */
+const isWellFormed = (message: unknown): message is UIMessage =>
+  isObject(message) && Array.isArray(message.parts) && message.parts.every((part) => isObject(part) && (part.type !== 'text' || typeof part.text === 'string'));
+
 /**
  * The model (Claude, or the local model) with the Maison tools, acting as the signed-in customer. The customer's
  * own session token goes to Strapi unchanged; the route adds no credential of its own.
  */
 export async function handleConcierge(request: Request, deps: ConciergeDeps): Promise<Response> {
   const authorization = request.headers.get('authorization') ?? '';
-  if (!/^Bearer mcp_at_\S+$/.test(authorization)) {
+  if (!isCustomerSession(authorization)) {
     return Response.json({ error: 'Sign in with LINE first.' }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { messages?: UIMessage[]; locale?: string } | null;
+  // At most the proxy's 1 MB, as the proxy reads it: never more than that of one body in memory.
+  let raw: Uint8Array | null;
+  try {
+    raw = await readBody(request, MAX_BODY_BYTES);
+  } catch {
+    return Response.json({ error: "The request's body couldn't be read." }, { status: 400 });
+  }
+  if (raw === null) return Response.json({ error: 'The request body is over 1 MB.' }, { status: 413 });
+  const body = parseBody(raw);
   const messages = Array.isArray(body?.messages) ? body.messages.slice(-MAX_MESSAGES) : [];
+  if (!messages.every(isWellFormed)) {
+    return Response.json({ error: 'Each message needs a list of parts, and each text part its text as a string.' }, { status: 400 });
+  }
   // The customer's own messages are limited. What the concierge wrote earlier (sent back with each turn) isn't: a long reply must not refuse the next one.
-  const oversized = messages.some((message) => message.role === 'user' && message.parts?.some((part) => part.type === 'text' && part.text.length > MAX_CHARS));
+  const oversized = messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text.length > MAX_CHARS));
   if (messages.length === 0 || oversized) {
     return Response.json({ error: `Send 1 to ${MAX_MESSAGES} messages of up to ${MAX_CHARS} characters.` }, { status: 400 });
   }

@@ -151,7 +151,8 @@ export const main = (args, { root = ROOT, log = console.log } = {}) => {
     log('Next: restart Strapi, start the app with `npm run start:line` (not `npm run dev`), then `npm run tunnel`.');
   } else {
     log('Local mode: strapi/.env and liff/.env use the LIFF mock and the local LINE verify mock again.');
-    log('Next: stop the tunnel and the LINE-mode app, then restart Strapi and start the app with `npm run dev`.');
+    log('Stop ngrok first (Ctrl-C in its terminal).');
+    log('Next: stop the LINE-mode app, then restart Strapi and start the app with `npm run dev`.');
   }
   return 0;
 };
