@@ -8,6 +8,7 @@
     "console": "strapi console",
     "deploy": "strapi deploy",
     "dev": "strapi develop",
+    "predevelop": "node scripts/share-strapi-utils.mjs --check",
     "develop": "strapi develop",
     "start": "strapi start",
     "strapi": "strapi",
