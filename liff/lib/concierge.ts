@@ -178,12 +178,17 @@ const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string } |
 };
 
 /**
- * A message as the app sends it: an object with a list of parts, each an object, and a text part's text a string.
- * Anything else is the caller's mistake, a 400. A number as the text otherwise reached the model call, and the SDK
- * refused the whole prompt there, after the reply had begun.
+ * A message as the app sends it: the customer's (role user) or the concierge's own earlier reply (assistant), an object
+ * with a list of parts, each an object, and a text part's text a string. Anything else is the caller's mistake, a 400.
+ * A number as the text otherwise reached the model call, and the SDK refused the whole prompt there, after the reply
+ * had begun. A system message was refused there too, inside a 200 stream, and an unknown role threw from
+ * convertToModelMessages once MCP had connected: a 500.
  */
 const isWellFormed = (message: unknown): message is UIMessage =>
-  isObject(message) && Array.isArray(message.parts) && message.parts.every((part) => isObject(part) && (part.type !== 'text' || typeof part.text === 'string'));
+  isObject(message) &&
+  (message.role === 'user' || message.role === 'assistant') &&
+  Array.isArray(message.parts) &&
+  message.parts.every((part) => isObject(part) && (part.type !== 'text' || typeof part.text === 'string'));
 
 /**
  * The model (Claude, or the local model) with the Maison tools, acting as the signed-in customer. The customer's
@@ -205,7 +210,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
   const body = parseBody(raw);
   const messages = Array.isArray(body?.messages) ? body.messages.slice(-MAX_MESSAGES) : [];
   if (!messages.every(isWellFormed)) {
-    return Response.json({ error: 'Each message needs a list of parts, and each text part its text as a string.' }, { status: 400 });
+    return Response.json({ error: 'Each message needs a role of user or assistant, a list of parts, and each text part its text as a string.' }, { status: 400 });
   }
   // The customer's own messages are limited. What the concierge wrote earlier (sent back with each turn) isn't: a long reply must not refuse the next one.
   const oversized = messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text.length > MAX_CHARS));
