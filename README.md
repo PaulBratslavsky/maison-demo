@@ -141,7 +141,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 
 ### Claude Desktop, the ops agent
 
-On macOS, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit Claude Desktop with ⌘Q and open it again. This command does it without printing the token:
+On macOS, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit Claude Desktop with ⌘Q and open it again. Start Strapi before you open Claude Desktop. `mcp-remote` connects to Strapi when Claude Desktop starts it, and exits for good if Strapi doesn't answer; if that happens, quit and reopen Claude Desktop. This command adds the server without printing the token:
 
 ```bash
 node -e '
@@ -411,7 +411,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
 
 ### Run it as a LINE MINI App
 
-A LINE MINI App is a LIFF app on a LINE MINI App channel, so this app runs as one with its LIFF ID and channel ID changed. Who can create a MINI App channel depends on LINE's MINI App Policy and your region, for example: an unverified MINI App can be created by an organization with a Japanese corporate number or a Taiwan or Thailand tax ID, an individual business owner in Japan, or an individual in Japan, Taiwan or Thailand. The presenter couldn't create one from his region, so the demo runs on a LINE Login channel (option B), and that path was run on a phone inside LINE on 1 October 2026.
+A LINE MINI App is a LIFF app on a LINE MINI App channel, so this app runs as one with its LIFF ID and channel ID changed. Who can create a MINI App channel depends on LINE's MINI App Policy and your region, for example: an unverified MINI App can be created by an organization with a Japanese corporate number or a Taiwan or Thailand tax ID, an individual business owner in Japan, or an individual in Japan, Taiwan or Thailand. The presenter's LINE account couldn't create one, so the demo runs on a LINE Login channel (option B), and that path was run on a phone inside LINE on 1 October 2026.
 
 In your provider, create both channels in the same provider. Otherwise user IDs won't match, and confirmations can't be delivered.
 1. **A LINE MINI App channel,** with your region (Japan, Taiwan or Thailand, per the policy):
