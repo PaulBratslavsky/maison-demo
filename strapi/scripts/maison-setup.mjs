@@ -77,16 +77,31 @@ const PUBLIC_CATALOG_ACTIONS = [
   'plugin::maison.boutiques.find',
 ];
 
+/** Every action a role's permission tree enables, as "plugin::maison.products.find": its type, controller and action joined by dots. */
+const enabledActions = (permissions) =>
+  Object.entries(permissions ?? {}).flatMap(([type, { controllers = {} }]) =>
+    Object.entries(controllers).flatMap(([controller, actions]) =>
+      Object.entries(actions)
+        .filter(([, permission]) => permission.enabled)
+        .map(([name]) => `${type}.${controller}.${name}`)
+    )
+  );
+
 /**
  * Lets the Public role call PUBLIC_CATALOG_ACTIONS and changes nothing else about it. users-permissions takes the tree
  * sent to PUT /users-permissions/roles/:id as the role's whole set, and deletes every action not enabled in it, so this
- * reads the role's full tree, enables the four actions in it and sends all of it back. Answers whether anything changed.
+ * reads the role's full tree, enables the four actions in it and sends all of it back. It then reads the role again and
+ * fails if an action the role had is gone or a catalog action is still off, so "changes nothing else" holds by check, not
+ * only by how users-permissions treats the tree. With the four actions already enabled it sends nothing.
+ * Answers whether anything changed.
  */
 const grantPublicCatalog = async (api) => {
   const { roles } = await api('GET', '/users-permissions/roles');
   const publicRole = roles.find((role) => role.type === 'public');
   if (!publicRole) throw new Error('users-permissions has no Public role. Check config/plugins.ts.');
   const { role } = await api('GET', `/users-permissions/roles/${publicRole.id}`);
+  // Taken before the loop below enables anything in the same tree.
+  const enabledBefore = enabledActions(role.permissions);
   let changed = false;
   for (const action of PUBLIC_CATALOG_ACTIONS) {
     // plugin::maison.collections.find is permissions['plugin::maison'].controllers.collections.find in the tree.
@@ -102,6 +117,15 @@ const grantPublicCatalog = async (api) => {
   }
   if (changed) {
     await api('PUT', `/users-permissions/roles/${role.id}`, { name: role.name, description: role.description, permissions: role.permissions });
+    const { role: updated } = await api('GET', `/users-permissions/roles/${role.id}`);
+    const enabledAfter = new Set(enabledActions(updated.permissions));
+    const lost = enabledBefore.filter((action) => !enabledAfter.has(action));
+    // A catalog action the role had and lost is already named in `lost`.
+    const missing = PUBLIC_CATALOG_ACTIONS.filter((action) => !enabledAfter.has(action) && !lost.includes(action));
+    if (lost.length || missing.length) {
+      const problems = [...(lost.length ? [`it no longer allows ${lost.join(', ')}`] : []), ...(missing.length ? [`it still doesn't allow ${missing.join(', ')}`] : [])];
+      throw new Error(`The Public role isn't as expected after the update: ${problems.join(' and ')}. Check it under Settings > Roles > Public.`);
+    }
   }
   return changed;
 };
