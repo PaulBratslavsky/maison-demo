@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -12,7 +12,10 @@ const INPUTS = { LINE_MODE_LIFF_ID: '1234567891-AbcdEfgh', LINE_MODE_CHANNEL_ID:
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-/** A demo checkout in local mode, as `npm install` and `npm run setup` leave it, plus `liffExtra` in liff/.env. */
+/**
+ * A demo checkout in local mode, as `npm install` and `npm run setup` leave it, plus `liffExtra` in liff/.env. liff/.env
+ * is readable by others (644), as an editor may leave a file it saved: the switch makes it 600.
+ */
 const demo = (liffExtra = {}) => {
   const root = mkdtempSync(join(tmpdir(), 'maison-mode-'));
   roots.push(root);
@@ -24,9 +27,11 @@ const demo = (liffExtra = {}) => {
     lines({ PORT: '1338', JWT_SECRET: SECRET, LINE_LOGIN_CHANNEL_ID: '1234567890', LINE_VERIFY_URL: 'http://127.0.0.1:4545/verify', MAISON_LIFF_URL: 'http://localhost:3003', MAISON_APP_ORIGIN: '', PUBLIC_URL: '' }),
     { mode: 0o600 }
   );
-  writeFileSync(join(root, 'liff', '.env'), lines({ NEXT_PUBLIC_STRAPI_URL: 'http://localhost:1338', NEXT_PUBLIC_MAISON_CLIENT_ID: 'mcp_client_test', ...liffExtra }), { mode: 0o600 });
+  writeFileSync(join(root, 'liff', '.env'), lines({ NEXT_PUBLIC_STRAPI_URL: 'http://localhost:1338', NEXT_PUBLIC_MAISON_CLIENT_ID: 'mcp_client_test', ...liffExtra }));
+  chmodSync(join(root, 'liff', '.env'), 0o644); // whatever the umask
   return root;
 };
+const fileMode = (root, app) => statSync(join(root, app, '.env')).mode & 0o777;
 const run = (args, root) => {
   const lines = [];
   const code = main(args, { root, log: (line) => lines.push(line) });
@@ -40,8 +45,10 @@ const LIFF_KEYS = ['NEXT_PUBLIC_LIFF_MOCK', 'NEXT_PUBLIC_LIFF_ID', 'NEXT_PUBLIC_
 test('switches to LINE mode and back, and a second run of either changes nothing', () => {
   const root = demo(INPUTS);
   assert.match(run(['status'], root).out, /^Mode: local /);
+  assert.equal(fileMode(root, 'liff'), 0o644);
 
   assert.equal(run(['line'], root).code, 0);
+  for (const app of ['strapi', 'liff']) assert.equal(fileMode(root, app), 0o600, `${app}/.env is readable by you only`);
   assert.deepEqual(pick(env(root, 'strapi'), STRAPI_KEYS), {
     LINE_LOGIN_CHANNEL_ID: '1234567891',
     LINE_VERIFY_URL: '',
@@ -80,9 +87,72 @@ test('switches to LINE mode and back, and a second run of either changes nothing
   assert.equal(files(), local);
   assert.equal(env(root, 'strapi').JWT_SECRET, SECRET);
   assert.equal(env(root, 'liff').NEXT_PUBLIC_MAISON_CLIENT_ID, 'mcp_client_test');
-  for (const app of ['strapi', 'liff']) assert.equal(statSync(join(root, app, '.env')).mode & 0o777, 0o600);
+  for (const app of ['strapi', 'liff']) assert.equal(fileMode(root, app), 0o600);
   assert.match(run(['status'], root).out, /^Mode: local /);
   assert.equal(run(['require-line'], root).code, 1);
+});
+
+// Strapi reads strapi/.env with dotenv, which also takes CRLF lines, `export KEY=…`, spaces around `=` and `KEY: value`,
+// and lets a later line override an earlier one. The switch reads and rewrites the files the same way.
+const DOTENV_FORMS = {
+  export: 'export LINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
+  spaced: 'LINE_VERIFY_URL = http://127.0.0.1:4545/verify\n',
+  colon: 'LINE_VERIFY_URL: http://127.0.0.1:4545/verify\n',
+  crlf: 'LINE_VERIFY_URL=http://127.0.0.1:4545/verify\r\n',
+};
+
+test("reads every form Strapi's dotenv reads: a LINE_VERIFY_URL added later in any of them leaves LINE mode", () => {
+  for (const [form, line] of Object.entries(DOTENV_FORMS)) {
+    const root = demo(INPUTS);
+    run(['line'], root);
+    appendFileSync(join(root, 'strapi', '.env'), line);
+    assert.equal(env(root, 'strapi').LINE_VERIFY_URL, 'http://127.0.0.1:4545/verify', form);
+    assert.doesNotMatch(run(['status'], root).out, /^Mode: LINE /, form);
+    assert.equal(run(['require-line'], root).code, 1, form);
+    // Switching again rewrites that line too, so it can't override LINE mode's.
+    assert.equal(run(['line'], root).code, 0, form);
+    assert.equal(env(root, 'strapi').LINE_VERIFY_URL, '', form);
+    assert.match(run(['status'], root).out, /^Mode: LINE /, form);
+  }
+});
+
+test('rewrites each key where it stands, in its form, keeping CRLF line endings and the file readable by you only', () => {
+  const root = demo(INPUTS);
+  const file = join(root, 'strapi', '.env');
+  const crlf = (lines) => lines.map((line) => `${line}\r\n`).join('');
+  writeFileSync(
+    file,
+    crlf(['PORT=1338', `JWT_SECRET=${SECRET}`, 'export LINE_LOGIN_CHANNEL_ID=1234567890', 'LINE_VERIFY_URL = http://127.0.0.1:4545/verify', 'MAISON_LIFF_URL: http://localhost:3003', 'PUBLIC_URL=']),
+    { mode: 0o600 }
+  );
+  assert.deepEqual(pick(env(root, 'strapi'), STRAPI_KEYS), {
+    LINE_LOGIN_CHANNEL_ID: '1234567890',
+    LINE_VERIFY_URL: 'http://127.0.0.1:4545/verify',
+    MAISON_LIFF_URL: 'http://localhost:3003',
+    PUBLIC_URL: '',
+  });
+  assert.match(run(['status'], root).out, /^Mode: local /);
+
+  assert.equal(run(['line'], root).code, 0);
+  const line = crlf([
+    'PORT=1338',
+    `JWT_SECRET=${SECRET}`,
+    'export LINE_LOGIN_CHANNEL_ID=1234567891',
+    'LINE_VERIFY_URL=',
+    'MAISON_LIFF_URL=https://liff.line.me/1234567891-AbcdEfgh',
+    'PUBLIC_URL=https://maison-test.ngrok-free.dev',
+  ]);
+  assert.equal(readFileSync(file, 'utf8'), line);
+  assert.match(run(['status'], root).out, /^Mode: LINE /);
+  run(['line'], root);
+  assert.equal(readFileSync(file, 'utf8'), line);
+
+  assert.equal(run(['local'], root).code, 0);
+  const local = crlf(['PORT=1338', `JWT_SECRET=${SECRET}`, 'export LINE_LOGIN_CHANNEL_ID=1234567890', 'LINE_VERIFY_URL=http://127.0.0.1:4545/verify', 'MAISON_LIFF_URL=http://localhost:3003', 'PUBLIC_URL=']);
+  assert.equal(readFileSync(file, 'utf8'), local);
+  run(['local'], root);
+  assert.equal(readFileSync(file, 'utf8'), local);
+  assert.equal(fileMode(root, 'strapi'), 0o600);
 });
 
 test("refuses LINE mode without your LINE values, or with the mock's channel, and changes nothing", () => {

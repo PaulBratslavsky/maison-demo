@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,16 +44,20 @@ const freePort = async () => {
   await new Promise((resolve) => server.close(resolve));
   return port;
 };
-/** The app on :3003, as the guard sees it: its X-Maison-Liff header, and the token endpoint it proxies to Strapi. */
+/**
+ * The app on :3003, as the guard sees it: its X-Maison-Liff header (none when `liff` is null), and the token endpoint
+ * it proxies to Strapi.
+ */
 const fakeApp = async ({ liff = 'line', token = [400, { error: 'invalid_grant' }] } = {}) => {
   const seen = [];
+  const liffHeader = liff === null ? {} : { 'X-Maison-Liff': liff };
   const port = await listen((req, res) => {
     seen.push(`${req.method} ${req.url}`);
     if (req.url === '/api/strapi-oauth-mcp-manager/oauth/token') {
-      res.writeHead(token[0], { 'Content-Type': 'application/json', 'X-Maison-Liff': liff });
+      res.writeHead(token[0], { 'Content-Type': 'application/json', ...liffHeader });
       return res.end(JSON.stringify(token[1]));
     }
-    res.writeHead(200, { 'Content-Type': 'text/html', 'X-Maison-Liff': liff });
+    res.writeHead(200, { 'Content-Type': 'text/html', ...liffHeader });
     res.end('<p>MAISON</p>');
   });
   return { appUrl: `http://127.0.0.1:${port}`, seen };
@@ -73,6 +77,22 @@ test('refuses while strapi/.env sets LINE_VERIFY_URL', async () => {
   assert.ok(problems.some((problem) => problem.startsWith('strapi/.env sets LINE_VERIFY_URL')), problems.join('\n'));
 });
 
+test("refuses a LINE_VERIFY_URL added later in any form Strapi's dotenv reads, and sends no forged token", async () => {
+  const { appUrl, seen } = await fakeApp();
+  for (const line of [
+    'export LINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
+    'LINE_VERIFY_URL = http://127.0.0.1:4545/verify\n',
+    'LINE_VERIFY_URL: http://127.0.0.1:4545/verify\n',
+    'LINE_VERIFY_URL=http://127.0.0.1:4545/verify\r\n',
+  ]) {
+    const root = demo('line');
+    appendFileSync(join(root, 'strapi', '.env'), line);
+    const problems = await checkTunnel({ root, appUrl, mockVerifyPort: await freePort() });
+    assert.ok(problems.some((problem) => problem.startsWith('strapi/.env sets LINE_VERIFY_URL')), `${JSON.stringify(line)}: ${problems.join('\n')}`);
+  }
+  assert.ok(!seen.some((request) => request.includes('/oauth/token')), 'no forged token was sent');
+});
+
 test('refuses in local mode, and while the app on :3003 is built for the LIFF mock', async () => {
   const { appUrl } = await fakeApp({ liff: 'mock' });
   const mockVerifyPort = await freePort();
@@ -80,6 +100,17 @@ test('refuses in local mode, and while the app on :3003 is built for the LIFF mo
   assert.ok(local.some((problem) => problem.includes('NEXT_PUBLIC_LIFF_MOCK (liff/.env)')), local.join('\n'));
   const built = await checkTunnel({ root: demo('line'), appUrl, mockVerifyPort });
   assert.ok(built.some((problem) => problem.includes('built for the LIFF mock')), built.join('\n'));
+});
+
+test('refuses a development server in LINE mode, or an app that says nothing: only the start:line build answers line', async () => {
+  const mockVerifyPort = await freePort();
+  const dev = await fakeApp({ liff: 'line-dev' });
+  const devProblems = await checkTunnel({ root: demo('line'), appUrl: dev.appUrl, mockVerifyPort });
+  assert.ok(devProblems.some((problem) => problem.includes('a development server')), devProblems.join('\n'));
+  const silent = await fakeApp({ liff: null });
+  const silentProblems = await checkTunnel({ root: demo('line'), appUrl: silent.appUrl, mockVerifyPort });
+  assert.ok(silentProblems.some((problem) => problem.includes("isn't the LINE build (X-Maison-Liff: none)")), silentProblems.join('\n'));
+  for (const { seen } of [dev, silent]) assert.ok(!seen.some((request) => request.includes('/oauth/token')), 'no forged token was sent');
 });
 
 test("refuses while the app isn't answering", async () => {

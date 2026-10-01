@@ -4,7 +4,8 @@
 //   - strapi/.env has no LINE_VERIFY_URL, and both .env files are in LINE mode (npm run mode:line)
 //   - nothing answers on the verify mock's port, 127.0.0.1:4545 (`npm run dev` starts the mock; LINE mode uses
 //     `npm run start:line`, which doesn't)
-//   - the app on :3003 was built for LINE, not the LIFF mock (its X-Maison-Liff header)
+//   - the app on :3003 is the LINE build that `npm run start:line` serves: its X-Maison-Liff header says line, which
+//     neither a build for the LIFF mock nor a dev server says
 //   - the running Strapi, reached through the app, refuses a forged ID token: LINE checks it (400 invalid_grant)
 // Only the app is exposed: it proxies Strapi's /mcp, token endpoint and /uploads, and Strapi's admin stays here.
 // ngrok runs with --inspect=false, so its local inspector (:4040) keeps no copy of customers' tokens.
@@ -54,14 +55,19 @@ export const checkTunnel = async ({ root = ROOT, appUrl = `http://${APP}`, mockV
     problems.push(`Something answers on 127.0.0.1:${port}, the LINE verify mock's port. Stop the app's dev server (npm run dev starts the mock); LINE mode runs npm run start:line.`);
   }
 
-  let liff = null;
+  // What liff/next.config.mjs says: line (the start:line build), line-dev (a dev server in LINE mode) or mock.
+  let liff;
   try {
-    liff = (await fetch(`${appUrl}/`, { signal: AbortSignal.timeout(10_000) })).headers.get('x-maison-liff') ?? 'unknown';
+    liff = (await fetch(`${appUrl}/`, { signal: AbortSignal.timeout(10_000) })).headers.get('x-maison-liff') ?? 'none';
   } catch {
     problems.push(`The app isn't answering on ${appUrl}. Start it with npm run start:line.`);
   }
-  if (liff !== null && liff !== 'line') {
-    problems.push(`The app on ${appUrl} was built for the LIFF mock (X-Maison-Liff: ${liff}). Stop it, and start it with npm run start:line.`);
+  if (liff === 'mock') {
+    problems.push(`The app on ${appUrl} was built for the LIFF mock (X-Maison-Liff: mock). Stop it, and start it with npm run start:line.`);
+  } else if (liff === 'line-dev') {
+    problems.push(`The app on ${appUrl} is a development server (X-Maison-Liff: line-dev), not the LINE build. Stop it, and start it with npm run start:line.`);
+  } else if (liff !== undefined && liff !== 'line') {
+    problems.push(`The app on ${appUrl} isn't the LINE build (X-Maison-Liff: ${liff}). Stop it, and start it with npm run start:line.`);
   }
 
   // Last, and only once nothing else is wrong: a forged ID token, through the app, to the running Strapi.

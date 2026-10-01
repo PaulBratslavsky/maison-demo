@@ -5,7 +5,8 @@
  *   /api/strapi-oauth-mcp-manager/oauth/token     the LINE ID token exchange
  *   /uploads/*                                    catalog images
  * Responses stream through as Strapi writes them: an MCP answer is a server-sent event stream. Only the request
- * headers those calls use reach Strapi: no cookies, no Origin.
+ * headers those calls use reach Strapi: no cookies, no Origin, nothing hop-by-hop. A request body is read whole, up to
+ * MAX_BODY_BYTES, before any of it is passed on.
  */
 const PROXIED = /^(\/mcp|\/api\/strapi-oauth-mcp-manager\/oauth\/token|\/uploads\/[^?#]+)$/;
 const REQUEST_HEADERS = [
@@ -34,6 +35,12 @@ const DROPPED_RESPONSE_HEADERS = [
 ];
 
 /**
+ * The largest request body the proxy passes on. An MCP message or a token exchange is a few kB. A longer body is refused
+ * with 413 before any of it reaches Strapi, and the proxy never holds more than this of one in memory.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
  * Whether a path climbs out of its folder: a `..` segment, also with its dots or its slash percent-encoded. fetch
  * resolves an encoded `%2e%2e` before it sends the path, and Strapi's file server decodes `..%2f`.
  */
@@ -43,6 +50,37 @@ const climbs = (path: string) => {
   } catch {
     return true; // a malformed escape
   }
+};
+
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
+/** The headers a Connection header names: hop-by-hop, for that one connection (RFC 9110, section 7.6.1). */
+const namedByConnection = (headers: Headers) =>
+  new Set(
+    (headers.get('connection') ?? '')
+      .split(',')
+      .map((name) => name.trim().toLowerCase())
+      .filter((name) => HEADER_NAME.test(name))
+  );
+
+/**
+ * The request's body, or null when it's longer than `limit` bytes: by its Content-Length, before reading any of it, or
+ * as it arrives, for a body that has none (chunked) or is longer than it says.
+ */
+const readBody = async (request: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | null> => {
+  if (Number(request.headers.get('content-length')) > limit) return null;
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    size += chunk.value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(chunk.value);
+  }
+  return Buffer.concat(chunks, size);
 };
 
 /**
@@ -60,18 +98,31 @@ export async function proxyToStrapi(
   if (!PROXIED.test(path) || climbs(path)) {
     return Response.json({ error: 'not_found' }, { status: 404 });
   }
+  const hopByHop = namedByConnection(request.headers);
   const headers = new Headers();
   for (const name of REQUEST_HEADERS) {
     const value = request.headers.get(name);
-    if (value !== null) headers.set(name, value);
+    if (value !== null && !hopByHop.has(name)) headers.set(name, value);
   }
-  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+  let body: Uint8Array<ArrayBuffer> | undefined;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    let read: Uint8Array<ArrayBuffer> | null;
+    try {
+      read = await readBody(request, MAX_BODY_BYTES);
+    } catch {
+      return Response.json({ error: 'invalid_request', error_description: "The request's body couldn't be read." }, { status: 400 });
+    }
+    if (read === null) {
+      return Response.json({ error: 'invalid_request', error_description: 'The request body is over 1 MB.' }, { status: 413 });
+    }
+    body = read;
+  }
   let upstream: Response;
   try {
     upstream = await fetchImpl(`${strapiUrl}${path}${new URL(request.url).search}`, {
       method: request.method,
       headers,
-      body: hasBody ? await request.arrayBuffer() : undefined,
+      body,
       redirect: 'manual',
       signal: request.signal,
     });
@@ -82,6 +133,6 @@ export async function proxyToStrapi(
     );
   }
   const responseHeaders = new Headers(upstream.headers);
-  for (const name of DROPPED_RESPONSE_HEADERS) responseHeaders.delete(name);
+  for (const name of [...DROPPED_RESPONSE_HEADERS, ...namedByConnection(upstream.headers)]) responseHeaders.delete(name);
   return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders });
 }

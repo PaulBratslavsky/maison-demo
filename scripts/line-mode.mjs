@@ -7,30 +7,38 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseEnv } from 'node:util';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MOCK_CHANNEL_ID = '1234567890';
 
-/** An env file's KEY=value lines ({} when it's missing). Quotes around a value are dropped. */
-export const readEnv = (file) => {
-  const env = {};
-  if (!existsSync(file)) return env;
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-    if (match) env[match[1]] = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
-  }
-  return env;
-};
+// dotenv's `KEY: value` form, which Node's parser skips.
+const COLON_FORM = /^([ \t]*(?:export[ \t]+)?[\w.-]+):[ \t]+/gm;
 
-/** Sets KEY=value lines, adding the ones that are missing, and leaves the file readable by you only. */
+/**
+ * An env file's values ({} when it's missing), read the way Strapi's dotenv reads strapi/.env: Node's own parser (CRLF
+ * lines, `export KEY=…`, spaces around `=`, quotes and comments, and a later assignment wins), plus dotenv's
+ * `KEY: value`. Read any other way, a line Strapi honours could slip past the tunnel's check of LINE_VERIFY_URL.
+ */
+export const readEnv = (file) => (existsSync(file) ? parseEnv(readFileSync(file, 'utf8').replace(COLON_FORM, '$1=')) : {});
+
+/**
+ * Sets each key, and leaves the file readable by you only. Every line that assigns the key, in any form readEnv reads,
+ * becomes KEY=value where it stands (keeping an `export`), so no other line can override it; a missing key is added at
+ * the end. The file keeps its line endings.
+ */
 export const writeEnv = (file, values) => {
   const exists = existsSync(file);
   let text = exists ? readFileSync(file, 'utf8') : '';
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
   for (const [key, value] of Object.entries(values)) {
-    const pattern = new RegExp(`^${key}=.*$`, 'm');
-    text = pattern.test(text)
-      ? text.replace(pattern, () => `${key}=${value}`)
-      : `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${key}=${value}\n`;
+    const assignment = new RegExp(`^([ \\t]*(?:export[ \\t]+)?)${key}(?:[ \\t]*=|:[ \\t])[^\\r\\n]*`, 'gm');
+    let found = false;
+    text = text.replace(assignment, (_line, prefix) => {
+      found = true;
+      return `${prefix}${key}=${value}`;
+    });
+    if (!found) text = `${text}${text === '' || text.endsWith('\n') ? '' : eol}${key}=${value}${eol}`;
   }
   // `mode` applies only when the file is created, so tighten an existing one before writing into it.
   if (exists) chmodSync(file, 0o600);

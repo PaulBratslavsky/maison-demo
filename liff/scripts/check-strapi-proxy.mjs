@@ -4,9 +4,9 @@
 //   - the token endpoint's answer, status and Retry-After come back as Strapi sent them
 //   - a catalog image comes back byte for byte
 //   - nothing else reaches Strapi: /admin, the OAuth authorize and register pages, Maison's REST API, /.well-known,
-//     /_health, and a climb out of /uploads
+//     /_health, a climb out of /uploads, and a body over 1 MB, which answers 413
 //   - every answer says which LIFF the build signs in with (X-Maison-Liff), which `npm run tunnel` checks
-// From liff/: node scripts/check-strapi-proxy.mjs. Exits 1 on the first failed check.
+// From liff/: node scripts/check-strapi-proxy.mjs. Runs every check, prints each, and exits 1 if any failed.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 
@@ -104,6 +104,22 @@ try {
   ]) {
     const response = await fetch(`${base}${path}`, { method });
     check(response.status === 404, `${method} ${path} answers 404 from the app`);
+  }
+  // A body over 1 MB: one that says so (Content-Length), and one that doesn't (chunked) and is counted as it arrives.
+  const twoMegabytes = () =>
+    new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < 32; i += 1) controller.enqueue(new Uint8Array(64 * 1024));
+        controller.close();
+      },
+    });
+  for (const [path, label, init] of [
+    ['/mcp', 'with a Content-Length of 2 MB', { body: 'x'.repeat(2 * 1024 * 1024) }],
+    ['/api/strapi-oauth-mcp-manager/oauth/token', 'with 2 MB in chunks', { body: twoMegabytes(), duplex: 'half' }],
+  ]) {
+    const response = await fetch(`${base}${path}`, { method: 'POST', ...init }).catch((error) => ({ status: `nothing: ${error.cause?.code ?? error.message}` }));
+    const answered = response.status === 413 ? '' : ` (it answered ${response.status})`;
+    check(response.status === 413, `POST ${path} ${label} answers 413 from the app${answered}`);
   }
   check(reached.length === before, `Strapi was reached only for the three proxied paths (${reached.join(', ')})`);
 } finally {
