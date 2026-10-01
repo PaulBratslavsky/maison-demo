@@ -100,6 +100,33 @@ test('back in local mode, says to stop ngrok first: a tunnel left open would rea
   assert.match(out, /^Stop ngrok first \(Ctrl-C in its terminal\)\./m);
 });
 
+const REFUSE_DEV = 'The app is in LINE mode. For the stage, run npm run mode:local, then restart Strapi.';
+
+test('require-local, which npm run dev runs first, refuses LINE mode and lets local mode through', () => {
+  const root = demo(INPUTS);
+  assert.equal(run(['require-local'], root).code, 0);
+  run(['line'], root);
+  const { code, out } = run(['require-local'], root);
+  assert.equal(code, 1);
+  assert.ok(out.split('\n').includes(REFUSE_DEV), out);
+  run(['local'], root);
+  assert.equal(run(['require-local'], root).code, 0);
+});
+
+test('require-local refuses whenever the app is set for LINE, though the rest is mixed, and lets the LIFF mock through', () => {
+  // The app's own setting decides what npm run dev would start: next dev on the LIFF mock, or on LINE.
+  const lineApp = demo({ ...INPUTS, NEXT_PUBLIC_LIFF_MOCK: 'false' });
+  assert.match(run(['status'], lineApp).out, /^Mode: mixed\./);
+  assert.equal(run(['require-local'], lineApp).code, 1);
+  const mockApp = demo({ NEXT_PUBLIC_LIFF_MOCK: 'true' });
+  assert.equal(run(['require-local'], mockApp).code, 0);
+});
+
+test('npm run dev and npm run dev:app run require-local before they start anything', () => {
+  const { scripts } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const name of ['dev', 'dev:app']) assert.match(scripts[name], /^node scripts\/line-mode\.mjs require-local && /, name);
+});
+
 // Strapi reads strapi/.env with dotenv, which also takes CRLF lines, `export KEY=…`, spaces around `=` and `KEY: value`,
 // and lets a later line override an earlier one. The switch reads and rewrites the files the same way.
 const DOTENV_FORMS = {
@@ -176,6 +203,6 @@ test("refuses LINE mode without your LINE values, or with the mock's channel, an
 
 test('never prints a value from either file', () => {
   const root = demo(INPUTS);
-  const out = ['status', 'line', 'status', 'require-line', 'local', 'require-line'].map((command) => run([command], root).out).join('\n');
+  const out = ['status', 'line', 'status', 'require-line', 'require-local', 'local', 'require-line', 'require-local'].map((command) => run([command], root).out).join('\n');
   for (const value of [SECRET, ...Object.values(INPUTS), 'mcp_client_test']) assert.ok(!out.includes(value), `printed ${value}`);
 });

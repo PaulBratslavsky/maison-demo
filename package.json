@@ -8,9 +8,9 @@
   },
   "scripts": {
     "postinstall": "npm install --prefix strapi && npm install --prefix liff && node scripts/init-env.mjs",
-    "dev": "concurrently -k -n strapi,app -c magenta,green \"npm run develop --prefix strapi\" \"npm run dev --prefix liff\"",
+    "dev": "node scripts/line-mode.mjs require-local && concurrently -k -n strapi,app -c magenta,green \"npm run develop --prefix strapi\" \"npm run dev --prefix liff\"",
     "dev:strapi": "npm run develop --prefix strapi",
-    "dev:app": "npm run dev --prefix liff",
+    "dev:app": "node scripts/line-mode.mjs require-local && npm run dev --prefix liff",
     "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",
     "mode": "node scripts/line-mode.mjs status",
     "mode:line": "node scripts/line-mode.mjs line",
@@ -18,7 +18,7 @@
     "start:line": "npm run start:line --prefix liff",
     "tunnel": "node scripts/line-tunnel.mjs",
     "qr": "node liff/scripts/line-qr.mjs",
-    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check && node --test scripts/line-mode.test.mjs scripts/line-tunnel.test.mjs liff/scripts/line-qr.test.mjs",
+    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check && node --test scripts/line-mode.test.mjs scripts/line-tunnel.test.mjs liff/scripts/line-qr.test.mjs liff/scripts/mock-line-verify.test.mjs",
     "test:e2e": "npm run test:e2e --prefix liff",
     "test:live": "npm run test:live --prefix liff"
   },

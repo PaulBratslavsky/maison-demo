@@ -27,6 +27,13 @@ export const slotsFor = (open: boolean, boutique: BoutiqueInfo | undefined): str
 export const startTimeFrom = (slots: string[], picked: string): string | undefined => (slots.includes(picked) ? picked : slots[0]);
 
 /**
+ * Whether a key closes the sheet: Escape, but not while an input method is composing text, as when the note is typed in
+ * Japanese, where Escape cancels the composition. Safari reports that keydown as keyCode 229, without isComposing.
+ */
+export const shouldCloseOnKey = (event: Pick<KeyboardEvent, 'key' | 'isComposing' | 'keyCode'>): boolean =>
+  event.key === 'Escape' && !event.isComposing && event.keyCode !== 229;
+
+/**
  * The booking sheet's rules in one place: what it may send, and what it says when it may not. `boutiques` and
  * `loading` are find_boutiques' answer for the date. The sheet may send only when `startTime` is set.
  */

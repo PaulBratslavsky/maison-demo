@@ -26,3 +26,9 @@ describe('next.config.mjs: X-Maison-Liff', () => {
     expect(await liffHeader()).toBe(value);
   });
 });
+
+describe('next.config.mjs: the stage', () => {
+  it("shows no development indicator: the stage runs on next dev, and Next's badge would sit in a corner of the projected screen", () => {
+    expect(nextConfig.devIndicators).toBe(false);
+  });
+});

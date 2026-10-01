@@ -4,6 +4,7 @@
 // LINE mode takes your values from liff/.env: LINE_MODE_LIFF_ID, LINE_MODE_CHANNEL_ID and LINE_MODE_DOMAIN.
 // From the repo root: npm run mode (shows the mode), npm run mode:line, npm run mode:local.
 // Restart Strapi and the app after a switch. Never prints a value from either file.
+// `require-line` and `require-local` check before a start: npm run start:line needs LINE mode, and npm run dev refuses it.
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -120,12 +121,18 @@ export const main = (args, { root = ROOT, log = console.log } = {}) => {
   const strapiEnv = readEnv(join(root, 'strapi', '.env'));
   const mode = currentMode(root);
 
-  if (command === 'status' || command === 'require-line') {
+  if (command === 'status' || command === 'require-line' || command === 'require-local') {
     const label = { line: 'LINE (your LIFF app; LINE verifies ID tokens)', local: 'local (the LIFF mock and the verify mock)', mixed: 'mixed' }[mode];
     log(`Mode: ${label}.`);
     if (mode === 'mixed') log(`Not in LINE mode: ${modeDifferences(root, 'line').join(', ')}. Run npm run mode:line or npm run mode:local.`);
     if (command === 'require-line' && mode !== 'line') {
       log('This needs LINE mode: run npm run mode:line first.');
+      return 1;
+    }
+    // npm run dev is the stage's: next dev on the LIFF mock, beside the verify mock. The app set for LINE
+    // (NEXT_PUBLIC_LIFF_MOCK=false, in LINE mode and in a mix with it) is npm run start:line's.
+    if (command === 'require-local' && liffEnv.NEXT_PUBLIC_LIFF_MOCK === 'false') {
+      log('The app is in LINE mode. For the stage, run npm run mode:local, then restart Strapi.');
       return 1;
     }
     return 0;
@@ -140,7 +147,7 @@ export const main = (args, { root = ROOT, log = console.log } = {}) => {
     for (const warning of warnings) log(`Warning: ${warning}`);
   }
   if (command !== 'line' && command !== 'local') {
-    log('Usage: node scripts/line-mode.mjs status | line | local | require-line');
+    log('Usage: node scripts/line-mode.mjs status | line | local | require-line | require-local');
     return 1;
   }
   const values = modeValues(command, strapiEnv, liffEnv);

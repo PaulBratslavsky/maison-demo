@@ -36,7 +36,7 @@ export const errorOf = (error: unknown): ScreenError => {
  * server named a wait (Retry-After), the copy says how long it is. The booking sheet passes the boutique's name, in the
  * customer's language, so boutique_closed can name it: the tool's own message names it in the catalog's default language.
  */
-export const errorText = (error: Pick<ScreenError, 'code' | 'retryAfterSeconds'>, locale: Locale, boutique?: string): string => {
+export const errorText = (error: Pick<ScreenError, 'code' | 'message' | 'retryAfterSeconds'>, locale: Locale, boutique?: string): string => {
   const t = COPY[locale];
   const errors: Readonly<Record<string, string>> = t.errors;
   const text =
@@ -51,7 +51,9 @@ export const errorText = (error: Pick<ScreenError, 'code' | 'retryAfterSeconds'>
 /** The likely fix for a setup or connection failure, for the mock-mode technical line. */
 const MOCK_FIXES: Readonly<Record<string, string>> = {
   network: `Is Strapi running on ${config.strapiUrl}? Open the app at http://localhost:3003, not 127.0.0.1.`,
-  invalid_grant: 'In mock mode this means the app and Strapi disagree about the LINE channel. Run `npm run setup` and restart the app.',
+  // In mock mode, Strapi refuses the LIFF mock's ID tokens when it isn't checking them with the verify mock: it's in
+  // LINE mode, or hasn't been restarted since `npm run mode:local`.
+  invalid_grant: 'Check npm run mode; after a switch, restart Strapi and the app.',
   invalid_client: "The app's OAuth client isn't active in Strapi. Run `npm run setup` and restart the app.",
 };
 

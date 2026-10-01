@@ -128,11 +128,10 @@ describe('errorDetail (the mock-mode technical line)', () => {
     expect(detail).toContain('Open the app at http://localhost:3003, not 127.0.0.1.');
   });
 
-  it("keeps the server's message for invalid_grant and explains it in mock mode", () => {
+  it("keeps the server's message for invalid_grant and points at the mode: in mock mode, Strapi doesn't trust the mock's tokens", () => {
+    // Strapi left in LINE mode, or not restarted after `npm run mode:local`: npm run setup doesn't fix that.
     const detail = errorDetail({ code: 'invalid_grant', message: 'The LINE ID token is invalid or expired' });
-    expect(detail).toBe(
-      'The LINE ID token is invalid or expired — In mock mode this means the app and Strapi disagree about the LINE channel. Run `npm run setup` and restart the app.'
-    );
+    expect(detail).toBe('The LINE ID token is invalid or expired — Check npm run mode; after a switch, restart Strapi and the app.');
   });
 
   it("names the fix when the app's OAuth client isn't active (setup re-run, app not restarted)", () => {

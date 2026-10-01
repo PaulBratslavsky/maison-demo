@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
-import { bookingState, isBookableDate } from '@/lib/booking';
+import { bookingState, isBookableDate, shouldCloseOnKey } from '@/lib/booking';
 import { COPY } from '@/lib/copy';
 import { nextSaturday, tomorrow } from '@/lib/format';
 import { toolErrorOf } from '@/lib/mcp';
@@ -40,13 +40,13 @@ export function BookingSheet({ product, onClose }: { product: Product; onClose: 
   const boutiques = availability.data?.boutiques ?? [];
   const { validDate, dateProblem, chosen, open, slots, startTime } = bookingState({ date, boutique, time, boutiques, loading: availability.loading });
 
-  // Focus moves into the dialog when it opens, and Escape closes it.
+  // Focus moves into the dialog when it opens, and Escape closes it: not while Japanese input composes, which it cancels.
   useEffect(() => {
     heading.current?.focus();
   }, []);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (shouldCloseOnKey(event)) onClose();
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);

@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 const nextConfig = {
   // Strict mode runs effects twice in development, which would record every tool call twice in the agent view.
   reactStrictMode: false,
+  // The stage runs on `next dev`: no Next badge in a corner of the projected screen.
+  devIndicators: false,
   // liff/ has its own package-lock.json, and so do the repo root and strapi/. Pin Turbopack's workspace root to liff/.
   turbopack: { root: dirname(fileURLToPath(import.meta.url)) },
   // Which LIFF this server signs in with, which `npm run tunnel` reads: line only for a production build in LINE mode,

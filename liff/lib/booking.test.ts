@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bookingState, isBookableDate } from './booking';
+import { bookingState, isBookableDate, shouldCloseOnKey } from './booking';
 import type { BoutiqueInfo } from './types';
 
 // 11:30 on Thursday 1 October 2026 in Tokyo. Tomorrow there is Friday 2 October.
@@ -82,5 +82,23 @@ describe('bookingState', () => {
 
   it('falls back to the first slot when the picked time is not offered', () => {
     expect(sheet({ time: '09:00' }).startTime).toBe('11:00');
+  });
+});
+
+describe('shouldCloseOnKey', () => {
+  const key = (event: Partial<Pick<KeyboardEvent, 'key' | 'isComposing' | 'keyCode'>>) => ({ key: '', isComposing: false, keyCode: 0, ...event });
+
+  it('closes the sheet on Escape', () => {
+    expect(shouldCloseOnKey(key({ key: 'Escape', keyCode: 27 }))).toBe(true);
+  });
+
+  it('leaves it open while an input method composes, as when typing the note in Japanese: Escape there cancels the composition', () => {
+    expect(shouldCloseOnKey(key({ key: 'Escape', keyCode: 27, isComposing: true }))).toBe(false);
+    // Safari ends a composition before its keydown, and reports that keydown as keyCode 229 instead.
+    expect(shouldCloseOnKey(key({ key: 'Escape', keyCode: 229 }))).toBe(false);
+  });
+
+  it('ignores every other key', () => {
+    for (const other of ['Enter', 'Tab', 'a', ' ']) expect(shouldCloseOnKey(key({ key: other })), other).toBe(false);
   });
 });

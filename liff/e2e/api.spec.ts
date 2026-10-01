@@ -34,10 +34,14 @@ type Answer = Awaited<ReturnType<typeof send>>;
 
 /**
  * The status a call should answer with. A failure carries Strapi's own reason, the start of the answer's body, so a 403
- * for a missing grant explains itself. Nothing of the request, such as a header, goes into the message.
+ * for a missing grant explains itself. Nothing of the request, such as a header, goes into the message. The message is
+ * built only for a failure: Playwright names a step by it, so a passing call's body, customers' data, stays out of the
+ * report.
  */
-const expectStatus = (answer: Answer, status: number, label?: string) =>
-  expect(answer.status, [label, answer.text.slice(0, 400)].filter(Boolean).join(': ')).toBe(status);
+const expectStatus = (answer: Answer, status: number, label?: string) => {
+  if (answer.status === status) expect(answer.status, label).toBe(status);
+  else expect(answer.status, [label, answer.text.slice(0, 400)].filter(Boolean).join(': ')).toBe(status);
+};
 
 /** A demo customer's session, signed in the way the app signs in: a LIFF mock ID token, exchanged. */
 const sessionOf = (lineUserId: string) => createSession({ strapiUrl, clientId, getIdToken: () => `valid.${lineUserId}` }).getToken();
