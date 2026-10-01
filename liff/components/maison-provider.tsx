@@ -6,11 +6,13 @@ import { config } from '@/lib/config';
 import { readStoredLocale, resolveLocale, storeLocale } from '@/lib/locale';
 import { getMaison, onToolCall, type Maison } from '@/lib/maison';
 import type { ToolCallRecord } from '@/lib/mcp';
+import { OpenInLineError } from '@/lib/open-in-line';
 import { errorOf, type ScreenError } from '@/lib/status';
 import type { Locale } from '@/lib/types';
 
 interface MaisonContext {
-  status: 'starting' | 'ready' | 'error';
+  /** open-in-line: LINE mode outside the LINE app, where the app doesn't sign in. It isn't an error. */
+  status: 'starting' | 'ready' | 'error' | 'open-in-line';
   /** The message of a failed sign-in, or null. */
   error: string | null;
   /**
@@ -21,7 +23,12 @@ interface MaisonContext {
   /** A failed sign-in as the screens show it (errorText), with any wait the server named, or null. */
   signInError: ScreenError | null;
   maison: Maison | null;
-  /** The screens' language: the switch's choice, else LINE's language, else the demo default (lib/locale.ts). */
+  /** With status open-in-line: the link that opens this page in LINE, and the OS (a phone gets a button). Else null. */
+  openInLine: Pick<OpenInLineError, 'url' | 'os'> | null;
+  /**
+   * The screens' language: the switch's choice, else LINE's language (at sign-in, or as LINE or the browser reports it
+   * for the Open in LINE page), else the demo default (lib/locale.ts).
+   */
   locale: Locale;
   calls: ToolCallRecord[];
   agentView: boolean;
@@ -31,7 +38,8 @@ interface MaisonContext {
   retrySignIn: () => void;
 }
 
-type SignIn = Pick<MaisonContext, 'status' | 'signInError' | 'maison'>;
+type SignIn = Pick<MaisonContext, 'status' | 'signInError' | 'maison'> & { openInLine: OpenInLineError | null };
+const STARTING: SignIn = { status: 'starting', signInError: null, maison: null, openInLine: null };
 
 const Context = createContext<MaisonContext | null>(null);
 const AGENT_VIEW_KEY = 'maison.agentView';
@@ -46,7 +54,7 @@ const browserStorage = (): Storage | null => {
 };
 
 export function MaisonProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SignIn>({ status: 'starting', signInError: null, maison: null });
+  const [state, setState] = useState<SignIn>(STARTING);
   const [attempt, setAttempt] = useState(0);
   const [calls, setCalls] = useState<ToolCallRecord[]>([]);
   const [agentView, setAgentViewState] = useState(false);
@@ -65,14 +73,17 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'starting', signInError: null, maison: null });
+    setState(STARTING);
     getMaison().then(
       (maison) => {
-        if (!cancelled) setState({ status: 'ready', signInError: null, maison });
+        if (!cancelled) setState({ ...STARTING, status: 'ready', maison });
       },
       (error: unknown) => {
+        if (cancelled) return;
+        // Outside LINE in LINE mode, the app asks to be opened in LINE: not a failure.
+        if (error instanceof OpenInLineError) setState({ ...STARTING, status: 'open-in-line', openInLine: error });
         // A failed fetch (Strapi unreachable) is `network`; a token-endpoint refusal keeps its OAuth code.
-        if (!cancelled) setState({ status: 'error', signInError: errorOf(error), maison: null });
+        else setState({ ...STARTING, status: 'error', signInError: errorOf(error) });
       }
     );
     return () => {
@@ -99,7 +110,12 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
       ...state,
       error: state.signInError?.message ?? null,
       errorCode: state.signInError?.code ?? null,
-      locale: resolveLocale({ override: localeOverride, signedIn: state.maison?.locale ?? null, demo: config.demoLocale }),
+      // The Open in LINE page's language, as LINE or the browser reports it, takes the place of the signed-in one.
+      locale: resolveLocale({
+        override: localeOverride,
+        signedIn: state.maison?.locale ?? state.openInLine?.locale ?? null,
+        demo: config.demoLocale,
+      }),
       calls,
       agentView,
       setAgentView,

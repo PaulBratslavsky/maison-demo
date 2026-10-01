@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ToolCallRecord } from './mcp';
+import { OpenInLineError } from './open-in-line';
 
 const mocks = vi.hoisted(() => ({
   config: { strapiUrl: 'http://strapi.test', clientId: 'mcp_client_app' },
@@ -91,6 +92,16 @@ describe('getMaison', () => {
     fetchImpl.mockImplementation(async () => granted());
     expect(await getMaison()).toMatchObject({ mock: true });
     expect(mocks.initLiff).toHaveBeenCalledTimes(2);
+  });
+
+  it('outside LINE, hands the open-in-LINE state to the screens as it came: no token exchange, no MCP connection', async () => {
+    const outside = new OpenInLineError('https://liff.line.me/1234567890-AbcdEfgh/visits', 'en', 'ios');
+    mocks.initLiff.mockRejectedValue(outside);
+    const fetchImpl = tokenEndpoint(granted);
+    const { getMaison } = await load();
+    await expect(getMaison()).rejects.toBe(outside);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.createMcp).not.toHaveBeenCalled();
   });
 });
 

@@ -49,6 +49,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `liff/scripts/mock-line-verify.mjs` | The local stand-in for LINE's verify endpoint |
 | `scripts/init-env.mjs` | Creates the two `.env` files on `npm install` |
 | `scripts/line-mode.mjs`, `scripts/line-tunnel.mjs` | Option B: `npm run mode:line` and `mode:local` switch both `.env` files, and `npm run tunnel` refuses an unsafe tunnel |
+| `liff/scripts/line-qr.mjs` | Option B: `npm run qr`, the app's LINE link as a QR code, saved in `liff/line/qr/` (gitignored: it holds your LIFF ID) |
 | `liff/lib/strapi-proxy.ts` and its routes (`liff/app/mcp`, `liff/app/uploads`, `liff/app/api/strapi-oauth-mcp-manager`) | Option B: Strapi's `/mcp`, token endpoint and `/uploads` on the app's own origin |
 | `liff/line/channel-icon.png` | The channel icon, to LINE's MINI App icon spec |
 | `liff/public/line/LINE_spinner_light.svg` | LINE's loading icon: LINE's own file, from its MINI App design guidelines |
@@ -320,15 +321,25 @@ npm run dev:strapi    # Strapi reads the LINE channel when it starts
 npm run setup         # checks Strapi's channel, and points the app at your domain
 npm run start:line    # builds the app for LINE and serves it on :3003, without the verify mock
 npm run tunnel        # checks it's safe, then runs ngrok on your domain
+npm run qr            # prints the app's LINE link, with a QR code to scan in LINE
 ```
 
 `npm run setup` mints a new ops token, so update Claude Desktop again afterwards (see "Claude Desktop, the ops agent").
 
-On your phone, in LINE, open `https://liff.line.me/<your LIFF ID>`: send it to yourself in a chat, or to Keep memo, and tap it.
-- **The first time,** ngrok's free plan may show its warning page: tap **Visit Site**. ngrok remembers it for 7 days. If the app then shows an error, close it and tap the link again.
+**Open the app inside LINE.** Run `npm run qr`, then scan the code with LINE's QR reader: the QR icon next to the search bar on LINE's Home tab. The iPhone Camera app may hand the link to Safari instead. The code opens `https://liff.line.me/<your LIFF ID>`, and `npm run qr -- /visits` opens a given screen. It also saves the code in `liff/line/qr/`, as a PNG and an SVG.
+- **If LINE opens links in Safari or Chrome:** in LINE, go to Settings → LINE Labs and turn off "Open links in your default browser". Outside LINE the app never signs in: it shows an "Open in LINE" page, with the QR code and, on a phone, a button.
+- **The first time,** ngrok's free plan may show its warning page: tap **Visit Site**. ngrok remembers it for 7 days. If the app then shows an error, close it and open it again.
 - **LINE asks you to allow the app,** with your channel's icon and name.
 - **The app's language** follows the LINE app's language, until you switch it with **EN**/**JA**.
 - **The Strapi admin** stays at http://localhost:1338/admin on the laptop. Strapi prints your public URL as its own, but the admin isn't served there.
+
+Who can sign in:
+- **While your LINE Login channel is in Developing,** only its Admins and Testers can (LINE Developers Console → your channel → **Roles**).
+- **Publishing the channel opens it to anyone with LINE.** Every visit then reaches your laptop through the tunnel, the concierge answers on your model or API key, and each visitor becomes a customer in the demo database:
+  - **Each sign-in** stores a session in oauth-mcp-manager: the visitor's full LINE user ID (`line:U…`), a hash of the session token (not the token), the app's client ID, and when the session expires (an hour on) and was last used. Its hourly cleanup deletes expired sessions.
+  - **Each visit request** stores a Maison appointment: the same full LINE user ID, the boutique, the products, the date and time, the visitor's note if they wrote one, and a reference. It stays until you reset the demo appointments.
+  - **Nothing else:** no name, picture or email, and not the ID token. Strapi checks the ID token with LINE and keeps only the user ID. Staff see it masked (`line:U4af…88`), and the admin API never returns it.
+- **The QR image** holds your LIFF ID and stays out of git: `liff/line/qr/` is in `.gitignore`.
 
 `npm run tunnel` refuses unless all of these hold:
 - strapi/.env has no `LINE_VERIFY_URL`, and both `.env` files are in LINE mode
@@ -406,11 +417,11 @@ Already done for LINE's MINI App guidelines:
 - **The loading icon:** LINE's own spinner, 30×30 px and centered, wherever the app waits (`liff/components/spinner.tsx`).
 - **LIFF inside LINE:**
   - `liff.init()` runs at or below the endpoint URL.
-  - `liff.login()` is called only outside LINE.
+  - Outside LINE the app never starts LINE Login. It shows an "Open in LINE" page instead, with a QR code of the page's LINE link (`liff/components/open-in-line.tsx`).
   - When an ID token expires (they last an hour), the app logs out and reloads, LINE's own pattern.
 
 Still to do before LINE's review:
-- **People without LINE.** LINE asks that a MINI App work in an external browser without LINE Login. Every screen here needs a LINE session, so a public catalog session would come next.
+- **People without LINE.** LINE asks that a MINI App work in an external browser without LINE Login. Every screen here needs a LINE session, so an external browser gets the "Open in LINE" page for now. A public catalog session would come next.
 - **Performance.** LINE asks for a Lighthouse Performance score of 50 or more, measured on your deployment without LINE Login.
 - **The policy and the review request:**
   - the LINE MINI App Policy
@@ -428,7 +439,7 @@ LINE's pages behind this:
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, and the tests of option B's mode switch and tunnel guard | nothing running |
+| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
 | `npm run test:e2e` | Browser tests: booking and **My visits**, the language a booking sends, Osaka's closed day, a cleared date and today's date, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
 | `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama and `npm run setup`, in local mode; it's skipped otherwise |
 

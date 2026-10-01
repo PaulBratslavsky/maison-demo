@@ -10,6 +10,14 @@ export const COPY = {
     language: '言語',
     signingIn: 'LINEでサインインしています…',
     signInFailed: 'サインインできませんでした',
+    // LINE mode, outside the LINE app: the "Open in LINE" page (components/open-in-line.tsx).
+    openInLine: {
+      title: 'LINEでMaisonを開く',
+      body: 'MaisonはLINEの中で動きます。LINEのQRコードリーダーでこのコードを読み取ってください（LINEの検索バーの横にあるQRアイコン）。',
+      button: 'LINEで開く',
+      hint: 'SafariやChromeで開いてしまう場合は、LINEの［設定］→［LINEラボ］で「リンクをデフォルトのブラウザで開く」をオフにしてください。',
+      alt: 'LINEでMaisonを開くQRコード',
+    },
     backHome: 'トップへ戻る',
     chooseDate: '日付をお選びください。',
     dateTooSoon: '明日以降の日付をお選びください。',
@@ -80,6 +88,13 @@ export const COPY = {
     language: 'Language',
     signingIn: 'Signing in with LINE…',
     signInFailed: 'Sign-in failed',
+    openInLine: {
+      title: 'Open Maison in LINE',
+      body: "Maison runs inside LINE. Scan this code with LINE's QR reader: in LINE, tap the QR icon next to the search bar.",
+      button: 'Open in LINE',
+      hint: 'Keeps opening in Safari or Chrome? In LINE, go to Settings → LINE Labs and turn off "Open links in your default browser".',
+      alt: 'QR code that opens Maison in LINE',
+    },
     backHome: 'Back to the start',
     chooseDate: 'Please choose a date.',
     dateTooSoon: 'Please choose a date from tomorrow on.',

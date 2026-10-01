@@ -4,3 +4,5 @@ node_modules
 .env
 .env.*
 !.env.example
+# npm run qr: the app's LINE link as a QR code, which holds your LIFF ID
+liff/line/qr/

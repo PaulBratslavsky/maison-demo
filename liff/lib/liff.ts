@@ -1,6 +1,8 @@
 import type { ExtendedInit, LiffMockApi } from '@line/liff-mock';
 
 import { config } from './config';
+import { lineAppUrl } from './line-app-url.mjs';
+import { OpenInLineError } from './open-in-line';
 import type { Locale } from './types';
 
 export interface LiffState {
@@ -54,6 +56,12 @@ const init = async (): Promise<LiffState> => {
     }));
   } else {
     await liff.init({ liffId: config.liffId });
+    // Outside the LINE app, for instance when LINE hands a liff.line.me link to Safari, LINE Login looped through LINE
+    // and ngrok's warning page and never came back. So the app signs in only inside LINE, and asks to be opened there.
+    // (The LIFF mock's isInClient() is false too, which is why this sits in the branch for the real LIFF only.)
+    if (!liff.isInClient()) {
+      throw new OpenInLineError(lineAppUrl(config.liffId, window.location.pathname), toLocale(liff.getAppLanguage()), liff.getOS());
+    }
     if (!liff.isLoggedIn()) {
       liff.login();
       return new Promise<LiffState>(() => {}); // the page is leaving for LINE Login
@@ -71,8 +79,9 @@ const init = async (): Promise<LiffState> => {
     mock: config.liffMock,
     signInAgain: () => {
       // LINE's way: log out, then reload. Inside LINE, liff.init() signs in again by itself, and liff.login() can't be
-      // used there; in an external browser, init() above calls liff.login(). At most once a minute: refused again right
-      // after a new sign-in, the app and Strapi disagree about the LINE channel, and the screen shows the error instead.
+      // used there; outside LINE the app never signs in (init() above ends in the "Open in LINE" page). At most once a
+      // minute: refused again right after a new sign-in, the app and Strapi disagree about the LINE channel, and the
+      // screen shows the error instead.
       // The same minute absorbs a second call for one refusal: maison.ts wraps both getToken() and refresh(), which
       // share one exchange.
       try {

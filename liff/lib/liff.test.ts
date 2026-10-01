@@ -1,20 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The real LIFF SDK, as the app uses it inside LINE (NEXT_PUBLIC_LIFF_MOCK=false).
+import type { LineOs } from './open-in-line';
+
+// The real LIFF SDK, as the app uses it in LINE mode (NEXT_PUBLIC_LIFF_MOCK=false), plus what mock mode calls on it.
 const liff = vi.hoisted(() => ({
-  init: vi.fn(async () => {}),
+  init: vi.fn(async (_config: object) => {}),
+  isInClient: vi.fn(() => true),
   isLoggedIn: vi.fn(() => true),
   getIDToken: vi.fn(() => 'eyJ.line.idtoken'),
-  getAppLanguage: vi.fn(() => 'ja'),
+  getAppLanguage: vi.fn((): string => 'ja'),
+  getOS: vi.fn((): LineOs => 'ios'),
   login: vi.fn(),
   logout: vi.fn(),
+  use: vi.fn(),
+  $mock: { set: vi.fn() },
 }));
 vi.mock('@line/liff', () => ({ default: liff }));
 
-/** The LIFF browser: its location, and the tab's session storage, which outlives a reload. */
-const browser = (sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>) => {
+const LIFF_ID = '1234567890-AbcdEfgh'; // made up: never a real LIFF ID in this repo
+
+/** The browser: its location, and the tab's session storage, which outlives a reload. */
+const browser = ({
+  pathname = '/visits',
+  search = '',
+  hash = '',
+  sessionStorage,
+}: { pathname?: string; search?: string; hash?: string; sessionStorage?: Pick<Storage, 'getItem' | 'setItem'> } = {}) => {
   const store = new Map<string, string>();
-  const location = { href: 'https://maison.example/visits', search: '', reload: vi.fn() };
+  const location = { href: `https://maison.example${pathname}${search}${hash}`, pathname, search, hash, reload: vi.fn() };
   vi.stubGlobal('window', {
     location,
     sessionStorage: sessionStorage ?? {
@@ -25,26 +38,47 @@ const browser = (sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>) => {
   return location;
 };
 
-describe('initLiff inside LINE', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
-    vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'false');
-    vi.stubEnv('NEXT_PUBLIC_LIFF_ID', '1234567890-AbcdEfgh');
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+/** Whether a promise is still pending after the microtasks and a few timers have run. */
+const stillPending = (promise: Promise<unknown>) =>
+  Promise.race([promise.then(() => false, () => false), new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 20))]);
 
+/** liff.ts and the open-in-LINE state, fresh for each test (beforeEach resets the modules), so instanceof holds. */
+const load = async () => ({ ...(await import('./liff')), ...(await import('./open-in-line')) });
+
+beforeEach(() => {
+  vi.resetModules();
+  vi.clearAllMocks();
+  // Inside LINE, signed in by LINE, on an iPhone, in Japanese. Each test changes what it's about.
+  liff.isInClient.mockReturnValue(true);
+  liff.isLoggedIn.mockReturnValue(true);
+  liff.getAppLanguage.mockReturnValue('ja');
+  liff.getOS.mockReturnValue('ios');
+  vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'false');
+  vi.stubEnv('NEXT_PUBLIC_LIFF_ID', LIFF_ID);
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('initLiff inside LINE', () => {
   it("starts LIFF with the app's LIFF ID and passes on LINE's ID token and language", async () => {
     browser();
     const { initLiff } = await import('./liff');
     const state = await initLiff();
-    expect(liff.init).toHaveBeenCalledWith({ liffId: '1234567890-AbcdEfgh' });
+    expect(liff.init).toHaveBeenCalledWith({ liffId: LIFF_ID });
     expect(state).toMatchObject({ locale: 'ja', mock: false });
     expect(state.getIdToken()).toBe('eyJ.line.idtoken');
+  });
+
+  it("keeps today's sign-in: LINE signs in by itself, and liff.login() runs only if it hasn't", async () => {
+    browser();
+    liff.isLoggedIn.mockReturnValue(false);
+    const { initLiff } = await import('./liff');
+    const started = initLiff();
+    expect(await stillPending(started)).toBe(true); // the page is leaving for LINE Login
+    expect(liff.login).toHaveBeenCalledTimes(1);
   });
 
   it('signs in again the way LINE documents it: log out and reload, never liff.login(), and only once a minute', async () => {
@@ -77,11 +111,13 @@ describe('initLiff inside LINE', () => {
 
   it("doesn't reload without session storage, where a loop can't be told apart: the screen shows the error", async () => {
     const location = browser({
-      getItem: () => {
-        throw new Error('SecurityError');
-      },
-      setItem: () => {
-        throw new Error('SecurityError');
+      sessionStorage: {
+        getItem: () => {
+          throw new Error('SecurityError');
+        },
+        setItem: () => {
+          throw new Error('SecurityError');
+        },
       },
     });
     const { initLiff } = await import('./liff');
@@ -89,5 +125,60 @@ describe('initLiff inside LINE', () => {
     state.signInAgain();
     expect(liff.logout).not.toHaveBeenCalled();
     expect(location.reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('initLiff outside LINE, in a browser such as Safari', () => {
+  it("never starts LINE Login: start-up ends in the open-in-LINE state, with this page's LINE link", async () => {
+    const location = browser({ pathname: '/products/weekender-50', search: '?code=abc&liffClientId=x', hash: '#access_token=y' });
+    liff.isInClient.mockReturnValue(false);
+    liff.isLoggedIn.mockReturnValue(false);
+    liff.getAppLanguage.mockReturnValue('en-US');
+    liff.getOS.mockReturnValue('android');
+    const { initLiff, OpenInLineError } = await load();
+    const started = initLiff().then(
+      () => 'signed in',
+      (error: unknown) => error
+    );
+    const outcome = await Promise.race([started, new Promise((resolve) => setTimeout(() => resolve('still starting'), 20))]);
+    expect(liff.login).not.toHaveBeenCalled();
+    expect(outcome).toBeInstanceOf(OpenInLineError);
+    // The page's path only: the query and the hash can carry LINE's tokens or codes.
+    expect(outcome).toMatchObject({ url: `https://liff.line.me/${LIFF_ID}/products/weekender-50`, locale: 'en', os: 'android' });
+    expect(liff.init).toHaveBeenCalledWith({ liffId: LIFF_ID });
+    expect(liff.getIDToken).not.toHaveBeenCalled();
+    expect(location.reload).not.toHaveBeenCalled();
+  });
+
+  it('gives the start page the bare LINE link, and passes on a desktop browser as web, which gets no button', async () => {
+    browser({ pathname: '/' });
+    liff.isInClient.mockReturnValue(false);
+    liff.getOS.mockReturnValue('web');
+    const { initLiff } = await import('./liff');
+    await expect(initLiff()).rejects.toMatchObject({ url: `https://liff.line.me/${LIFF_ID}`, locale: 'ja', os: 'web' });
+    expect(liff.login).not.toHaveBeenCalled();
+  });
+
+  it('is also how a signed-in browser ends: outside LINE, no session even with a LINE login', async () => {
+    browser();
+    liff.isInClient.mockReturnValue(false);
+    liff.isLoggedIn.mockReturnValue(true);
+    const { initLiff, OpenInLineError } = await load();
+    await expect(initLiff()).rejects.toBeInstanceOf(OpenInLineError);
+    expect(liff.getIDToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('initLiff with the LIFF mock (the stage and development)', () => {
+  it("signs the demo customer in as before: the mock isn't outside LINE, though its isInClient() says false", async () => {
+    browser();
+    vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'true');
+    liff.isInClient.mockReturnValue(false); // what @line/liff-mock answers by default
+    const { initLiff } = await import('./liff');
+    const state = await initLiff();
+    expect(state).toMatchObject({ mock: true });
+    expect(liff.init).toHaveBeenCalledWith({ liffId: LIFF_ID, mock: true });
+    expect(liff.$mock.set).toHaveBeenCalledTimes(1);
+    expect(liff.login).not.toHaveBeenCalled();
   });
 });
