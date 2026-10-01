@@ -10,7 +10,7 @@ LINE sign-in is simulated with LINE's official LIFF mock and a local stand-in fo
 
 ## Quick start
 
-You need Node.js 22.9 or later, and npm. For the concierge, either Ollama with `qwen3-14b-32k`, or an Anthropic API key (see "Models").
+You need Node.js 22.12 or later, and npm. For the concierge, either Ollama with `qwen3-14b-32k`, or an Anthropic API key (see "Models").
 
 ```bash
 git clone https://github.com/PaulBratslavsky/maison-demo.git

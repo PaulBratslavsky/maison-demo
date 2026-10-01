@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=22.9.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "concurrently -k -n app,line-mock -c green,cyan \"next dev -H 127.0.0.1 -p 3003\" \"node --env-file-if-exists=.env scripts/mock-line-verify.mjs\"",
