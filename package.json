@@ -9,6 +9,7 @@
   "scripts": {
     "postinstall": "npm install --prefix strapi && node scripts/init-env.mjs",
     "dev:strapi": "npm run develop --prefix strapi",
+    "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",
     "test": "npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check"
   }
 }
