@@ -1,11 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { needsRetry } from './chat-retry';
 
+type Part = { type: string; text?: string; toolName?: string; state?: string; output?: unknown; errorText?: string };
+
 const text = (value: string) => ({ type: 'text', text: value });
 const resolveDate = { type: 'tool-resolve_date' }; // the concierge's own tool
 const searchProducts = { type: 'dynamic-tool' }; // a Maison tool
 const user = (value: string) => ({ role: 'user', parts: [text(value)] });
-const assistant = (...parts: Array<{ type: string; text?: string }>) => ({ role: 'assistant', parts });
+const assistant = (...parts: Part[]) => ({ role: 'assistant', parts });
+
+/** A request_appointment call as the page holds it. MCP tools arrive as dynamic-tool parts. */
+const booking = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'request_appointment', state, ...(output === undefined ? {} : { output }) });
+/** What Maison answers, as @ai-sdk/mcp passes it on: the visit it stored, or a refusal (isError). */
+const appointment = { reference: 'MA-7Q2K', status: 'requested', requestedFor: '2026-10-03T14:00:00+09:00' };
+const stored = { content: [{ type: 'text', text: JSON.stringify({ appointment }) }], structuredContent: { appointment } };
+const refusal = {
+  isError: true,
+  content: [{ type: 'text', text: JSON.stringify({ error: { code: 'too_many_open_requests', message: 'You have 3 requests waiting.', hint: 'Wait for the boutique.' } }) }],
+};
+const booked = booking('output-available', { ...stored, isError: false }); // the MCP client's parse can add isError: false
+const refused = booking('output-available', refusal);
+/** The demo's two messages, up to the customer's yes. */
+const askedToBook = [
+  user('A travel gift, and a visit to Ginza on Saturday at 2 pm?'),
+  assistant(text('Shall I request Saturday 3 October at 14:00 at Ginza?')),
+  user('Yes, please.'),
+];
 
 describe('needsRetry', () => {
   it('is false for a reply that ends in something to read', () => {
@@ -42,5 +62,36 @@ describe('needsRetry', () => {
     expect(needsRetry([user('Hello')], false)).toBe(false);
     expect(needsRetry([user('Hello'), assistant(resolveDate), user('Yes, please.')], false)).toBe(false);
     expect(needsRetry([user('Hello'), assistant(resolveDate), user('Yes, please.'), assistant(text('Done.'))], false)).toBe(false);
+  });
+
+  // Asking again drops the last reply and sends the customer's yes again: after a booking, the model books it twice.
+  it('is false after a booking went through, even with no words after it', () => {
+    expect(needsRetry([...askedToBook, assistant(booked)], false)).toBe(false);
+    expect(needsRetry([...askedToBook, assistant({ type: 'step-start' }, resolveDate, { type: 'step-start' }, booked, { type: 'step-start' })], false)).toBe(false);
+    expect(needsRetry([...askedToBook, assistant(booking('output-available', stored))], false)).toBe(false); // no isError at all
+    expect(needsRetry([...askedToBook, assistant(booked, searchProducts)], false)).toBe(false); // another tool call after it
+    expect(needsRetry([...askedToBook, assistant(refused, booked)], false)).toBe(false); // refused, then booked on a second try
+    expect(needsRetry([...askedToBook, assistant(booked, refused)], false)).toBe(false); // booked, then a second one refused
+    // A typed MCP tool (mcp.tools({ schemas })) arrives as a static part, with the name in the type.
+    expect(needsRetry([...askedToBook, assistant({ type: 'tool-request_appointment', state: 'output-available', output: stored })], false)).toBe(false);
+  });
+
+  it('allows it after a booking Maison refused (isError): nothing was booked', () => {
+    expect(needsRetry([...askedToBook, assistant(refused)], false)).toBe(true);
+    expect(needsRetry([...askedToBook, assistant(text('One moment.'), refused, refused)], false)).toBe(true);
+  });
+
+  it("is false when it can't tell whether the booking went through: no result yet, or the call failed on the way", () => {
+    expect(needsRetry([...askedToBook, assistant(booking('input-streaming'))], false)).toBe(false);
+    expect(needsRetry([...askedToBook, assistant(booking('input-available'))], false)).toBe(false);
+    expect(needsRetry([...askedToBook, assistant({ ...booking('output-error'), errorText: 'fetch failed' })], false)).toBe(false);
+    expect(needsRetry([...askedToBook, assistant(booking('output-available', null))], false)).toBe(false);
+  });
+
+  it('still allows it for an empty reply with no tool call, and when the booking was in an earlier reply', () => {
+    expect(needsRetry([...askedToBook, assistant()], false)).toBe(true);
+    expect(needsRetry([...askedToBook, assistant({ type: 'step-start' })], false)).toBe(true);
+    // Asking again keeps the earlier replies, so the model still sees that booking.
+    expect(needsRetry([...askedToBook, assistant(booked, text('Requested.')), user('Anything else for him?'), assistant(searchProducts)], false)).toBe(true);
   });
 });

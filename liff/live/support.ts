@@ -53,11 +53,42 @@ export const datesIn = (text: string, year: number): string[] => {
   return dates;
 };
 
+/** The words that make a confirmation one still to come: "once it is confirmed", "it is confirmed once they reply". */
+const STILL_TO_COME = String.raw`\b(?:once|when|whenever|after|as soon as|until|till|before|if|whether)\b`;
+const STILL_TO_COME_BEFORE = new RegExp(STILL_TO_COME, 'i');
+const ADVERBS = String.raw`(?:\s+(?:now|already|all|also|just|officially|fully))*`;
+/** The word itself, unless a condition follows it: "is confirmed once the boutique accepts it". */
+const CONFIRMED_WORD = String.raw`\s+confirmed\b(?!\s+(?:only\s+)?${STILL_TO_COME})`;
 /**
- * Whether an English reply says a visit is confirmed ("is confirmed", "has been confirmed", "is now confirmed"). A
- * request is only requested: the boutique confirms it, on LINE. "will confirm" and "not yet confirmed" are fine.
+ * A visit called confirmed, in English: "is confirmed", "it's confirmed", "has already been confirmed", "you're all
+ * confirmed"; or someone saying they confirmed it: "I've confirmed", "the boutique has confirmed". Not the customer's
+ * "you've confirmed" (their yes), nor "isn't confirmed" or "hasn't been confirmed".
  */
-export const saysConfirmed = (text: string): boolean => /\b(?:is|are|was|has been|have been)(?: now| already)? confirmed\b/i.test(text);
+const CONFIRMED = new RegExp(
+  String.raw`(?:\b(?:is|are|was|were)|['’](?:s|re)|(?:\b(?:has|have|had)|['’](?:s|ve|d))${ADVERBS}\s+been)${ADVERBS}${CONFIRMED_WORD}` +
+    String.raw`|(?<!\byou)(?:['’]ve|\s+(?:have|has|had))${ADVERBS}${CONFIRMED_WORD}`,
+  'gi'
+);
+/**
+ * Where an English clause ends: a sentence or a line, a semicolon or a colon, or a comma with a new subject after it
+ * ("After checking, your visit is confirmed"). A comma inside a clause, as in a date ("Saturday, October 3, is
+ * confirmed"), doesn't end it.
+ */
+const CLAUSE_END = /[.!?;:\n]+|,\s*(?=(?:I|we|you|they|it|your|our|the|this|that|everything)\b)/i;
+/** The same in Japanese: 確定しました, 確定いたしました, 確定です. Not 確定しましたら ("once it is"), nor 未確定 ("not yet"). */
+const CONFIRMED_JA = /(?<![未不])確定(?:しました|いたしました|致しました|しております|しています|となりました|になりました|されました|済み|です)(?![らか])/;
+
+/**
+ * Whether a reply, in English or Japanese, says a visit is confirmed. A request is only requested: the boutique confirms
+ * it, on LINE. A confirmation still to come is fine ("once it is confirmed", "when …", "after …", "as soon as …",
+ * "until …", "it is confirmed once they reply", 確定しましたら, 確定次第), and so are "will confirm", "not yet confirmed"
+ * and 未確定. A bare "Confirmed: Saturday at 2 pm" isn't caught.
+ */
+export const saysConfirmed = (text: string): boolean =>
+  CONFIRMED_JA.test(text) ||
+  text
+    .split(CLAUSE_END)
+    .some((clause) => [...clause.matchAll(CONFIRMED)].some((claim) => !STILL_TO_COME_BEFORE.test(clause.slice(0, claim.index))));
 
 /** The weekday names an English reply mentions ("Saturday", "Saturdays"), as written in WEEKDAYS. */
 export const weekdaysIn = (text: string): string[] => WEEKDAYS.filter((name) => new RegExp(`\\b${name}s?\\b`, 'i').test(text));

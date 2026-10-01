@@ -63,11 +63,55 @@ describe("the booking test's reply checks", () => {
   });
 
   it('tells a visit that is confirmed from one that is only requested', () => {
-    for (const reply of ['Your visit is confirmed.', 'Your visit has been confirmed for Saturday.', 'It is now confirmed.', 'Both visits are already confirmed.', 'The visit WAS confirmed.']) {
-      expect(saysConfirmed(reply), reply).toBe(true);
+    const confirmed = [
+      'Your visit is confirmed.',
+      'Your visit has been confirmed for Saturday.',
+      'It is now confirmed.',
+      'Both visits are already confirmed.',
+      'The visit WAS confirmed.',
+      'Your visit has already been confirmed.',
+      // Contractions, and someone doing the confirming.
+      "Great news, it's confirmed.",
+      'It’s been confirmed.',
+      "You're all confirmed for Saturday at 2 pm.",
+      "I've confirmed your visit to the Ginza boutique.",
+      'We have confirmed your appointment.',
+      'The boutique has confirmed your visit.',
+      // A clause before it, ended by a comma and a new subject, doesn't make it a confirmation still to come.
+      'Once again, your visit is confirmed.',
+      'After checking with Ginza, I’ve confirmed your visit.',
+    ];
+    const notConfirmed = [
+      'Your visit has been requested. The boutique will confirm it on LINE.',
+      'It is requested, and not yet confirmed.',
+      "It isn't confirmed yet, and hasn't been confirmed by the boutique.",
+      'Awaiting confirmation from the boutique.',
+      'Please confirm the time.',
+      // A confirmation still to come, whichever side of "confirmed" the condition is on.
+      "You'll get a LINE message once it is confirmed.",
+      'The boutique will message you on LINE when it is confirmed.',
+      'You will hear from them as soon as the visit is confirmed by the boutique.',
+      "After it's confirmed, you'll see it under Visits.",
+      'It stays a request until it’s confirmed.',
+      "I'll let you know when they've confirmed it.",
+      'Once your visit on Saturday, October 3, is confirmed, the boutique will message you on LINE.',
+      'Your visit is confirmed once the boutique accepts it on LINE.',
+      'Nothing is confirmed until the boutique replies.',
+      // The customer's yes.
+      "Thank you, you've confirmed Saturday at 2 pm, so I've requested it.",
+    ];
+    // Soft, so a run names every reply it misjudges, not just the first.
+    for (const reply of confirmed) expect.soft(saysConfirmed(reply), reply).toBe(true);
+    for (const reply of notConfirmed) expect.soft(saysConfirmed(reply), reply).toBe(false);
+  });
+
+  it('reads a Japanese reply the same way', () => {
+    for (const reply of ['確定しました。', 'ご予約が確定しました。', '土曜日14時のご予約が確定いたしました。', 'ご予約は確定です。']) {
+      expect.soft(saysConfirmed(reply), reply).toBe(true);
     }
-    for (const reply of ['Your visit has been requested. The boutique will confirm it on LINE.', 'It is requested, and not yet confirmed.', 'Awaiting confirmation from the boutique.', 'Please confirm the time.']) {
-      expect(saysConfirmed(reply), reply).toBe(false);
+    // 確定しましたら is "once it is confirmed", 確定次第 "as soon as it is confirmed", and 未確定 "not confirmed".
+    for (const reply of ['確定しましたらLINEでお知らせいたします。', 'ご予約が確定しましたら、LINEでお知らせいたします。', '予約が確定次第、LINEでご連絡いたします。', 'まだ確定しておりません。', 'ご予約はまだ未確定です。']) {
+      expect.soft(saysConfirmed(reply), reply).toBe(false);
     }
   });
 

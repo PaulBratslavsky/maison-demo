@@ -222,7 +222,12 @@ describe('handleConcierge', () => {
     const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text());
     expect(events.some((event) => event.type === 'tool-output-available')).toBe(false);
     expect(events.some((event) => event.type === 'tool-input-error' || event.type === 'tool-output-error')).toBe(true);
-    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('weeks');
+    // The step after, the model is shown the schema's own words. Not just "weeks": its call is in that prompt, and the
+    // error echoes the input, so "weeks" is there whatever the error says.
+    const results = model.doStreamCalls[1].prompt.flatMap((message) => (message.role === 'tool' ? message.content : []));
+    const shown = results.map((part) => (part.type === 'tool-result' && part.output.type === 'error-text' ? part.output.value : '')).join('\n');
+    // The schema's issues arrive as JSON inside that text, so their quotes come escaped.
+    expect(shown.replaceAll('\\"', '"')).toContain('Unrecognized key: "weeks"');
   });
 
   it('treats the null and "" a model sends for the inputs it is not using as not given, and ignores case and spaces', async () => {
@@ -450,11 +455,15 @@ describe('conciergeInstructions', () => {
   });
 
   it('lets the model answer an opening-hours question without asking which day', () => {
-    // Rule 1 says to use the tools for opening hours; rule 4 must not forbid the one call that answers it.
+    // Rule 1 says to use the tools for opening hours; rule 4 must not forbid the one call that answers it. Only when no
+    // day is named: a booking turn names one, and checks it with find_boutiques and that date.
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
-      expect(text, locale).toMatch(/Don't look up opening hours unless the customer asks about them; then call find_boutiques without a date, which lists each boutique's weekly hours/);
+      expect(text, locale).toMatch(/If the customer names no day, look up opening hours only when they ask about them: call find_boutiques without a date, which lists each boutique's weekly hours\./);
+      expect(text, locale).not.toMatch(/Don't look up opening hours unless/); // the old wording, which had no scope
       expect(text, locale).toMatch(/Use the tools for every fact about products, prices, stock and opening hours/);
+      // The sentence after it names its tool: "it" would point at find_boutiques.
+      expect(text, locale).toContain('Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer');
     }
   });
 

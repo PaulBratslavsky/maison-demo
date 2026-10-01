@@ -1,23 +1,51 @@
+/** What the chat needs from a message part: its text, or the tool call it records. */
+interface ChatPart {
+  type: string;
+  text?: string;
+  /** The tool's name, on a dynamic-tool part (MCP tools arrive as dynamic tools). */
+  toolName?: string;
+  state?: string;
+  output?: unknown;
+}
+
 /** What the chat needs from a message to tell whether the concierge answered. */
 interface ChatMessage {
   role: string;
-  parts: ReadonlyArray<{ type: string; text?: string }>;
+  parts: ReadonlyArray<ChatPart>;
 }
 
 /** The parts the screen shows: text with something in it, and tool calls. */
-const shown = (part: { type: string; text?: string }) =>
+const shown = (part: ChatPart) =>
   part.type === 'text' ? Boolean(part.text?.trim()) : part.type === 'dynamic-tool' || part.type.startsWith('tool-');
+
+/**
+ * Whether a part is a request_appointment call that may have booked a visit. Only Maison's refusal says it didn't: an
+ * MCP error result (isError) that came back. A result without one is a booking. A call with no result, or one that failed
+ * on the way (output-error), can't be told from a booking that went through, so it counts as one.
+ */
+const mayHaveBooked = (part: ChatPart): boolean => {
+  const name = part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
+  if (name !== 'request_appointment') return false;
+  const refused = part.state === 'output-available' && (part.output as { isError?: unknown } | null | undefined)?.isError === true;
+  return !refused;
+};
 
 /**
  * Whether the last reply ended with nothing to read: no text, or tool calls and no words after them. The local model
  * sometimes makes its tool calls and then returns nothing, which would leave the customer looking at chips. It isn't
  * so while a reply is still coming in, nor when the customer spoke last. A reply that ends in words, even "Let me look
  * that up", can't be told from an answer this way: the customer's next message carries on from it.
+ *
+ * Nor is it so when the reply holds a booking that went through, or may have. Asking again drops the reply, booking
+ * included, and sends the customer's yes again, so the model would book the visit a second time: Maison has no duplicate
+ * check, only a cap of 3 open requests. The call's chip (and the visit's card) shows what happened, and the customer can
+ * still write.
  */
 export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boolean => {
   if (busy) return false;
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return false;
+  if (last.parts.some(mayHaveBooked)) return false;
   const end = last.parts.filter(shown).at(-1);
   return end?.type !== 'text';
 };
