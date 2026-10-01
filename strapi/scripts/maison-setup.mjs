@@ -149,6 +149,12 @@ const main = async () => {
   if (!overview.mcpEnabled) throw new Error('Strapi MCP is off. Set mcp.enabled in config/server.ts (MCP_ENABLED).');
   if (!overview.encryptionKeyConfigured) throw new Error('Set ENCRYPTION_KEY in strapi/.env, then restart Strapi.');
   if (!overview.lineSignIn?.configured) throw new Error('Set LINE_LOGIN_CHANNEL_ID in strapi/.env, then restart Strapi.');
+  // npm run mode:line and npm run mode:local switch the channel in strapi/.env, and Strapi reads it when it starts.
+  if (overview.lineSignIn.channelId !== process.env.LINE_LOGIN_CHANNEL_ID) {
+    throw new Error('Strapi signs customers in with another LINE channel than strapi/.env names. Restart Strapi.');
+  }
+  const lineMode = process.env.LINE_LOGIN_CHANNEL_ID !== '1234567890';
+  console.log(lineMode ? 'LINE sign-in: your LINE Login channel (LINE mode).' : 'LINE sign-in: the LIFF mock (local mode).');
 
   // 2. The catalog, and reading it over REST without credentials.
   const seeded = await api('POST', '/maison/demo/seed', {});
@@ -196,7 +202,11 @@ const main = async () => {
   });
 
   // 5. Where the app and the ops agent find them.
-  writeEnv(join(root, 'liff', '.env'), { NEXT_PUBLIC_STRAPI_URL: STRAPI_URL, NEXT_PUBLIC_MAISON_CLIENT_ID: app.clientId });
+  // In LINE mode the browser reaches Strapi through the app's own public origin, PUBLIC_URL, which proxies it.
+  writeEnv(join(root, 'liff', '.env'), {
+    NEXT_PUBLIC_STRAPI_URL: process.env.PUBLIC_URL || STRAPI_URL,
+    NEXT_PUBLIC_MAISON_CLIENT_ID: app.clientId,
+  });
   mkdirSync(join(root, 'strapi', '.tmp'), { recursive: true });
   const opsTokenFile = join(root, 'strapi', '.tmp', 'maison-ops-token');
   // `mode` applies only when the file is created, so tighten one left by an earlier run before writing into it.

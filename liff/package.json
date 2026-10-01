@@ -7,6 +7,7 @@
     "dev": "concurrently -k -n app,line-mock -c green,cyan \"next dev -H 127.0.0.1 -p 3003\" \"node --env-file-if-exists=.env scripts/mock-line-verify.mjs\"",
     "build": "next build",
     "start": "concurrently -k -n app,line-mock -c green,cyan \"next start -H 127.0.0.1 -p 3003\" \"node --env-file-if-exists=.env scripts/mock-line-verify.mjs\"",
+    "start:line": "node ../scripts/line-mode.mjs require-line && next build && next start -H 127.0.0.1 -p 3003",
     "typecheck": "tsc --noEmit",
     "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run",

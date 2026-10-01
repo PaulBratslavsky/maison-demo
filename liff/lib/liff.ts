@@ -7,12 +7,13 @@ export interface LiffState {
   getIdToken: () => string;
   locale: Locale;
   mock: boolean;
-  /** Inside LINE: a new LINE login, for when the token endpoint answers invalid_grant. It leaves the page. */
+  /** Inside LINE: a new LINE login, for when the token endpoint answers invalid_grant. It reloads the page. */
   signInAgain: () => void;
 }
 
 const LINE_USER_ID = /^U[0-9a-f]{32}$/;
 const DEMO_USER_KEY = 'maison.demoUser';
+const SIGNED_IN_AGAIN_AT = 'maison.signedInAgainAt';
 let ready: Promise<LiffState> | null = null;
 
 export const toLocale = (language: string | undefined): Locale =>
@@ -69,8 +70,19 @@ const init = async (): Promise<LiffState> => {
     locale: toLocale(liff.getAppLanguage()),
     mock: config.liffMock,
     signInAgain: () => {
-      liff.logout(); // drops the stale ID token
-      liff.login({ redirectUri: window.location.href });
+      // LINE's way: log out, then reload. Inside LINE, liff.init() signs in again by itself, and liff.login() can't be
+      // used there; in an external browser, init() above calls liff.login(). At most once a minute: refused again right
+      // after a new sign-in, the app and Strapi disagree about the LINE channel, and the screen shows the error instead.
+      // The same minute absorbs a second call for one refusal: maison.ts wraps both getToken() and refresh(), which
+      // share one exchange.
+      try {
+        if (Date.now() - Number(window.sessionStorage.getItem(SIGNED_IN_AGAIN_AT)) < 60_000) return;
+        window.sessionStorage.setItem(SIGNED_IN_AGAIN_AT, String(Date.now()));
+      } catch {
+        return; // without storage a loop can't be told apart: show the error
+      }
+      liff.logout(); // drops the expired ID token
+      window.location.reload();
     },
   };
 };

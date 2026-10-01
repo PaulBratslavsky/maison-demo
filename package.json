@@ -12,7 +12,12 @@
     "dev:strapi": "npm run develop --prefix strapi",
     "dev:app": "npm run dev --prefix liff",
     "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",
-    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check",
+    "mode": "node scripts/line-mode.mjs status",
+    "mode:line": "node scripts/line-mode.mjs line",
+    "mode:local": "node scripts/line-mode.mjs local",
+    "start:line": "npm run start:line --prefix liff",
+    "tunnel": "node scripts/line-tunnel.mjs",
+    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check && node --test scripts/line-mode.test.mjs scripts/line-tunnel.test.mjs",
     "test:e2e": "npm run test:e2e --prefix liff",
     "test:live": "npm run test:live --prefix liff"
   },

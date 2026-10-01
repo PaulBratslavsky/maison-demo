@@ -6,6 +6,7 @@ import {
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import type { Session } from './session';
+import { tunnelHeaders } from './tunnel';
 
 export interface ToolCallRecord {
   id: number;
@@ -59,7 +60,9 @@ const connectTo =
     const client = new Client({ name: 'maison-app', version: '1.0.0' });
     await client.connect(
       new StreamableHTTPClientTransport(new URL(`${strapiUrl}/mcp`), {
-        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+        requestInit: {
+          headers: { Authorization: `Bearer ${token}`, ...tunnelHeaders(strapiUrl) },
+        },
       })
     );
     return client;

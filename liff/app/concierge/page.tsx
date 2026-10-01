@@ -10,9 +10,11 @@ import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
 import { Spinner } from '@/components/spinner';
 import { needsRetry } from '@/lib/chat-retry';
+import { config } from '@/lib/config';
 import { COPY } from '@/lib/copy';
 import { getMaison } from '@/lib/maison';
 import { errorOf, errorText } from '@/lib/status';
+import { tunnelHeaders } from '@/lib/tunnel';
 
 const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'request_appointment', 'my_appointments'];
 
@@ -28,7 +30,10 @@ export default function ConciergePage() {
       new DefaultChatTransport<UIMessage>({
         api: '/api/concierge',
         // The customer's own session token, fetched per request. The route passes it on to Strapi.
-        headers: async () => ({ Authorization: `Bearer ${await (await getMaison()).session.getToken()}` }),
+        headers: async () => ({
+          Authorization: `Bearer ${await (await getMaison()).session.getToken()}`,
+          ...tunnelHeaders(config.strapiUrl),
+        }),
         body: () => ({ locale: localeRef.current }),
       }),
     []

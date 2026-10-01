@@ -1,3 +1,5 @@
+import { tunnelHeaders } from './tunnel';
+
 export const TOKEN_EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
 export const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
 
@@ -59,7 +61,10 @@ export const createSession = ({
       `${strapiUrl}/api/strapi-oauth-mcp-manager/oauth/token`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...tunnelHeaders(strapiUrl),
+        },
         body: new URLSearchParams({
           grant_type: TOKEN_EXCHANGE,
           client_id: clientId,
