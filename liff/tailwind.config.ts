@@ -28,12 +28,7 @@ export default {
       mono: ['ui-monospace', '"SF Mono"', 'Menlo', '"Zen Kaku Gothic New"', 'monospace'],
     },
     extend: {
-      colors: {
-        ...colors,
-        // Retired, and white, not cream. Only screens that Task RD2 rebuilds still say `ivory` (app/page.tsx among them,
-        // which this task leaves alone); without it their buttons' text would be ink on ink. RD2 deletes this line.
-        ivory: colors.paper,
-      },
+      colors,
       borderColor: { DEFAULT: colors.hairline },
       // The type scale, from the mockup: [size, { lineHeight, letterSpacing, fontWeight }].
       fontSize: {

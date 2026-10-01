@@ -24,6 +24,11 @@ strong {
   @apply font-medium;
 }
 
+/* A Japanese heading breaks between phrases, not inside a word: 店頭で stays whole. Where it's unknown, it breaks as before. */
+:lang(ja) :is(h1, h2) {
+  word-break: auto-phrase;
+}
+
 /*
  * LINE MINI App safe area (https://developers.line.biz/en/docs/line-mini-app/design/landscape/): 34px at the bottom in
  * normal mode, and 44px on the left and right and 21px at the bottom in landscape mode. The app's frame and its fixed
