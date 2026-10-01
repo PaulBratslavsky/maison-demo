@@ -49,7 +49,8 @@ const fakeStrapi = ({ locales = ['en'], defaultLocale = 'en', rows = [] } = {}) 
   };
   return {
     store,
-    db: { query: (uid) => (assert.equal(uid, HOME_PAGE), { count: async () => store.rows.length }) },
+    // The existence check must count every row, so a filter (published only, one locale) fails the test.
+    db: { query: (uid) => (assert.equal(uid, HOME_PAGE), { count: async (params) => (assert.equal(params, undefined, 'count takes no filter'), store.rows.length) }) },
     plugin: (name) => (assert.equal(name, 'i18n'), { service: (service) => (assert.equal(service, 'locales'), localesService) }),
     documents: (uid) => (assert.equal(uid, HOME_PAGE), documentService),
   };

@@ -20,7 +20,15 @@ export default {
    * which loads an ES module on Node 22.12 and later.
    */
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
-    const { writeStartingText }: StartingText = await import(join(strapi.dirs.app.api, 'home-page', 'starting-text.mjs'));
-    if (await writeStartingText(strapi)) strapi.log.info('Home page: wrote the starting text in en and ja, and published it.');
+    // The Home page is optional: without it the app shows its built-in text. So a failure here is logged, and Strapi
+    // starts anyway.
+    try {
+      const { writeStartingText }: StartingText = await import(join(strapi.dirs.app.api, 'home-page', 'starting-text.mjs'));
+      if (await writeStartingText(strapi)) strapi.log.info('Home page: wrote the starting text in en and ja, and published it.');
+    } catch (error) {
+      strapi.log.error(
+        `Home page: couldn't write the starting text (${(error as Error).message}). The app shows its built-in text until a Home page is published in the Content Manager.`
+      );
+    }
   },
 };
