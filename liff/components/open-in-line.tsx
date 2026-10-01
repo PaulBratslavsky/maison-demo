@@ -37,20 +37,20 @@ export function OpenInLine({ url, os }: { url: string; os: LineOs }) {
   }, [url]);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-5 pb-10 pt-8 text-center">
-      <h1 className="font-serif text-3xl">{t.title}</h1>
-      <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink/70">{openInLineBody(t, os)}</p>
-      {/* Black on white, 240 px square (at least 220), on a white tile so the code scans on any background. */}
-      <div className="mt-6 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-ink/10">
+    <section className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-5 pb-10 pt-10 text-center">
+      <h1 className="max-w-xs text-headline">{t.title}</h1>
+      <p className="mt-4 max-w-xs text-body text-graphite">{openInLineBody(t, os)}</p>
+      {/* Black on white, 240 px square (at least 220), on a white tile inside a hairline, so the code scans on any background. */}
+      <div className="mt-8 border border-hairline bg-paper p-3">
         {qr ? (
           <img src={qr} alt={t.alt} width={240} height={240} className="block h-60 w-60" />
         ) : (
           <div className="h-60 w-60" aria-hidden="true" />
         )}
       </div>
-      {qrFailed && <p className="mt-3 max-w-xs select-all break-all font-mono text-xs text-ink/70">{url}</p>}
+      {qrFailed && <p className="mt-3 max-w-xs select-all break-all font-mono text-[11px] text-graphite">{url}</p>}
       {onPhone(os) && (
-        <a href={url} className="mt-6 inline-flex min-h-[44px] items-center rounded-full bg-ink px-6 text-sm text-ivory">
+        <a href={url} className="btn-primary mt-8 w-full max-w-xs">
           {t.button}
         </a>
       )}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { COPY } from './copy';
 import { SessionError } from './session';
-import { errorDetail, errorOf, errorText, leadsHome, requestSentFor, statusLabel } from './status';
+import { errorDetail, errorOf, errorText, leadsHome, requestSentFor, statusLabel, statusTag } from './status';
 import type { Appointment } from './types';
 
 const visit = (overrides: Partial<Appointment> = {}): Appointment => ({
@@ -25,6 +25,24 @@ describe('statusLabel', () => {
   it('says confirmed, and whether the LINE confirmation went out', () => {
     expect(statusLabel(visit({ status: 'confirmed' }), 'en')).toBe('Confirmed');
     expect(statusLabel(visit({ status: 'confirmed', confirmationSent: true }), 'en')).toBe('Confirmed · LINE sent');
+  });
+});
+
+describe('statusTag (components/status-tag.tsx)', () => {
+  it('outlines a visit awaiting the boutique, in the words the e2e specs look for', () => {
+    expect(statusTag(visit(), 'en')).toEqual({ label: 'Awaiting the boutique', filled: false, lineSent: false });
+    expect(statusTag(visit(), 'ja')).toEqual({ label: 'ブティックの確認待ち', filled: false, lineSent: false });
+  });
+
+  it('fills a confirmed visit, and adds the check once the LINE confirmation went out', () => {
+    expect(statusTag(visit({ status: 'confirmed' }), 'en')).toEqual({ label: 'Confirmed', filled: true, lineSent: false });
+    expect(statusTag(visit({ status: 'confirmed', confirmationSent: true }), 'ja')).toEqual({ label: '確定', filled: true, lineSent: true });
+    expect([COPY.en.lineSent, COPY.ja.lineSent]).toEqual(['LINE sent', 'LINEで送信済み']);
+  });
+
+  it('shows no check on a request still awaiting the boutique, as statusLabel says nothing of LINE there', () => {
+    expect(statusTag(visit({ confirmationSent: true }), 'en')).toEqual({ label: 'Awaiting the boutique', filled: false, lineSent: false });
+    expect(statusLabel(visit({ confirmationSent: true }), 'en')).toBe('Awaiting the boutique');
   });
 });
 

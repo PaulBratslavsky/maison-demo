@@ -16,6 +16,16 @@ export const statusLabel = (visit: Appointment, locale: Locale) => {
   return visit.confirmationSent ? t.confirmationSent : t.confirmed;
 };
 
+/**
+ * A visit's status as a monochrome tag (components/status-tag.tsx): outlined while it awaits the boutique, filled ink
+ * once confirmed, and a small check when the LINE confirmation went out. The same words statusLabel uses.
+ */
+export const statusTag = (visit: Pick<Appointment, 'status' | 'confirmationSent'>, locale: Locale) => {
+  const t = COPY[locale];
+  const confirmed = visit.status === 'confirmed';
+  return { label: confirmed ? t.confirmed : t.requested, filled: confirmed, lineSent: confirmed && visit.confirmationSent };
+};
+
 /** Whether the list holds this reference as a request still waiting for the boutique: only then is "Request sent" true. */
 export const requestSentFor = (visits: Appointment[] | undefined, reference: string | null): boolean =>
   reference !== null && (visits ?? []).some((visit) => visit.reference === reference && visit.status === 'requested');

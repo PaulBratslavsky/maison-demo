@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 import { COPY } from '@/lib/copy';
 import type { Locale } from '@/lib/types';
@@ -8,53 +9,56 @@ import { useMaison } from './maison-provider';
 
 const LANGUAGES: Locale[] = ['en', 'ja'];
 
+/** The header's link up from a screen, shown as "‹ Voyage": a product names its collection this way. */
+export interface BackLink {
+  href: string;
+  label: string;
+}
+
 /**
- * Two rows at every width: the logo and the language switch, then the visits link and the agent-view switch. In
- * Japanese the second row's two controls take about 185 px; with the logo (136 px) and the switch (94 px), one row
- * would need about 450 px of content width, more than any phone has. Two rows hold from 320 px up (50 px to spare),
- * and switching the language never moves a control to another row. Every control is 44 px tall; the pills inside are
- * drawn smaller.
+ * Every screen's header: sticky under the safe area's top, white, 56 px, with a hairline under it. Three columns:
+ * - left: "My visits" on Home; elsewhere "‹" and the screen's parent, which a screen can name (`back`), or else a visit
+ *   leads up to My visits and anything else to Home;
+ * - centre: the wordmark, which leads Home;
+ * - right: the EN/JA switch, two real buttons; the chosen one is 500 weight and underlined, the other mist.
+ * The centre column is as wide as the wordmark (118 px) and the sides share the rest, so the wordmark stays centred
+ * whatever the sides hold: equal thirds, as in the mockup, would push it off centre at any width under 393 px. At 360 px
+ * each side gets 101 px, room for the two 44 px language buttons, and a long parent's name ends in an ellipsis. There's
+ * no room for a third 44 px control, so the agent view's switch sits under the header (Screen).
  */
-export function Header() {
-  const { locale, setLocale, agentView, setAgentView } = useMaison();
+export function Header({ back }: { back?: BackLink }) {
+  const { locale, setLocale } = useMaison();
   const t = COPY[locale];
+  const pathname = usePathname();
+  const up = back ?? (pathname.startsWith('/visits/') ? { href: '/visits', label: t.myVisits } : { href: '/', label: t.homeNav });
   return (
-    <header className="sticky top-0 z-10 border-b border-ink/10 bg-ivory/95 px-5 backdrop-blur">
-      <div className="flex h-11 items-center justify-between gap-3">
-        <Link href="/" className="flex h-11 items-center whitespace-nowrap font-serif text-2xl tracking-[0.3em]">
-          MAISON
+    <header className="sticky top-[env(safe-area-inset-top,0px)] z-10 grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-hairline bg-paper px-5">
+      {pathname === '/' && !back ? (
+        <Link href="/visits" className="flex h-11 min-w-0 max-w-full items-center justify-self-start text-nav uppercase">
+          <span className="truncate">{t.myVisits}</span>
         </Link>
-        <div role="group" aria-label={t.language} className="flex shrink-0 rounded-full border border-ink/25 p-0.5">
-          {LANGUAGES.map((option) => (
-            // The 44 px box overhangs the 30 px pill (negative margins), so the tap target stays full height.
-            <button
-              key={option}
-              type="button"
-              aria-pressed={locale === option}
-              onClick={() => setLocale(option)}
-              className="-my-[10px] flex h-11 min-w-[44px] items-center justify-center whitespace-nowrap"
-            >
-              <span className={`rounded-full px-2.5 py-1 text-[11px] tracking-[0.15em] ${locale === option ? 'bg-ink text-ivory' : 'text-ink/60'}`}>
-                {option.toUpperCase()}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex h-11 items-center justify-between gap-3">
-        <Link href="/visits" className="flex h-11 items-center whitespace-nowrap text-xs">
-          {t.myVisits}
+      ) : (
+        <Link href={up.href} className="flex h-11 min-w-0 max-w-full items-center gap-1 justify-self-start text-nav uppercase">
+          <span aria-hidden="true">‹</span>
+          <span className="truncate">{up.label}</span>
         </Link>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={agentView}
-          aria-label={t.agentView}
-          onClick={() => setAgentView(!agentView)}
-          className="flex h-11 shrink-0 items-center whitespace-nowrap"
-        >
-          <span className={`rounded-full border px-3 py-1.5 text-[11px] ${agentView ? 'border-ink bg-ink text-ivory' : 'border-ink/30'}`}>{t.agentView}</span>
-        </button>
+      )}
+      <Link href="/" className="wordmark flex h-11 items-center">
+        Maison
+      </Link>
+      {/* The 44 px buttons reach 6 px into the header's padding, so JA's letters end where the mockup's do. */}
+      <div role="group" aria-label={t.language} className="-mr-1.5 flex gap-1 justify-self-end">
+        {LANGUAGES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={locale === option}
+            onClick={() => setLocale(option)}
+            className={`h-11 min-w-[44px] text-nav ${locale === option ? 'font-medium text-ink underline underline-offset-4' : 'text-mist'}`}
+          >
+            {option.toUpperCase()}
+          </button>
+        ))}
       </div>
     </header>
   );

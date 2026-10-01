@@ -5,6 +5,8 @@ export const COPY = {
     pieces: (n: number) => `${n}点`,
     askConcierge: 'コンシェルジュに相談する',
     myVisits: 'ご来店予約',
+    // The header's link back to Home, after its ‹ (components/header.tsx).
+    homeNav: 'トップ',
     agentView: 'エージェントビュー',
     agentViewEmpty: 'この画面のツール呼び出しはまだありません。',
     language: '言語',
@@ -50,6 +52,8 @@ export const COPY = {
     requested: 'ブティックの確認待ち',
     confirmed: '確定',
     confirmationSent: '確定 · LINEで送信済み',
+    // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
+    lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
     noVisits: 'ご来店予約はまだありません。',
     visitNotFound: 'この予約は見つかりませんでした。',
@@ -85,6 +89,7 @@ export const COPY = {
     pieces: (n: number) => `${n} pieces`,
     askConcierge: 'Ask the concierge',
     myVisits: 'My visits',
+    homeNav: 'Home',
     agentView: 'Agent view',
     agentViewEmpty: 'No tool calls on this screen yet.',
     language: 'Language',
@@ -126,6 +131,7 @@ export const COPY = {
     requested: 'Awaiting the boutique',
     confirmed: 'Confirmed',
     confirmationSent: 'Confirmed · LINE sent',
+    lineSent: 'LINE sent',
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
     noVisits: 'No visits yet.',
     visitNotFound: "We couldn't find this visit.",

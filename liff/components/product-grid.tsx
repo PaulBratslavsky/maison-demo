@@ -6,12 +6,13 @@ import { COPY } from '@/lib/copy';
 import { mediaUrl, yen } from '@/lib/format';
 import type { Locale, ProductCard } from '@/lib/types';
 
+/** A catalog image, or its quiet wash while it loads and where there's none. */
 export function ProductImage({ url, alt, className = '' }: { url: string | null; alt: string; className?: string }) {
   const src = mediaUrl(url);
   return src ? (
-    <img src={src} alt={alt} className={`bg-neutral-200 object-cover ${className}`} />
+    <img src={src} alt={alt} className={`bg-wash object-cover ${className}`} />
   ) : (
-    <div aria-hidden className={`bg-neutral-200 ${className}`} />
+    <div aria-hidden className={`bg-wash ${className}`} />
   );
 }
 
