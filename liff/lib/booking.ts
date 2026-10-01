@@ -4,7 +4,7 @@ import type { BoutiqueInfo } from './types';
 /** Why a date can't be booked: the COPY key the sheet shows under the days. */
 export type DateProblem = 'chooseDate' | 'dateTooSoon';
 
-/** How many days the sheet offers, from tomorrow: two weeks, as far ahead as the concierge's calendar reaches. */
+/** How many days the sheet offers, from tomorrow: two weeks. The concierge's calendar covers 14 days from today, so the sheet reaches one day further. */
 export const BOOKING_DAYS = 14;
 
 /**

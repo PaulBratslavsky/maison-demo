@@ -127,7 +127,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 
 - **The local model** is Qwen3 14B with a 32k context: `ollama pull qwen3:14b`, then `ollama create qwen3-14b-32k -f Modelfile` with a `Modelfile` of `FROM qwen3:14b` and `PARAMETER num_ctx 32768`. Any Ollama model that calls tools works through `OLLAMA_MODEL`.
 - **Qwen3 is slower:** about 20–60 seconds a turn, where Claude takes seconds.
-- **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its chip reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
+- **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its tool line reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
 - **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
 - **Strapi runs no model.** The ops agent is Claude Desktop, on your own Claude account, and needs the internet.
@@ -198,7 +198,7 @@ Check it once:
 | Time | Beat | Do |
 |---|---|---|
 | 0:00–0:30 | UX | The app opens signed in with LINE. Browse Voyage, then the Weekender 50. Flip **Agent view**: every screen is an MCP tool call, the same tools an agent uses. |
-| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. Chips show each tool call, and cards show the pieces it found. The `Local · resolve_date` chip shows the Saturday it worked out. |
+| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line under the reply names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
 | 1:10–1:30 | Booking | Tap **Yes, please.** The request is sent and awaits the boutique. |
 | 1:30–1:50 | The request arrives | On the board, the request appears, created via `concierge`, with the customer masked. |
 | 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed. |
@@ -458,7 +458,7 @@ LINE's pages behind this:
 | Command | What it runs | Needs |
 |---|---|---|
 | `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
-| `npm run test:e2e` | Browser tests: booking and **My visits**, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
+| `npm run test:e2e` | Browser tests: booking and **My visits**, Home's headline from Strapi in English and Japanese, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
 | `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
