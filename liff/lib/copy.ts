@@ -47,6 +47,8 @@ export const COPY = {
     conciergeIntro: 'ギフト選びやご来店のご予約をお手伝いします。',
     placeholder: 'メッセージを入力',
     send: '送信',
+    // Under a reply that ended with nothing to read, beside `retry`'s button (the concierge page).
+    noReply: '返信を受け取れませんでした。',
     suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', 'はい、お願いします。'],
     results: (n: number) => `${n}件`,
     noProducts: 'このコレクションには、まだ商品がありません。',
@@ -113,6 +115,7 @@ export const COPY = {
     conciergeIntro: 'I can help you choose a gift and book a boutique visit.',
     placeholder: 'Write a message',
     send: 'Send',
+    noReply: 'No reply came back.',
     suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Yes, please.'],
     results: (n: number) => `${n} results`,
     noProducts: 'Nothing in this collection yet.',

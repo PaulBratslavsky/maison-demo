@@ -1,5 +1,7 @@
 import type { createMCPClient } from '@ai-sdk/mcp';
 import {
+  APICallError,
+  RetryError,
   convertToModelMessages,
   createUIMessageStreamResponse,
   isStepCount,
@@ -12,7 +14,7 @@ import {
 import { z } from 'zod';
 
 import { tokyoDays } from './format';
-import { WEEKDAY_IDS, resolveDate } from './resolve-date';
+import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
 
 /** Tells the Maison plugin a call came from the concierge. Informational; never used for identity. */
 export const SURFACE_HEADER = 'x-maison-surface';
@@ -48,7 +50,7 @@ Rules:
 1. Use the tools for every fact about products, prices, stock and opening hours. Never invent products, prices, availability or hours. Name products exactly as the tools return them. Call the tools you need in this reply and answer from their results: never say you will look something up and then stop.
 2. Search broadly first. For a gift, use search_products with the occasion (occasion "travel" for someone who travels), the budget (maxPriceJpy) and the boutique (inStockAt). Add a category or collection only when the customer asks for one. If a search finds nothing, drop a filter and search again before saying nothing fits.
 3. Before calling request_appointment, restate the boutique, the day (the weekday and date resolve_date returned), the time and the products in one short sentence, and wait for the customer's yes.
-4. Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "today", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment: weekday for a weekday on its own, relative only for exactly "today" or "tomorrow", date for any other day: a calendar date, or a day you read off the calendar, such as "the day after tomorrow" or "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques or look up opening hours, and don't suggest a day yourself: ask which day suits them when they want to visit. Use the date it returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean. Write requestedFor as YYYY-MM-DDTHH:MM:00+09:00: the date from resolve_date, then T and the time in 24-hour form (2 pm is T14:00:00+09:00).
+4. Call resolve_date only when the customer names a day, never to find out today's date, which is given above.${locale === 'ja' ? ' 日付が出ていないご相談では resolve_date を呼ばないでください。' : ''} Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment: weekday for a weekday name ("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"), relative for exactly "today", "tomorrow" or "day_after_tomorrow" ("the day after tomorrow", 明後日), date for any other day: a calendar date, or a day you read off the calendar, such as "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit. Don't look up opening hours unless the customer asks about them; then call find_boutiques without a date, which lists each boutique's weekly hours. Use the date it returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean. Write requestedFor as YYYY-MM-DDTHH:MM:00+09:00: the date from resolve_date, then T and the time in 24-hour form (2 pm is T14:00:00+09:00).
 5. Never say a visit is confirmed. Say it is requested, and that the boutique will confirm it on LINE. After request_appointment, restate the boutique, date and time from the tool's result (appointment.boutique.name and appointment.requestedFor), with the weekday resolve_date returned for that date, never from what the customer asked for.
 6. If a tool returns an error, follow its hint. not_found means a slug was wrong: look it up with the tool the hint names, never guess. An input validation error means fix the arguments and call again. Otherwise ask the customer.
 7. ${locale === 'ja' ? 'Reply in polite Japanese (keigo).' : 'Reply in English.'} Pass locale "${locale}" to every tool that takes one, so names match your reply and the app's cards. Keep replies to two or three short sentences of plain text: no markdown, no bold, no numbered or bulleted lists. The app shows product cards, so don't repeat their details.
@@ -58,28 +60,38 @@ Rules:
 /**
  * The local model fills in every input a tool has, sending null or "" for the ones it isn't using, and writes "Saturday"
  * for "saturday". Blanks mean "not given", and case and spaces don't matter. Without this, "exactly one of" rejected
- * nearly every call, and the model sometimes gave up after repeating it. A real value in two of them, or one that isn't
- * allowed ("the day after tomorrow" for relative), is still refused.
+ * nearly every call, and the model sometimes gave up after repeating it. A real value in two of them, one that isn't
+ * allowed ("the day after tomorrow" for relative), or under a name the tool doesn't have is still refused. The one name
+ * ignored is `locale`: the Maison tools take one, the instructions say to pass it to every tool that does, and the model
+ * does here too, though this tool already answers in the reply's language.
  */
 const tidyInput = (input: unknown) =>
   input !== null && typeof input === 'object' && !Array.isArray(input)
     ? Object.fromEntries(
         Object.entries(input)
           .map(([key, value]) => [key, typeof value === 'string' ? value.trim().toLowerCase() : value])
-          .filter(([, value]) => value !== null && value !== '')
+          .filter(([key, value]) => value !== null && value !== '' && key !== 'locale')
       )
     : input;
 
+/**
+ * A strict object: a key the tool doesn't have is refused, with its name, and not stripped. Stripping once turned the
+ * model's `week: "next"` into this week's Saturday, under a green chip, for 来週の土曜日.
+ */
 const resolveDateInput = z.preprocess(
   tidyInput,
   z
-    .object({
-      weekday: z.enum(WEEKDAY_IDS).optional().describe('A weekday on its own, as the customer said it, in lower case English: "Saturday" is "saturday". It gives the first such day after today.'),
+    .strictObject({
+      weekday: z.enum(WEEKDAY_IDS).optional().describe('Any day the customer names by its weekday, such as "Saturday" or 土曜日, in lower case English: "saturday". Use it even when that day is only two days away. It gives the first such day after today, or with week "next" the one in next week.'),
+      week: z.enum(WEEK_IDS).optional().describe('Only with weekday. "this" for "Saturday" or "this Saturday": the coming one. "next" for "next week\'s Saturday" (来週の土曜日): that weekday in next week, which runs from Monday to Sunday.'),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.').optional().describe('A calendar date, YYYY-MM-DD, to get its weekday.'),
-      relative: z.enum(['today', 'tomorrow']).optional().describe('Only when the customer says exactly "today" or "tomorrow". "The day after tomorrow" is not "tomorrow": give that as a date.'),
+      relative: z.enum(RELATIVE_IDS).optional().describe('Only when the customer says exactly "today", "tomorrow" or "the day after tomorrow". A weekday name such as "Saturday" or 土曜日 is never relative: use weekday.'),
     })
     .refine((input) => [input.weekday, input.date, input.relative].filter((part) => part !== undefined).length === 1, {
-      message: 'Give exactly one of weekday, date or relative.',
+      message: 'Give exactly one of weekday, date or relative, and leave the others out. A weekday name such as "Saturday" or 土曜日 is weekday, with week "this" or "next".',
+    })
+    .refine((input) => input.week === undefined || input.weekday !== undefined, {
+      message: 'week goes with weekday: give both, such as weekday "saturday" and week "next".',
     })
 );
 
@@ -90,7 +102,7 @@ const resolveDateInput = z.preprocess(
 const resolveDateTool = (locale: 'ja' | 'en', now: Date) =>
   tool({
     description:
-      'Works out which day the customer means, on Tokyo\'s calendar, so you never work out a date or weekday yourself. Call it only when the customer has named a day, never to look up today\'s date or to suggest a day, and call it before find_boutiques with a date and before request_appointment. Give exactly one of: weekday (a weekday on its own, such as "Saturday": the first such day after today), relative ("today" or "tomorrow"), or date (YYYY-MM-DD, to get its weekday). It returns the date as YYYY-MM-DD, the weekday\'s name in the customer\'s language, and isPast, whether that day has already gone.',
+      'Works out which day the customer means, on Tokyo\'s calendar, so you never work out a date or weekday yourself. Call it only when the customer has named a day, never to look up today\'s date or to suggest a day, and call it before find_boutiques with a date and before request_appointment. Give exactly one of: weekday (a weekday name, with week "this" for "Saturday" or "next" for "next week\'s Saturday", 来週の土曜日), relative ("today", "tomorrow" or "day_after_tomorrow", 明後日), or date (YYYY-MM-DD, to get its weekday). It returns the date as YYYY-MM-DD, the weekday\'s name in the customer\'s language, and isPast, whether that day has already gone.',
     inputSchema: resolveDateInput,
     execute: async (query) => resolveDate(query, locale, now),
   });
@@ -104,10 +116,14 @@ export interface ConciergeDeps {
   now?: () => Date;
 }
 
-/** What the customer sees when the model fails. An unreachable model is named, with the fix. */
+/**
+ * What the customer sees when the model fails. A model call that can't connect is named, with the fix. Only a model
+ * call is: a tool that can't reach Strapi also fails with "fetch failed", and says that, not that the model is down.
+ */
 export const describeModelError = (error: unknown, modelLabel?: string): string => {
   const message = error instanceof Error ? error.message : 'The concierge had a problem.';
-  if (/Cannot connect to API|fetch failed|ECONNREFUSED/i.test(message)) {
+  const modelCall = APICallError.isInstance(error) || RetryError.isInstance(error);
+  if (modelCall && /Cannot connect to API|fetch failed|ECONNREFUSED/i.test(message)) {
     return `The concierge's model${modelLabel ? ` (${modelLabel})` : ''} isn't reachable. Start Ollama, or set ANTHROPIC_API_KEY in liff/.env, then restart the app.`;
   }
   return message;
@@ -124,7 +140,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
   }
   const body = (await request.json().catch(() => null)) as { messages?: UIMessage[]; locale?: string } | null;
   const messages = Array.isArray(body?.messages) ? body.messages.slice(-MAX_MESSAGES) : [];
-  const oversized = messages.some((message) => message.parts?.some((part) => part.type === 'text' && part.text.length > MAX_CHARS));
+  // The customer's own messages are limited. What the concierge wrote earlier (sent back with each turn) isn't: a long reply must not refuse the next one.
+  const oversized = messages.some((message) => message.role === 'user' && message.parts?.some((part) => part.type === 'text' && part.text.length > MAX_CHARS));
   if (messages.length === 0 || oversized) {
     return Response.json({ error: `Send 1 to ${MAX_MESSAGES} messages of up to ${MAX_CHARS} characters.` }, { status: 400 });
   }
@@ -155,7 +172,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       onEnd: close,
       onAbort: close,
       onError: async ({ error }) => {
-        console.error('[concierge]', error);
+        // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).
+        console.error('[concierge]', describeModelError(error, deps.modelLabel), error);
         await close();
       },
     });

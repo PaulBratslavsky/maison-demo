@@ -19,6 +19,9 @@ export default {
         // The stage laptop: a wide screen with a mouse or trackpad, where the app sits in a phone-sized frame
         // (components/phone-frame.tsx). A phone in landscape is wide too, but has no fine pointer, so it stays full screen.
         stage: { raw: '(min-width: 500px) and (hover: hover) and (pointer: fine)' },
+        // A phone turned to landscape: under 500 px high. The concierge hides its suggestion row there once the conversation
+        // has begun, so the conversation gets the room. (The stage laptop is tall, and keeps it: "Yes, please." is a tap.)
+        short: { raw: '(orientation: landscape) and (max-height: 500px)' },
       },
     },
   },

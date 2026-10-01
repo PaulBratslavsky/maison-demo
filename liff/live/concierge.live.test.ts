@@ -14,7 +14,7 @@ import { POST } from '@/app/api/concierge/route';
 import { COPY } from '@/lib/copy';
 import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
-import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, sseEvents, strapiUp, weekdaysIn } from './support';
+import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, sseEvents, strapiUp, weekdaysIn } from './support';
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.AI_GATEWAY_API_KEY;
@@ -60,6 +60,15 @@ describe("the booking test's reply checks", () => {
     expect(datesIn('That is 2026-10-03, a Saturday', 2026)).toEqual(['2026-10-03']);
     expect(datesIn('requestedFor 2026-10-03T14:00:00+09:00', 2026)).toEqual(['2026-10-03']);
     expect(datesIn('Saturday at 2 pm in Ginza: the Weekender 50 for ¥385,000 and 3 other pieces', 2026)).toEqual([]);
+  });
+
+  it('tells a visit that is confirmed from one that is only requested', () => {
+    for (const reply of ['Your visit is confirmed.', 'Your visit has been confirmed for Saturday.', 'It is now confirmed.', 'Both visits are already confirmed.', 'The visit WAS confirmed.']) {
+      expect(saysConfirmed(reply), reply).toBe(true);
+    }
+    for (const reply of ['Your visit has been requested. The boutique will confirm it on LINE.', 'It is requested, and not yet confirmed.', 'Awaiting confirmation from the boutique.', 'Please confirm the time.']) {
+      expect(saysConfirmed(reply), reply).toBe(false);
+    }
   });
 
   it('finds the weekday names an English reply mentions', () => {
@@ -171,6 +180,9 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(booked, `a visit was requested. ${trace}`).toBeDefined();
     expect(booked?.input.requestedFor, `it asks for ${saturday} at 14:00. ${trace}`).toMatch(on);
     expect(booked?.output?.structuredContent.appointment.requestedFor, `the visit is on ${saturday} at 14:00. ${trace}`).toMatch(on);
+
+    // The visit is requested, not confirmed: the boutique confirms it, on LINE.
+    expect(saysConfirmed(replies[1]), `the second reply says the visit is confirmed. ${trace}`).toBe(false);
 
     // And what it tells the customer, before the yes and after the booking, names no other date or weekday.
     const year = Number(saturday.slice(0, 4));

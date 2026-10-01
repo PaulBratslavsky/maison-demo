@@ -53,6 +53,12 @@ export const datesIn = (text: string, year: number): string[] => {
   return dates;
 };
 
+/**
+ * Whether an English reply says a visit is confirmed ("is confirmed", "has been confirmed", "is now confirmed"). A
+ * request is only requested: the boutique confirms it, on LINE. "will confirm" and "not yet confirmed" are fine.
+ */
+export const saysConfirmed = (text: string): boolean => /\b(?:is|are|was|has been|have been)(?: now| already)? confirmed\b/i.test(text);
+
 /** The weekday names an English reply mentions ("Saturday", "Saturdays"), as written in WEEKDAYS. */
 export const weekdaysIn = (text: string): string[] => WEEKDAYS.filter((name) => new RegExp(`\\b${name}s?\\b`, 'i').test(text));
 

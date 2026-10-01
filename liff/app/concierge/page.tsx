@@ -9,6 +9,7 @@ import { ErrorDetail } from '@/components/error-detail';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
 import { Spinner } from '@/components/spinner';
+import { needsRetry } from '@/lib/chat-retry';
 import { COPY } from '@/lib/copy';
 import { getMaison } from '@/lib/maison';
 import { errorOf, errorText } from '@/lib/status';
@@ -32,10 +33,12 @@ export default function ConciergePage() {
       }),
     []
   );
-  const { messages, sendMessage, status, error } = useChat({ transport });
+  const { messages, sendMessage, regenerate, status, error } = useChat({ transport });
   const [draft, setDraft] = useState('');
   const busy = status === 'submitted' || status === 'streaming';
   const failure = error ? errorOf(error) : null;
+  // A reply that ended with nothing to read (tool calls, then no words): offer to ask again.
+  const retry = needsRetry(messages, busy);
 
   // The conversation scrolls inside the screen. It follows the newest words as they stream in, until the customer
   // scrolls up to read; sending a message, or scrolling back to the end, makes it follow again.
@@ -93,6 +96,22 @@ export default function ConciergePage() {
               })}
             </div>
           ))}
+          {retry && (
+            <div className="flex items-center gap-3 text-xs text-mist">
+              <p>{t.noReply}</p>
+              <button
+                type="button"
+                data-testid="retry-reply"
+                onClick={() => {
+                  following.current = true;
+                  void regenerate();
+                }}
+                className="min-h-[44px] shrink-0 text-ink underline"
+              >
+                {t.retry}
+              </button>
+            </div>
+          )}
           {busy && <Spinner label={t.loading} className="py-2" />}
           {failure && (
             <div role="alert" className="text-sm text-red-800">
@@ -102,8 +121,9 @@ export default function ConciergePage() {
           )}
         </div>
       </div>
-      <div className="shrink-0 space-y-2 border-t border-ink/10 bg-ivory px-5 pb-[calc(0.75rem+var(--line-safe-bottom))] pt-3">
-        <div className="flex gap-2 overflow-x-auto">
+      <div className="flex shrink-0 flex-col gap-2 border-t border-ink/10 bg-ivory px-5 pb-[calc(0.75rem+var(--line-safe-bottom))] pt-3">
+        {/* On a phone in landscape the row goes once the conversation has begun, to leave it room (tailwind.config.ts). A flex gap, not space-y: the hidden row leaves no margin behind. */}
+        <div className={`flex gap-2 overflow-x-auto ${messages.length > 0 ? 'short:hidden' : ''}`}>
           {t.suggestions.map((suggestion) => (
             <button
               key={suggestion}
