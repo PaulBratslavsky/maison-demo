@@ -6,7 +6,7 @@ A fictional luxury house whose catalog and appointments are served to people and
 - **The human gate:** staff confirm requests on the Maison board in the Strapi admin
 - **AX for operations:** an ops agent in Claude Desktop that prepares, and can send, the customer's LINE confirmation
 
-LINE sign-in is simulated with LINE's official LIFF mock and a local stand-in for LINE's ID token verify endpoint. Everything else is the production path. The same app also runs inside LINE on your own LIFF app, through one tunnel (option B, tested). It follows LINE's MINI App design guidelines, so QBurst can run it as a LINE MINI App. The demo was built for "Building the AI-Powered Connected Experience" (QBurst and LY Corporation, Tokyo, 7 October 2026), where QBurst presents the LINE MINI App side (see "Handoff").
+LINE sign-in is simulated with LINE's official LIFF mock and a local stand-in for LINE's ID token verify endpoint. Everything else is the production path. The same app also runs inside LINE on your own LIFF app, through one tunnel (option B). It follows LINE's MINI App design guidelines, so QBurst can run it as a LINE MINI App. The demo was built for "Building the AI-Powered Connected Experience" (QBurst and LY Corporation, Tokyo, 7 October 2026), where QBurst presents the LINE MINI App side (see "Handoff").
 
 ## Quick start
 
@@ -90,10 +90,18 @@ curl "$STRAPI/api/maison/boutiques?productSlugs=weekender-50&date=<YYYY-MM-DD>&l
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
 
-**The customer's routes** take the session the MCP tools take: the `access_token` from the token endpoint (see "Handoff").
+**The customer's routes** take the session the MCP tools take: the `access_token` from the token endpoint (see "Handoff"). You can get a session yourself with `curl`: the verify mock accepts `valid.` and a LINE user ID (`U` and 32 lowercase hex digits) as an ID token. That works in local mode only, because in LINE mode LINE checks the ID token. The client ID is `NEXT_PUBLIC_MAISON_CLIENT_ID`, which `npm run setup` writes to `liff/.env`.
 
 ```bash
-# $SESSION: a customer's access_token
+STRAPI=http://localhost:1338
+# Local mode only: a session for a mock customer. The body is a form, as the app sends it (liff/lib/session.ts).
+curl -s "$STRAPI/api/strapi-oauth-mcp-manager/oauth/token" \
+  -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+  -d 'client_id=<client id from liff/.env>' \
+  -d subject_token=valid.U0123456789abcdef0123456789abcdef \
+  -d subject_token_type=urn:ietf:params:oauth:token-type:id_token
+SESSION='<the access_token it answered>'
+
 curl -X POST "$STRAPI/api/maison/appointments" \
   -H "Authorization: Bearer $SESSION" -H 'Content-Type: application/json' \
   -d '{"boutique":"ginza","productSlugs":["weekender-50"],"requestedFor":"<YYYY-MM-DD>T14:00:00+09:00","note":"A gift","locale":"en"}'
@@ -149,7 +157,7 @@ console.log("Added maison-ops to", file);
 
 - Run it from the repo root. It keeps the rest of the file.
 - Run it again after each `npm run setup`, which mints a new ops token, and restart Claude Desktop.
-- **What the connector offers:** the tools `pending_confirmations` and `record_confirmation`, and the prompt `send_pending_confirmations`. Strapi's own `log` tool also appears while Strapi runs in development. The token holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.
+- **What the connector offers:** the tools `pending_confirmations` and `record_confirmation`, and the prompt `send_pending_confirmations`, which Claude Desktop may list by its title, "Send pending appointment confirmations". Strapi's own `log` tool also appears while Strapi runs in development. The token holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.
 
 Check it once:
 1. Book a visit in the app, and confirm it on the board.
@@ -284,7 +292,7 @@ The message's button opens the visit in the app, at `MAISON_LIFF_URL` followed b
 
 ## Option B: the real app inside LINE
 
-The stage runs on the LIFF mock. Option B runs the same app inside LINE on your phone, signed in by LINE: your own LINE Login channel and LIFF app, on one public https origin from ngrok. It was tested this way before the talk. The mock stays the default, and the stage's fallback.
+The stage runs on the LIFF mock. Option B runs the same app inside LINE on your phone, signed in by LINE: your own LINE Login channel and LIFF app, on one public https origin from ngrok. Option B was run on a phone, inside LINE, on 1 October 2026: LINE sign-in, the catalog, a booking through the concierge, and staff confirmation on the board. The mock stays the default, and the stage's fallback.
 
 How it fits together:
 - **One origin.** ngrok forwards your domain to the app on :3003, a production build. The app passes three of Strapi's paths on to it: `/mcp`, the token endpoint (`/api/strapi-oauth-mcp-manager/oauth/token`) and `/uploads`. Strapi, with its admin, stays on your laptop. `MAISON_APP_ORIGIN` isn't needed, because the browser never calls Strapi on another origin.
@@ -337,8 +345,8 @@ Who can sign in:
 - **While your LINE Login channel is in Developing,** only its Admins and Testers can (LINE Developers Console → your channel → **Roles**).
 - **Publishing the channel opens it to anyone with LINE.** Every visit then reaches your laptop through the tunnel, the concierge answers on your model or API key, and each visitor becomes a customer in the demo database:
   - **Each sign-in** stores a session in oauth-mcp-manager: the visitor's full LINE user ID (`line:U…`), a hash of the session token (not the token), the app's client ID, and when the session expires (an hour on) and was last used. Its hourly cleanup deletes expired sessions.
-  - **Each visit request** stores a Maison appointment: the same full LINE user ID, the boutique, the products, the date and time, the visitor's note if they wrote one, and a reference. It stays until you reset the demo appointments.
-  - **Nothing else:** no name, picture or email, and not the ID token. Strapi checks the ID token with LINE and keeps only the user ID. Staff see it masked (`line:U4af…88`), and the admin API never returns it.
+  - **Each visit request** stores a Maison appointment: the same full LINE user ID, the boutique, the products, the date and time, the visitor's note if they wrote one, a reference, and where it was made (`createdVia`: `app`, `concierge` or `web`). It stays until you reset the demo appointments. When the ops agent records a delivery, a confirmation log row keeps the reference, sent or failed, the time and the agent's note, with no LINE user ID. Reset deletes it too.
+  - **No other personal data:** no name, picture or email, and not the ID token. Strapi checks the ID token with LINE and keeps only the user ID. Staff see it masked (`line:U4af…88`), and the admin API never returns it. The ops agent gets the full ID from `pending_confirmations`, to send the LINE message (see "Handoff").
 - **The QR image** holds your LIFF ID and stays out of git: `liff/line/qr/` is in `.gitignore`.
 
 `npm run tunnel` refuses unless all of these hold:
@@ -370,7 +378,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
 3. The MINI App, and any agent working for that customer, calls the Maison tools on Strapi `/mcp`.
 4. Staff confirm in Strapi, on the Maison board. The ops agent delivers the ready-made LINE message: through the Messaging API today, and as a MINI App service message once verified.
 
-**What's ready** (send this to QBurst before the event):
+**What's ready:**
 
 - **This repo.** Clone it and run it (see "Quick start"). Option B runs it inside LINE, and "Run it as a LINE MINI App" below runs it on your MINI App channel.
 - **Token endpoint:** `POST {STRAPI}/api/strapi-oauth-mcp-manager/oauth/token`, as a form:
@@ -396,7 +404,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
 
 ### Run it as a LINE MINI App
 
-A LINE MINI App is a LIFF app on a LINE MINI App channel, so this app runs as one with its LIFF ID and channel ID changed. Under LINE's MINI App Policy, organizations with a Japanese corporate number can create one. The presenter, outside Japan, couldn't, so the demo was tested on a LINE Login channel (option B).
+A LINE MINI App is a LIFF app on a LINE MINI App channel, so this app runs as one with its LIFF ID and channel ID changed. Who can create a MINI App channel depends on LINE's MINI App Policy and your region, for example: an unverified MINI App can be created by an organization with a Japanese corporate number or a Taiwan or Thailand tax ID, an individual business owner in Japan, or an individual in Japan, Taiwan or Thailand. The presenter couldn't create one from his region, so the demo runs on a LINE Login channel (option B), and that path was run on a phone inside LINE on 1 October 2026.
 
 In your provider, create both channels in the same provider. Otherwise user IDs won't match, and confirmations can't be delivered.
 1. **A LINE MINI App channel,** with Japan as its region:
@@ -433,6 +441,7 @@ LINE's pages behind this:
 - design: the [icon](https://developers.line.biz/en/docs/line-mini-app/design/line-mini-app-icon/), the [safe area](https://developers.line.biz/en/docs/line-mini-app/design/landscape/) and the [loading icon](https://developers.line.biz/en/docs/line-mini-app/design/loading-icon/)
 - [settings shown to users](https://developers.line.biz/en/docs/line-mini-app/develop/configure-console/), and the [console guide](https://developers.line.biz/en/docs/line-mini-app/discover/console-guide/)
 - [permanent links](https://developers.line.biz/en/docs/line-mini-app/develop/permanent-links/), and [external browsers](https://developers.line.biz/en/docs/line-mini-app/develop/external-browser/)
+- the [performance guidelines](https://developers.line.biz/en/docs/line-mini-app/develop/performance-guidelines/), behind the Lighthouse score
 - the [LINE MINI App Policy](https://terms2.line.me/LINE_MINI_App?lang=en)
 
 ## Tests
@@ -441,7 +450,7 @@ LINE's pages behind this:
 |---|---|---|
 | `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
 | `npm run test:e2e` | Browser tests: booking and **My visits**, the language a booking sends, Osaka's closed day, a cleared date and today's date, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
-| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama and `npm run setup`, in local mode; it's skipped otherwise |
+| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
 - **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Reset demo appointments before going on stage.
@@ -499,7 +508,7 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 - **Staff** get an admin role with the Maison actions they need (`catalog.read`, `appointments.review`, `appointments.confirm`) instead of Super Admin.
 - **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
-- **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for an app that calls Strapi on another origin.
+- **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.
 - **Bind to 127.0.0.1** unless a proxy in front needs otherwise. The demo does it for Strapi, the app and the verify mock.
 - **The Public role reads the catalog over REST,** because `npm run setup` grants it the four catalog actions, on every run. If your catalog isn't public, take them away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop the grant from the setup script.
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
