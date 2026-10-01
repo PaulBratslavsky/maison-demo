@@ -1,5 +1,12 @@
 export const COPY = {
   ja: {
+    // The Home page's built-in text (lib/home-page.ts): the same words as Strapi's starting text for the Home page
+    // single type. Home shows Strapi's published text, and these when Strapi can't give it.
+    home: {
+      eyebrow: '心を込めて選ぶ、贈り物',
+      headline: 'ふさわしい一品を。店頭で、お手に取って。',
+      ctaLabel: 'コンシェルジュに相談する',
+    },
     tagline: '旅と贈り物のメゾン',
     collections: 'コレクション',
     pieces: (n: number) => `${n}点`,
@@ -84,6 +91,11 @@ export const COPY = {
     },
   },
   en: {
+    home: {
+      eyebrow: 'Gifts, chosen with care',
+      headline: 'Find the right piece. See it in person.',
+      ctaLabel: 'Ask the concierge',
+    },
     tagline: 'A house of travel and gifts',
     collections: 'Collections',
     pieces: (n: number) => `${n} pieces`,
