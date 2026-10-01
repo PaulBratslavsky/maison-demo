@@ -9,6 +9,7 @@ import { AgentViewSwitch } from './agent-view-switch';
 import { ErrorNote } from './error-note';
 import { Header, type BackLink } from './header';
 import { useMaison } from './maison-provider';
+import { McpToolsButton } from './mcp-tools-button';
 import { OpenInLine } from './open-in-line';
 import { Spinner } from './spinner';
 
@@ -22,7 +23,9 @@ const BAR_HEIGHT = 48 + 2 * BAR_PADDING;
  * screen's parent for the header's link, when it's closer than the header's own guess (a product's collection).
  *
  * Under the header, one quiet line: the screen's MCP tools on the left, and on the right the agent view's switch, which
- * the header has no room for on a phone. On a page it scrolls away with the content; on a `fill` screen it stays.
+ * the header has no room for on a phone. On a page it scrolls away with the content; on a `fill` screen it stays. A screen
+ * with a `title` (the concierge) gets a title bar there instead, as in the mockup: the title, the screen's one h1, and an
+ * "N MCP tools" button whose panel lists the tools and holds the switch. Either way, one switch per screen.
  *
  * By default the page scrolls. `fill` is for a screen that scrolls inside itself with a bar pinned under it (the
  * concierge): it makes a column as tall as the whole screen, whose children are the column's flex items. The column runs
@@ -35,6 +38,7 @@ const BAR_HEIGHT = 48 + 2 * BAR_PADDING;
 export function Screen({
   name,
   tools,
+  title,
   fill = false,
   back,
   bar,
@@ -42,6 +46,7 @@ export function Screen({
 }: {
   name: string;
   tools: string[];
+  title?: string;
   fill?: boolean;
   back?: BackLink;
   bar?: ReactNode;
@@ -65,7 +70,13 @@ export function Screen({
       }
     >
       <Header back={back} />
-      {status !== 'open-in-line' && (
+      {status !== 'open-in-line' && title && (
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-hairline px-5 py-1">
+          <h1 className="text-[15px] font-normal tracking-[0.04em]">{title}</h1>
+          <McpToolsButton tools={tools} />
+        </div>
+      )}
+      {status !== 'open-in-line' && !title && (
         <div className="flex h-11 shrink-0 items-center justify-between gap-4 px-5">
           <div className="flex min-w-0 items-center font-mono text-[11px] text-mist">
             <span aria-hidden="true" className="shrink-0 whitespace-pre">

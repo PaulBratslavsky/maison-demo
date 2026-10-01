@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRealDate, listOf, mediaUrl, nextSaturday, personalizationKind, sizeCm, timeSlots, tokyoDays, tomorrow, visitTime, yen } from './format';
+import { dayLabel, isRealDate, listOf, mediaUrl, nextSaturday, personalizationKind, sizeCm, timeSlots, tokyoDays, tomorrow, visitTime, yen } from './format';
 
 // Every date below is an instant, so the results don't depend on the machine's time zone. The suite passes under
 // TZ=America/Los_Angeles and TZ=Asia/Tokyo alike. Tokyo is UTC+9 all year: noon in Tokyo is 03:00Z.
@@ -65,6 +65,13 @@ describe('format', () => {
     // Month and year ends, and a leap day.
     expect(tokyoDays(4, new Date('2026-12-30T03:00:00Z')).map((day) => day.date)).toEqual(['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
     expect(tokyoDays(3, new Date('2028-02-28T03:00:00Z')).map((day) => day.date)).toEqual(['2028-02-28', '2028-02-29', '2028-03-01']);
+  });
+
+  it("names a day for the booking sheet's chips, as the mockup does: its weekday and the day of the month", () => {
+    expect(dayLabel('2026-10-03', 'en')).toBe('Sat 3');
+    expect(dayLabel('2026-10-03', 'ja')).toBe('3日(土)');
+    expect(dayLabel('2026-10-31', 'en')).toBe('Sat 31');
+    expect(dayLabel('2026-11-01', 'ja')).toBe('1日(日)');
   });
 
   it("writes a piece's size in centimetres, width × height × depth, and nothing when the catalog has none", () => {

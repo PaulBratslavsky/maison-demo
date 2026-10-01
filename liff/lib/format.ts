@@ -23,6 +23,13 @@ export const personalizationKind = (kind: string, locale: Locale): string => {
   return Object.hasOwn(names, kind) ? names[kind] : kind.replace(/-/g, ' ');
 };
 
+const dayFormats: Record<Locale, Intl.DateTimeFormat> = {
+  ja: new Intl.DateTimeFormat('ja-JP', { timeZone: 'UTC', day: 'numeric', weekday: 'short' }),
+  en: new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', weekday: 'short' }),
+};
+/** A day (YYYY-MM-DD) on the booking sheet's chips: "Sat 3", or "3日(土)". The date is a calendar day, so no time zone moves it. */
+export const dayLabel = (date: string, locale: Locale): string => dayFormats[locale].format(new Date(`${date}T00:00:00Z`));
+
 /** A piece's size for its details list, width × height × depth: "50 × 29 × 22 cm". Null when the catalog has none. */
 export const sizeCm = (dimensions: { width: number; height: number; depth: number } | null): string | null =>
   dimensions ? `${dimensions.width} × ${dimensions.height} × ${dimensions.depth} cm` : null;

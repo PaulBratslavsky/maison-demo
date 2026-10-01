@@ -18,6 +18,12 @@ body {
   }
 }
 
+/* Bold is Jost's 500, the heaviest weight the app loads: the browser's 700 would be a smeared, synthesized one. */
+b,
+strong {
+  @apply font-medium;
+}
+
 /*
  * LINE MINI App safe area (https://developers.line.biz/en/docs/line-mini-app/design/landscape/): 34px at the bottom in
  * normal mode, and 44px on the left and right and 21px at the bottom in landscape mode. The app's frame and its fixed
@@ -83,13 +89,21 @@ body {
   }
 
   .chip[aria-pressed='true'],
-  .chip[aria-checked='true'],
+  .chip[aria-checked='true'] {
+    @apply border-ink bg-ink text-paper;
+  }
+
+  /* On its own: a browser without :has() drops the whole rule it's in, and the two above must stay. */
   .chip:has(input:checked) {
     @apply border-ink bg-ink text-paper;
   }
 
   .chip:has(input:disabled) {
     @apply cursor-not-allowed bg-wash text-mist;
+  }
+
+  .chip:focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-ink;
   }
 
   .chip:has(input:focus-visible) {

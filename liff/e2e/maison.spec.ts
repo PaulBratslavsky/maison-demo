@@ -5,23 +5,44 @@ import { nextWeekday } from './support';
 const SECOND_CUSTOMER = `U${'b'.repeat(32)}`;
 const JAPANESE_CUSTOMER = `U${'c'.repeat(32)}`;
 
-/** Today's date on Tokyo's calendar, as the app counts it (YYYY-MM-DD: en-CA writes dates that way). */
-const tokyoToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
+const WEEKENDER = /Weekender|ウィークエンダー/;
 
-const openWeekender = async (page: Page) => {
+/** Tomorrow's date on Tokyo's calendar, as the app counts it (YYYY-MM-DD: en-CA writes dates that way; Tokyo has no DST). */
+const tokyoTomorrow = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+/** How long from now until a minute past Tokyo's next midnight, in ms. Tokyo is UTC+9 all year. */
+const pastTokyoMidnight = () => {
+  const day = 24 * 60 * 60 * 1000;
+  return day - ((Date.now() + 9 * 60 * 60 * 1000) % day) + 60_000;
+};
+
+/** Opens a piece of the Voyage collection from Home. */
+const openProduct = async (page: Page, name: RegExp) => {
   await page.goto('/');
   await page.getByTestId('collection-card').filter({ hasText: /Voyage|ヴォヤージュ/ }).click();
-  await page.getByTestId('product-card').filter({ hasText: /Weekender|ウィークエンダー/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(/Weekender|ウィークエンダー/);
+  await page.getByTestId('product-card').filter({ hasText: name }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(name);
+};
+
+// The booking sheet's controls, by their accessible names: a radio group per boutique, day and time. The names are
+// anchored: the Japanese note's label, ブティックへのメッセージ, also holds ブティック.
+const boutiqueRadio = (page: Page, name: RegExp) => page.getByLabel(/^(Boutique|ブティック)$/).getByRole('radio', { name });
+const timeChip = (page: Page, time: string) => page.getByLabel(/^(Time|時間)$/).getByRole('radio', { name: time });
+/** A day's chip (YYYY-MM-DD): "Sat 10" in English, "10日(土)" in Japanese. The sheet offers the two weeks from tomorrow. */
+const dayChip = (page: Page, date: string) => {
+  const day = Number(date.slice(8));
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const en = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday];
+  return page.getByLabel(/^(Date|日付)$/).getByRole('radio', { name: new RegExp(`^(${en} ${day}|${day}日\\(${'日月火水木金土'[weekday]}\\))$`) });
 };
 
 /** Books the Weekender at Ginza on the next Saturday at 14:00, and returns the new visit's reference (the URL has it). */
 const bookWeekender = async (page: Page) => {
-  await openWeekender(page);
+  await openProduct(page, WEEKENDER);
   await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
-  await page.getByLabel(/Boutique|ブティック/).selectOption('ginza');
-  await page.getByLabel(/Date|日付/).fill(nextWeekday(6));
-  await page.getByLabel(/Time|時間/).selectOption('14:00');
+  await boutiqueRadio(page, /Ginza|銀座/).check();
+  await dayChip(page, nextWeekday(6)).click();
+  await timeChip(page, '14:00').click();
   await page.getByRole('button', { name: /Send request|リクエストを送る/ }).click();
   await expect(page).toHaveURL(/\/visits\?ref=APT-\d{4}/);
   const reference = new URL(page.url()).searchParams.get('ref');
@@ -29,9 +50,9 @@ const bookWeekender = async (page: Page) => {
   return reference as string;
 };
 
-/** Opens the booking sheet on the Weekender, and waits for the answer to its first availability check: the Time select. */
-const openSheet = async (page: Page) => {
-  await openWeekender(page);
+/** Opens the booking sheet on a piece, the Weekender by default, and waits for the answer to its first availability check: the Time chips. */
+const openSheet = async (page: Page, name: RegExp = WEEKENDER) => {
+  await openProduct(page, name);
   await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
   await expect(page.getByLabel(/Time|時間/)).toBeVisible();
 };
@@ -115,30 +136,36 @@ test("the booking sheet sends the customer's language: a request made in Japanes
 
 test('Osaka is closed on Tuesdays, and the sheet says so before any request', async ({ page }) => {
   const calls = toolCalls(page);
-  await openSheet(page);
-  await page.getByLabel(/Boutique|ブティック/).selectOption('osaka');
-  await page.getByLabel(/Date|日付/).fill(nextWeekday(2));
+  // A piece Osaka has: the sheet doesn't offer a boutique without the piece (the next test), and Osaka has no Weekender.
+  await openSheet(page, /Cabin Case|キャビン・ケース/);
+  await boutiqueRadio(page, /Osaka|大阪/).check();
+  await dayChip(page, nextWeekday(2)).click();
   await expect(page.getByText(/Closed on this day|この日は休業日です/)).toBeVisible();
   await expectNothingSent(page, calls);
 });
 
-test('a cleared date asks for one, and sends no request', async ({ page }) => {
-  const calls = toolCalls(page);
+test("a boutique without the piece can't be chosen, and says so", async ({ page }) => {
+  // Osaka has no Weekender in stock (the demo's seed): its radio is disabled, its name says why, and Ginza stays chosen.
   await openSheet(page);
-  expect(namesOf(calls), 'the sheet checked its first date').toContain('find_boutiques');
-  const before = [...calls];
-  await page.getByLabel(/Date|日付/).fill('');
-  await expect(page.getByText(/^(Please choose a date\.|日付をお選びください。)$/)).toBeVisible();
-  await expectNothingSent(page, calls);
-  expect(calls, 'no tool is called for a date that is not there').toEqual(before);
+  const osaka = boutiqueRadio(page, /Osaka|大阪/);
+  await expect(osaka).toBeDisabled();
+  await expect(osaka).toHaveAccessibleName(/not in stock|在庫なし/);
+  await expect(boutiqueRadio(page, /Ginza|銀座/)).toBeChecked();
+  await expect(page.getByRole('button', { name: /Send request|リクエストを送る/ })).toBeEnabled();
 });
 
-test("today's date asks for a later one, and sends no request", async ({ page }) => {
+test('a day that has become today asks for a later one, and sends no request', async ({ page }) => {
+  // The chips start tomorrow, so a day becomes too soon only when Tokyo's midnight passes with the sheet open on it. The
+  // page's clock runs as usual until the test moves it past midnight.
+  await page.clock.install();
   const calls = toolCalls(page);
   await openSheet(page);
-  expect(namesOf(calls), 'the sheet checked its first date').toContain('find_boutiques');
+  await page.getByLabel(/^(Date|日付)$/).getByRole('radio').first().click();
+  // Tomorrow's availability is back: the sheet asked for it, then showed its times.
+  await expect.poll(() => argumentsOf(calls, 'find_boutiques').at(-1)?.date).toBe(tokyoTomorrow());
+  await expect(page.getByLabel(/Time|時間/)).toBeVisible();
   const before = [...calls];
-  await page.getByLabel(/Date|日付/).fill(tokyoToday());
+  await page.clock.fastForward(pastTokyoMidnight());
   await expect(page.getByText(/^(Please choose a date from tomorrow on\.|明日以降の日付をお選びください。)$/)).toBeVisible();
   await expectNothingSent(page, calls);
   expect(calls, 'no tool is called for a date that is too soon').toEqual(before);
