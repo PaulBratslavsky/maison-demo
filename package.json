@@ -12,7 +12,7 @@
     "dev:strapi": "npm run develop --prefix strapi",
     "dev:app": "npm run dev --prefix liff",
     "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",
-    "test": "npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check"
+    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
