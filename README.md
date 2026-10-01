@@ -141,7 +141,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 
 ### Claude Desktop, the ops agent
 
-On macOS, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit Claude Desktop with ⌘Q and open it again. Start Strapi before you open Claude Desktop. `mcp-remote` connects to Strapi when Claude Desktop starts it, and exits for good if Strapi doesn't answer; if that happens, quit and reopen Claude Desktop. This command adds the server without printing the token:
+On macOS, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit Claude Desktop with ⌘Q and open it again. This command adds the server without printing the token:
 
 ```bash
 node -e '
@@ -157,6 +157,7 @@ console.log("Added maison-ops to", file);
 ```
 
 - Run it from the repo root. It keeps the rest of the file.
+- Start Strapi before you open Claude Desktop. `mcp-remote` connects to Strapi when Claude Desktop starts it, and exits for good if Strapi doesn't answer; if that happens, quit and reopen Claude Desktop.
 - Run it again after each `npm run setup`, which mints a new ops token, and restart Claude Desktop.
 - **`npx` by its absolute path.** Claude Desktop doesn't start servers with your shell's `PATH`, so when Node comes from nvm or another version manager, a bare `npx` isn't found. The command writes the path of the `npx` beside the `node` that runs it (the one `which npx` prints in that terminal), and a `PATH` in `env` that starts with its folder, because `npx` runs on `node` from the `PATH`. Run it again after you change Node versions.
 - **What the connector offers:** the tools `pending_confirmations` and `record_confirmation`, and the prompt `send_pending_confirmations`, which Claude Desktop may list by its title, "Send pending appointment confirmations". Strapi's own `log` tool also appears while Strapi runs in development. The token holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.

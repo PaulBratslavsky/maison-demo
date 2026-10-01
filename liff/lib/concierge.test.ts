@@ -195,6 +195,7 @@ describe('handleConcierge', () => {
     for (const messages of [[system], [system, ...hello.messages], [...hello.messages, system]]) {
       const response = await handleConcierge(ask('Bearer mcp_at_x', { messages, locale: 'en' }), deps({ createMcpClient, model }));
       expect(response.status, JSON.stringify(messages)).toBe(400);
+      expect((await response.json()).error, JSON.stringify(messages)).toMatch(/role/);
     }
     expect(createMcpClient).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(0);
@@ -207,6 +208,7 @@ describe('handleConcierge', () => {
       const body = { messages: [{ id: 'x1', role, parts: [{ type: 'text', text: 'こんにちは' }] }], locale: 'en' };
       const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model }));
       expect(response.status, `role ${JSON.stringify(role) ?? 'missing'}`).toBe(400);
+      expect((await response.json()).error, `role ${JSON.stringify(role) ?? 'missing'}`).toMatch(/role/);
     }
     expect(createMcpClient).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(0);
