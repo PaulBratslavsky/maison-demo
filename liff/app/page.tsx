@@ -29,7 +29,8 @@ export default function Home() {
         {collections.data?.collections.map((collection) => (
           <li key={collection.slug}>
             <Link href={`/collections/${collection.slug}`} data-testid="collection-card" className="block">
-              <ProductImage url={collection.heroImageUrl} alt={collection.name} className="aspect-[4/3] w-full" />
+              {/* Decorative: the link's name is the collection name below it. */}
+              <ProductImage url={collection.heroImageUrl} alt="" className="aspect-[4/3] w-full" />
               <div className="mt-2 flex items-baseline justify-between">
                 <p className="font-serif text-2xl">{collection.name}</p>
                 <p className="text-xs text-mist">{t.pieces(collection.productCount)}</p>

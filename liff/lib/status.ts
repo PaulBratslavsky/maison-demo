@@ -1,6 +1,14 @@
+import { config } from './config';
 import { COPY } from './copy';
 import type { ToolError } from './mcp';
+import { SessionError } from './session';
 import type { Appointment, Locale } from './types';
+
+/** An error as a screen shows it: a tool's error, or one thrown on the way (errorOf). */
+export interface ScreenError extends ToolError {
+  /** For a sign-in error: the wait the server named (Retry-After), in seconds. */
+  retryAfterSeconds?: number | null;
+}
 
 export const statusLabel = (visit: Appointment, locale: Locale) => {
   const t = COPY[locale];
@@ -8,6 +16,50 @@ export const statusLabel = (visit: Appointment, locale: Locale) => {
   return visit.confirmationSent ? t.confirmationSent : t.confirmed;
 };
 
-/** A tool error (or a sign-in error) in the customer's words. Unknown codes show the tool's own message. */
-export const errorText = (error: Pick<ToolError, 'code' | 'message'>, locale: Locale): string =>
-  (COPY[locale].errors as Record<string, string>)[error.code] ?? error.message;
+/** Whether the list holds this reference as a request still waiting for the boutique: only then is "Request sent" true. */
+export const requestSentFor = (visits: Appointment[] | undefined, reference: string | null): boolean =>
+  reference !== null && (visits ?? []).some((visit) => visit.reference === reference && visit.status === 'requested');
+
+/**
+ * A thrown error as the screens show it. A sign-in error keeps its OAuth code and any wait the server named. A failed
+ * fetch is a TypeError in every browser ("Failed to fetch", "Load failed"), so it's `network`. Anything else is `error`.
+ */
+export const errorOf = (error: unknown): ScreenError => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof SessionError) return { code: error.code, message, hint: '', retryAfterSeconds: error.retryAfterSeconds };
+  return { code: error instanceof TypeError ? 'network' : 'error', message, hint: '' };
+};
+
+/**
+ * An error in the customer's words. An unknown code, or a name Object inherits such as `constructor`, gets the generic
+ * copy: nothing falls back to the raw message, which is in English and written for developers or agents. When the
+ * server named a wait (Retry-After), the copy says how long it is.
+ */
+export const errorText = (error: Pick<ScreenError, 'code' | 'retryAfterSeconds'>, locale: Locale): string => {
+  const t = COPY[locale];
+  const errors: Readonly<Record<string, string>> = t.errors;
+  const text = Object.hasOwn(errors, error.code) ? errors[error.code] : errors.error;
+  return error.retryAfterSeconds ? `${text} ${t.tryAgainIn(error.retryAfterSeconds)}` : text;
+};
+
+/** The likely fix for a setup or connection failure, for the mock-mode technical line. */
+const MOCK_FIXES: Readonly<Record<string, string>> = {
+  network: `Is Strapi running on ${config.strapiUrl}? Open the app at http://localhost:3003, not 127.0.0.1.`,
+  invalid_grant: 'In mock mode this means the app and Strapi disagree about the LINE channel. Run `npm run setup` and restart the app.',
+  invalid_client: "The app's OAuth client isn't active in Strapi. Run `npm run setup` and restart the app.",
+};
+
+/**
+ * The technical line under an error's copy in mock mode (the stage and development): the raw message, plus the likely
+ * fix when there's a known one. Null when there's nothing to say.
+ */
+export const errorDetail = (error: Pick<ScreenError, 'code' | 'message'>): string | null => {
+  const fix = Object.hasOwn(MOCK_FIXES, error.code) ? MOCK_FIXES[error.code] : '';
+  return [error.message, fix].filter(Boolean).join(' — ') || null;
+};
+
+/**
+ * Whether an error leads home instead of offering a retry, because trying again can't fix it. That's always so for
+ * not_found, and for invalid_input when the input came from the URL (a slug): there's nothing typed to correct.
+ */
+export const leadsHome = (code: string, fromUrl: boolean): boolean => code === 'not_found' || (fromUrl && code === 'invalid_input');

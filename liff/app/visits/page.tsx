@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
+import { Header } from '@/components/header';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
+import { Spinner } from '@/components/spinner';
 import { StatusNote } from '@/components/status-note';
 import { COPY } from '@/lib/copy';
 import { visitTime } from '@/lib/format';
-import { statusLabel } from '@/lib/status';
+import { requestSentFor, statusLabel } from '@/lib/status';
 import type { Appointment } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
 
@@ -21,7 +23,7 @@ function Visits() {
   return (
     <Screen name="visits" tools={['my_appointments']}>
       <h1 className="px-5 pb-4 pt-6 font-serif text-4xl">{t.myVisits}</h1>
-      {highlight && <p className="mx-5 mb-4 rounded bg-gold/15 p-3 text-sm">{t.visitRequested}</p>}
+      {requestSentFor(visits.data?.appointments, highlight) && <p className="mx-5 mb-4 rounded bg-gold/15 p-3 text-sm">{t.visitRequested}</p>}
       <StatusNote loading={visits.loading} error={visits.error} retry={visits.retry} />
       {visits.data?.appointments.length === 0 && <p className="px-5 text-sm text-mist">{t.noVisits}</p>}
       <ul className="space-y-3 px-5">
@@ -47,9 +49,20 @@ function Visits() {
   );
 }
 
+/** The prerendered shell, which LINE's confirmation link opens first: the header and LINE's loading icon. */
+function VisitsLoading() {
+  const { locale } = useMaison();
+  return (
+    <div className="pb-32">
+      <Header />
+      <Spinner label={COPY[locale].loading} className="min-h-[50vh]" />
+    </div>
+  );
+}
+
 export default function VisitsPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<VisitsLoading />}>
       <Visits />
     </Suspense>
   );

@@ -14,7 +14,8 @@ import type { Product } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
 
 export default function ProductPage() {
-  const { slug } = useParams<{ slug: string }>();
+  // Slugs are lower case: /products/Weekender-50 is the Weekender 50 too.
+  const slug = useParams<{ slug: string }>().slug.toLowerCase();
   const { locale } = useMaison();
   const t = COPY[locale];
   const product = useTool<{ product: Product }>('product', 'view_product', { slug, locale });
@@ -23,7 +24,7 @@ export default function ProductPage() {
 
   return (
     <Screen name="product" tools={['view_product', 'find_boutiques', 'request_appointment']}>
-      <StatusNote loading={product.loading} error={product.error} retry={product.retry} />
+      <StatusNote loading={product.loading} error={product.error} retry={product.retry} fromUrl />
       {item && (
         <article>
           <ProductImage url={item.images[0]?.url ?? null} alt={item.images[0]?.alt ?? item.name} className="mt-3 aspect-square w-full" />

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import { useMaison } from '@/components/maison-provider';
-import { toolErrorOf, type ToolError } from './mcp';
-import { SessionError } from './session';
+import { toolErrorOf } from './mcp';
+import { errorOf, type ScreenError } from './status';
 
 /**
  * Calls one Maison tool once the customer is signed in, and again whenever `args` change.
@@ -10,29 +10,29 @@ import { SessionError } from './session';
  */
 export function useTool<T>(screen: string, name: string, args: Record<string, unknown> | null) {
   const { status, maison } = useMaison();
-  const [state, setState] = useState<{ loading: boolean; data: T | null; error: ToolError | null }>({ loading: true, data: null, error: null });
+  const [state, setState] = useState<{ loading: boolean; data: T | null; error: ScreenError | null }>({ loading: true, data: null, error: null });
   const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify(args);
 
   useEffect(() => {
     if (status !== 'ready' || !maison || args === null) return;
     let cancelled = false;
-    setState((previous) => ({ ...previous, loading: true }));
+    // A retry shows the spinner, not the error it's retrying.
+    setState((previous) => ({ ...previous, loading: true, error: null }));
     maison.callTool(screen, name, args).then(
       (result) => {
         if (!cancelled) setState({ loading: false, data: (result.structuredContent as T | undefined) ?? null, error: toolErrorOf(result) });
       },
-      (error: Error) => {
+      (error: unknown) => {
         // A sign-in problem keeps its OAuth code (temporarily_unavailable, invalid_grant), so the screen can say what to do.
-        const code = error instanceof SessionError ? error.code : 'network';
-        if (!cancelled) setState({ loading: false, data: null, error: { code, message: error.message, hint: '' } });
+        if (!cancelled) setState({ loading: false, data: null, error: errorOf(error) });
       }
     );
     return () => {
       cancelled = true;
     };
     // `key` stands in for `args`, whose identity changes on every render.
-  }, [status, maison, screen, name, key, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, maison, screen, name, key, attempt]);
 
   return { ...state, retry: () => setAttempt((n) => n + 1) };
 }

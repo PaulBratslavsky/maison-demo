@@ -38,6 +38,9 @@ export const COPY = {
     send: '送信',
     suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', 'はい、お願いします。'],
     results: (n: number) => `${n}件`,
+    noProducts: 'このコレクションには、まだ商品がありません。',
+    // Follows an error's copy when the server named the wait (Retry-After).
+    tryAgainIn: (seconds: number) => (seconds < 60 ? `目安は${seconds}秒ほどです。` : `目安は${Math.ceil(seconds / 60)}分ほどです。`),
     // What people see for a tool's error code. The tools' hints are written for agents, so screens don't show them.
     errors: {
       not_found: 'お探しのものは見つかりませんでした。',
@@ -48,6 +51,9 @@ export const COPY = {
       not_signed_in: 'LINEでサインインしてください。',
       invalid_grant: 'LINEでもう一度サインインしてください。',
       temporarily_unavailable: 'LINEのサインインを確認できませんでした。しばらくしてからもう一度お試しください。',
+      network: 'ただいまMaisonに接続できません。通信環境をご確認のうえ、もう一度お試しください。',
+      server_error: 'Maisonで問題が発生しました。もう一度お試しください。',
+      error: '問題が発生しました。もう一度お試しください。',
     },
   },
   en: {
@@ -89,15 +95,24 @@ export const COPY = {
     send: 'Send',
     suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Yes, please.'],
     results: (n: number) => `${n} results`,
+    noProducts: 'Nothing in this collection yet.',
+    // Follows an error's copy when the server named the wait (Retry-After).
+    tryAgainIn: (seconds: number) => {
+      const [n, unit] = seconds < 60 ? [seconds, 'second'] : [Math.ceil(seconds / 60), 'minute'];
+      return `That's about ${n} ${unit}${n === 1 ? '' : 's'}.`;
+    },
     errors: {
       not_found: "We couldn't find that.",
       invalid_input: 'Please check what you entered.',
       boutique_closed: 'The boutique is closed at that time.',
       in_the_past: 'Please choose a later time.',
-      too_many_open_requests: 'You have as many visits waiting for a boutique as you can. You can request another once one is confirmed.',
+      too_many_open_requests: "You've reached the limit of visit requests waiting for a boutique. You can request another once one is confirmed.",
       not_signed_in: 'Please sign in with LINE.',
       invalid_grant: 'Please sign in with LINE again.',
       temporarily_unavailable: "LINE sign-in couldn't be checked. Please try again in a moment.",
+      network: "We can't reach Maison right now. Check the connection and try again.",
+      server_error: 'Something went wrong at Maison. Please try again.',
+      error: 'Something went wrong. Please try again.',
     },
   },
 } as const;

@@ -6,14 +6,20 @@ import { config } from '@/lib/config';
 import { toLocale } from '@/lib/liff';
 import { getMaison, onToolCall, type Maison } from '@/lib/maison';
 import type { ToolCallRecord } from '@/lib/mcp';
-import { SessionError } from '@/lib/session';
+import { errorOf, type ScreenError } from '@/lib/status';
 import type { Locale } from '@/lib/types';
 
 interface MaisonContext {
   status: 'starting' | 'ready' | 'error';
+  /** The message of a failed sign-in, or null. */
   error: string | null;
-  /** The OAuth error code of a failed sign-in (temporarily_unavailable, invalid_grant), or null. */
+  /**
+   * The code of a failed sign-in, or null: an OAuth error (temporarily_unavailable, invalid_grant), `network` when
+   * Strapi can't be reached, or `error`.
+   */
   errorCode: string | null;
+  /** A failed sign-in as the screens show it (errorText), with any wait the server named, or null. */
+  signInError: ScreenError | null;
   maison: Maison | null;
   locale: Locale;
   calls: ToolCallRecord[];
@@ -22,13 +28,13 @@ interface MaisonContext {
   retrySignIn: () => void;
 }
 
-type SignIn = Pick<MaisonContext, 'status' | 'error' | 'errorCode' | 'maison'>;
+type SignIn = Pick<MaisonContext, 'status' | 'signInError' | 'maison'>;
 
 const Context = createContext<MaisonContext | null>(null);
 const AGENT_VIEW_KEY = 'maison.agentView';
 
 export function MaisonProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SignIn>({ status: 'starting', error: null, errorCode: null, maison: null });
+  const [state, setState] = useState<SignIn>({ status: 'starting', signInError: null, maison: null });
   const [attempt, setAttempt] = useState(0);
   const [calls, setCalls] = useState<ToolCallRecord[]>([]);
   const [agentView, setAgentViewState] = useState(false);
@@ -44,13 +50,14 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'starting', error: null, errorCode: null, maison: null });
+    setState({ status: 'starting', signInError: null, maison: null });
     getMaison().then(
       (maison) => {
-        if (!cancelled) setState({ status: 'ready', error: null, errorCode: null, maison });
+        if (!cancelled) setState({ status: 'ready', signInError: null, maison });
       },
-      (error: Error) => {
-        if (!cancelled) setState({ status: 'error', error: error.message, errorCode: error instanceof SessionError ? error.code : null, maison: null });
+      (error: unknown) => {
+        // A failed fetch (Strapi unreachable) is `network`; a token-endpoint refusal keeps its OAuth code.
+        if (!cancelled) setState({ status: 'error', signInError: errorOf(error), maison: null });
       }
     );
     return () => {
@@ -69,7 +76,16 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
   const retrySignIn = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<MaisonContext>(
-    () => ({ ...state, locale: state.maison?.locale ?? toLocale(config.demoLocale), calls, agentView, setAgentView, retrySignIn }),
+    () => ({
+      ...state,
+      error: state.signInError?.message ?? null,
+      errorCode: state.signInError?.code ?? null,
+      locale: state.maison?.locale ?? toLocale(config.demoLocale),
+      calls,
+      agentView,
+      setAgentView,
+      retrySignIn,
+    }),
     [state, calls, agentView, setAgentView, retrySignIn]
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
