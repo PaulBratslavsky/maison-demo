@@ -39,6 +39,11 @@ export const main = async (args, { root = ROOT, outDir = join(root, 'liff', 'lin
     log('No QR code: give a page path, like /visits or /products/weekender-50, without ?, #, :// or spaces.');
     return 1;
   }
+  // A URL parser reads \ as / for https, so /visits\..\.. is /visits/../.. to it: liff.line.me itself, which climbs() can't see.
+  if (path.includes('\\')) {
+    log('No QR code: give a page path without backslashes, like /visits.');
+    return 1;
+  }
   if (climbs(path)) {
     log('No QR code: give a page path without .. segments, like /visits.');
     return 1;

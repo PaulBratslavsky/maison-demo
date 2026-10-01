@@ -83,13 +83,14 @@ test('refuses a path with ?, #, :// or a space, and writes nothing', async () =>
   }
 });
 
-test('refuses a second argument, an option, and a .. segment, each with its reason, and writes nothing', async () => {
+test('refuses a second argument, an option, a .. segment and a backslash, each with its reason, and writes nothing', async () => {
   for (const [args, reason] of [
     [['/visits', '/products/weekender-50'], /one page path at most/],
     [['--help'], /takes no options/],
     // A .. would climb out of the app's LIFF link: https://liff.line.me/<LIFF ID>/.. is liff.line.me itself.
     [['/visits/../..'], /without \.\. segments/],
     [['/visits/%2E%2e/admin'], /without \.\. segments/], // as a URL reads it too
+    [['/visits\\..\\..'], /without backslashes/], // a URL parser reads \ as / for https: /visits/../.., so liff.line.me itself
   ]) {
     const demoDir = demo(`LINE_MODE_LIFF_ID=${LIFF_ID}\n`);
     const { code, out } = await run(args, demoDir);
