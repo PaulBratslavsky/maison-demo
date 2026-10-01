@@ -1,0 +1,15 @@
+import appointment from './appointment';
+import boutique from './boutique';
+import collection from './collection';
+import notification from './notification';
+import product from './product';
+import stockLevel from './stock-level';
+
+export default {
+  collection,
+  product,
+  boutique,
+  'stock-level': stockLevel,
+  appointment,
+  notification,
+};
