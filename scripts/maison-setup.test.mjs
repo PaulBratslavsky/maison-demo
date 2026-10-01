@@ -41,7 +41,7 @@ const fakeStrapi = async () => {
 // The script reads STRAPI_URL when it loads, so the fake Strapi comes first.
 const strapi = await fakeStrapi();
 process.env.STRAPI_URL = strapi.url;
-const { call, writeEnv } = await import(SETUP);
+const { call, grantPublicReads, writeEnv } = await import(SETUP);
 
 const node = promisify(execFile);
 
@@ -141,4 +141,82 @@ test('without a .env, copies .env.example, then writes the values into it, reada
   );
   assert.equal(fileMode(file), 0o600);
   assert.equal(readFileSync(join(file, '..', '.env.example'), 'utf8'), example, '.env.example is left as it was');
+});
+
+const CATALOG = ['plugin::maison.collections.find', 'plugin::maison.products.find', 'plugin::maison.products.findOne', 'plugin::maison.boutiques.find'];
+const HOME_PAGE_FIND = 'api::home-page.home-page.find';
+// What a fresh database's Public role allows: users-permissions' own sign-in and sign-up routes.
+const AUTH = ['plugin::users-permissions.auth.callback', 'plugin::users-permissions.auth.connect', 'plugin::users-permissions.auth.register'];
+// Actions Strapi has that the Public role never gets from setup.
+const OTHERS = [
+  'api::home-page.home-page.update',
+  'api::home-page.home-page.delete',
+  'plugin::maison.customer.requestAppointment',
+  'plugin::maison.customer.myAppointments',
+  'plugin::users-permissions.user.me',
+];
+
+/**
+ * users-permissions' admin routes for roles, as setup calls them, with the Public role allowing `enabled`. A role's tree
+ * lists every action Strapi has (`actions`), each enabled or not. PUT takes the tree as the role's whole set, as
+ * users-permissions' updateRole does: an action that isn't enabled in it is gone. With `keeps`, the role keeps only the
+ * enabled actions it accepts, for an update that doesn't go as sent.
+ */
+const usersPermissions = ({ actions, enabled, keeps = () => true }) => {
+  const fake = { enabled: new Set(enabled), puts: [] };
+  const tree = () => {
+    const permissions = {};
+    for (const action of actions) {
+      const [type, controller, name] = action.split('.');
+      ((permissions[type] ??= { controllers: {} }).controllers[controller] ??= {})[name] = { enabled: fake.enabled.has(action), policy: '' };
+    }
+    return permissions;
+  };
+  fake.api = async (method, path, body) => {
+    if (method === 'GET' && path === '/users-permissions/roles') return { roles: [{ id: 1, type: 'authenticated' }, { id: 2, type: 'public' }] };
+    if (method === 'GET' && path === '/users-permissions/roles/2') return { role: { id: 2, name: 'Public', description: 'Default role given to unauthenticated user.', permissions: tree() } };
+    if (method === 'PUT' && path === '/users-permissions/roles/2') {
+      fake.puts.push(body);
+      fake.enabled = new Set(
+        Object.entries(body.permissions)
+          .flatMap(([type, { controllers }]) =>
+            Object.entries(controllers).flatMap(([controller, names]) => Object.entries(names).filter(([, { enabled }]) => enabled).map(([name]) => `${type}.${controller}.${name}`))
+          )
+          .filter(keeps)
+      );
+      return { ok: true };
+    }
+    throw new Error(`Unexpected call: ${method} ${path}`);
+  };
+  return fake;
+};
+
+test("lets the Public role read the catalog and the Home page, keeps what it allowed, and sends nothing when it's done", async () => {
+  const actions = [...CATALOG, HOME_PAGE_FIND, ...AUTH, ...OTHERS];
+  const strapi = usersPermissions({ actions, enabled: [...AUTH, CATALOG[0]] });
+  assert.equal(await grantPublicReads(strapi.api), true);
+  assert.equal(strapi.puts.length, 1);
+  assert.equal(strapi.puts[0].name, 'Public', 'the role keeps its name');
+  assert.deepEqual([...strapi.enabled].sort(), [...AUTH, ...CATALOG, HOME_PAGE_FIND].sort());
+
+  assert.equal(await grantPublicReads(strapi.api), false);
+  assert.equal(strapi.puts.length, 1, 'a second run sends nothing');
+});
+
+test("says what to do when Strapi has no Home page, and changes nothing", async () => {
+  const strapi = usersPermissions({ actions: [...CATALOG, ...AUTH], enabled: AUTH });
+  await assert.rejects(grantPublicReads(strapi.api), { message: `Strapi has no ${HOME_PAGE_FIND}: it runs without the Home page (strapi/src/api/home-page). Restart Strapi.` });
+  assert.deepEqual(strapi.puts, []);
+});
+
+test("checks the role after the update: it fails, naming the action, if the Home page's find is still off or an action it had is gone", async () => {
+  const actions = [...CATALOG, HOME_PAGE_FIND, ...AUTH, ...OTHERS];
+  const homeStaysOff = usersPermissions({ actions, enabled: AUTH, keeps: (action) => action !== HOME_PAGE_FIND });
+  await assert.rejects(grantPublicReads(homeStaysOff.api), {
+    message: `The Public role isn't as expected after the update: it still doesn't allow ${HOME_PAGE_FIND}. Check it under Settings > Roles > Public.`,
+  });
+  const authGone = usersPermissions({ actions, enabled: AUTH, keeps: (action) => action !== AUTH[0] });
+  await assert.rejects(grantPublicReads(authGone.api), {
+    message: `The Public role isn't as expected after the update: it no longer allows ${AUTH[0]}. Check it under Settings > Roles > Public.`,
+  });
 });

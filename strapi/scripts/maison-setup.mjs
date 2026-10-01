@@ -1,6 +1,7 @@
 // Sets up the Maison demo on a running Strapi. Safe to run again: it replaces what it made before.
 //   1. on a fresh database, registers the demo admin (DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD) as its first admin
-//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's four catalog actions
+//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's four catalog actions,
+//      and the Home page's find, for the text on the app's Home screen
 //   3. (re)creates the admin tokens "Maison customer" and "Maison ops"
 //   4. (re)creates the OAuth client "Maison app" (customer sign-in with LINE, mapped to "Maison customer").
 //      oauth-mcp-manager allows one active LINE client, so any other active one is deactivated first.
@@ -68,14 +69,17 @@ export const writeEnv = (file, values) => {
 };
 
 /**
- * What a website may read without credentials: Maison's catalog over REST (GET /api/maison/collections, /products,
- * /products/:slug and /boutiques). Booking and "my visits" there take the customer's LINE session, whatever a role holds.
+ * What anyone may read over REST without credentials:
+ * - Maison's catalog, for websites (GET /api/maison/collections, /products, /products/:slug and /boutiques). Booking and
+ *   "my visits" there take the customer's LINE session, whatever a role holds.
+ * - the Home page's published text (GET /api/home-page), which the app's server reads.
  */
-const PUBLIC_CATALOG_ACTIONS = [
+const PUBLIC_ACTIONS = [
   'plugin::maison.collections.find',
   'plugin::maison.products.find',
   'plugin::maison.products.findOne',
   'plugin::maison.boutiques.find',
+  'api::home-page.home-page.find',
 ];
 
 /** Every action a role's permission tree enables, as "plugin::maison.products.find": its type, controller and action joined by dots. */
@@ -89,14 +93,14 @@ const enabledActions = (permissions) =>
   );
 
 /**
- * Lets the Public role call PUBLIC_CATALOG_ACTIONS and changes nothing else about it. users-permissions takes the tree
+ * Lets the Public role call PUBLIC_ACTIONS and changes nothing else about it. users-permissions takes the tree
  * sent to PUT /users-permissions/roles/:id as the role's whole set, and deletes every action not enabled in it, so this
- * reads the role's full tree, enables the four actions in it and sends all of it back. It then reads the role again and
- * fails if an action the role had is gone or a catalog action is still off, so "changes nothing else" holds by check, not
- * only by how users-permissions treats the tree. With the four actions already enabled it sends nothing.
+ * reads the role's full tree, enables the five actions in it and sends all of it back. It then reads the role again and
+ * fails if an action the role had is gone or one of the five is still off, so "changes nothing else" holds by check, not
+ * only by how users-permissions treats the tree. With the five actions already enabled it sends nothing.
  * Answers whether anything changed.
  */
-const grantPublicCatalog = async (api) => {
+export const grantPublicReads = async (api) => {
   const { roles } = await api('GET', '/users-permissions/roles');
   const publicRole = roles.find((role) => role.type === 'public');
   if (!publicRole) throw new Error('users-permissions has no Public role. Check config/plugins.ts.');
@@ -104,12 +108,16 @@ const grantPublicCatalog = async (api) => {
   // Taken before the loop below enables anything in the same tree.
   const enabledBefore = enabledActions(role.permissions);
   let changed = false;
-  for (const action of PUBLIC_CATALOG_ACTIONS) {
+  for (const action of PUBLIC_ACTIONS) {
     // plugin::maison.collections.find is permissions['plugin::maison'].controllers.collections.find in the tree.
     const [type, controller, name] = action.split('.');
     const permission = role.permissions?.[type]?.controllers?.[controller]?.[name];
     if (!permission) {
-      throw new Error(`Strapi has no ${action}: the Maison copy it runs predates the REST door. Copy Maison again, run npm install in strapi/ with Strapi stopped, then restart Strapi.`);
+      throw new Error(
+        action.startsWith('api::home-page.')
+          ? `Strapi has no ${action}: it runs without the Home page (strapi/src/api/home-page). Restart Strapi.`
+          : `Strapi has no ${action}: the Maison copy it runs predates the REST door. Copy Maison again, run npm install in strapi/ with Strapi stopped, then restart Strapi.`
+      );
     }
     if (!permission.enabled) {
       permission.enabled = true;
@@ -121,8 +129,8 @@ const grantPublicCatalog = async (api) => {
     const { role: updated } = await api('GET', `/users-permissions/roles/${role.id}`);
     const enabledAfter = new Set(enabledActions(updated.permissions));
     const lost = enabledBefore.filter((action) => !enabledAfter.has(action));
-    // A catalog action the role had and lost is already named in `lost`.
-    const missing = PUBLIC_CATALOG_ACTIONS.filter((action) => !enabledAfter.has(action) && !lost.includes(action));
+    // One of the five that the role had and lost is already named in `lost`.
+    const missing = PUBLIC_ACTIONS.filter((action) => !enabledAfter.has(action) && !lost.includes(action));
     if (lost.length || missing.length) {
       const problems = [...(lost.length ? [`it no longer allows ${lost.join(', ')}`] : []), ...(missing.length ? [`it still doesn't allow ${missing.join(', ')}`] : [])];
       throw new Error(`The Public role isn't as expected after the update: ${problems.join(' and ')}. Check it under Settings > Roles > Public.`);
@@ -157,14 +165,14 @@ const main = async () => {
   const lineMode = process.env.LINE_LOGIN_CHANNEL_ID !== '1234567890';
   console.log(lineMode ? 'LINE sign-in: your LINE Login channel (LINE mode).' : 'LINE sign-in: the LIFF mock (local mode).');
 
-  // 2. The catalog, and reading it over REST without credentials.
+  // 2. The catalog, and reading it and the Home page over REST without credentials.
   const seeded = await api('POST', '/maison/demo/seed', {});
   console.log(seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.');
-  const actions = PUBLIC_CATALOG_ACTIONS.join(', ');
+  const actions = PUBLIC_ACTIONS.join(', ');
   console.log(
-    (await grantPublicCatalog(api))
-      ? `Let the Public role read the catalog over REST: ${actions}.`
-      : `The Public role already reads the catalog over REST: ${actions}.`
+    (await grantPublicReads(api))
+      ? `Let the Public role read the catalog and the Home page over REST: ${actions}.`
+      : `The Public role already reads the catalog and the Home page over REST: ${actions}.`
   );
 
   // 3. The old client first, then the tokens: a client mapped to a deleted token would refuse to connect.

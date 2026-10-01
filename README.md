@@ -44,6 +44,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `strapi/src/plugins/maison/` | The Maison plugin: content types, ten MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
 | `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
+| `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
 | `strapi/scripts/maison-setup.mjs` | `npm run setup` |
 | `liff/` | The Maison app: Next.js 16, LIFF and the LIFF mock, the MCP SDK, and the concierge on AI SDK 7 |
 | `liff/scripts/mock-line-verify.mjs` | The local stand-in for LINE's verify endpoint |
@@ -75,7 +76,7 @@ Maison's services hold the rules: the catalog, opening hours, who may book what,
 
 ### The REST door
 
-**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's four catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne` and `boutiques.find`), and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
+**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's four catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne` and `boutiques.find`) and the Home page's `api::home-page.home-page.find`, and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
 
 ```bash
 STRAPI=http://localhost:1338
@@ -456,7 +457,7 @@ LINE's pages behind this:
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup`, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
+| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
 | `npm run test:e2e` | Browser tests: booking and **My visits**, the language a booking sends, Osaka's closed day, a cleared date and today's date, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
 | `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 

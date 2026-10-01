@@ -18,7 +18,7 @@
     "start:line": "npm run start:line --prefix liff",
     "tunnel": "node scripts/line-tunnel.mjs",
     "qr": "node liff/scripts/line-qr.mjs",
-    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check && node --test scripts/line-mode.test.mjs scripts/line-tunnel.test.mjs scripts/maison-setup.test.mjs liff/scripts/line-qr.test.mjs liff/scripts/mock-line-verify.test.mjs",
+    "test": "npm test --prefix liff && npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check && node --test scripts/line-mode.test.mjs scripts/line-tunnel.test.mjs scripts/maison-setup.test.mjs scripts/home-page-starting-text.test.mjs liff/scripts/line-qr.test.mjs liff/scripts/mock-line-verify.test.mjs",
     "test:e2e": "npm run test:e2e --prefix liff",
     "test:live": "npm run test:live --prefix liff"
   },
