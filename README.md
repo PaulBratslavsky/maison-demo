@@ -90,7 +90,7 @@ curl "$STRAPI/api/maison/boutiques?productSlugs=weekender-50&date=<YYYY-MM-DD>&l
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
 
-**The customer's routes** take the session the MCP tools take: the `access_token` from the token endpoint (see "Handoff"). You can get a session yourself with `curl`: the verify mock accepts `valid.` and a LINE user ID (`U` and 32 lowercase hex digits) as an ID token. That works in local mode only, because in LINE mode LINE checks the ID token. The client ID is `NEXT_PUBLIC_MAISON_CLIENT_ID`, which `npm run setup` writes to `liff/.env`.
+**The customer's routes** take the session the MCP tools take: the `access_token` from the token endpoint (see "Handoff"). You can get a session yourself with `curl`: the verify mock accepts `valid.` and a LINE user ID (`U` and 32 lowercase hex digits) as an ID token. That works in local mode only, because in LINE mode LINE checks the ID token. The client ID is the value of `NEXT_PUBLIC_MAISON_CLIENT_ID`, which `npm run setup` writes to `liff/.env`.
 
 ```bash
 STRAPI=http://localhost:1338
@@ -149,7 +149,8 @@ const fs = require("fs"), os = require("os"), path = require("path");
 const file = path.join(os.homedir(), "Library/Application Support/Claude/claude_desktop_config.json");
 const config = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
 const token = fs.readFileSync("strapi/.tmp/maison-ops-token", "utf8").trim();
-config.mcpServers = { ...config.mcpServers, "maison-ops": { command: "npx", args: ["-y", "mcp-remote", "http://localhost:1338/mcp", "--header", "Authorization:${MAISON_OPS_AUTH}"], env: { MAISON_OPS_AUTH: `Bearer ${token}` } } };
+const bin = path.dirname(process.execPath); // the folder of this node, and of its npx
+config.mcpServers = { ...config.mcpServers, "maison-ops": { command: path.join(bin, "npx"), args: ["-y", "mcp-remote", "http://localhost:1338/mcp", "--header", "Authorization:${MAISON_OPS_AUTH}"], env: { PATH: `${bin}:/usr/bin:/bin`, MAISON_OPS_AUTH: `Bearer ${token}` } } };
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
 console.log("Added maison-ops to", file);
 '
@@ -157,6 +158,7 @@ console.log("Added maison-ops to", file);
 
 - Run it from the repo root. It keeps the rest of the file.
 - Run it again after each `npm run setup`, which mints a new ops token, and restart Claude Desktop.
+- **`npx` by its absolute path.** Claude Desktop doesn't start servers with your shell's `PATH`, so when Node comes from nvm or another version manager, a bare `npx` isn't found. The command writes the path of the `npx` beside the `node` that runs it (the one `which npx` prints in that terminal), and a `PATH` in `env` that starts with its folder, because `npx` runs on `node` from the `PATH`. Run it again after you change Node versions.
 - **What the connector offers:** the tools `pending_confirmations` and `record_confirmation`, and the prompt `send_pending_confirmations`, which Claude Desktop may list by its title, "Send pending appointment confirmations". Strapi's own `log` tool also appears while Strapi runs in development. The token holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.
 
 Check it once:
@@ -179,12 +181,12 @@ Check it once:
 ### Before going on stage
 
 - [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits or tokens behind.
-- [ ] `npm run mode` says local. After option B, run `npm run mode:local` and restart.
+- [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and Claude Desktop need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
 - [ ] In the Strapi admin: **Maison** → **Reset demo appointments** (it asks first). Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
-- [ ] Warm up: ask the concierge one question. On the local model, the first answer also loads the model.
+- [ ] Warm up: walk the whole run once, so every screen is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
 - [ ] In Claude Desktop, check that the maison-ops tools and prompt are there.
 - [ ] Windows: the app (phone frame) beside the Strapi admin on the Maison board, and Claude Desktop behind them.
 - [ ] Turn Do Not Disturb on.
@@ -262,13 +264,16 @@ Check these once, in the admin:
 1. In LINE Developers, create a provider and an Official Account with the Messaging API. Check first that your account can create one from your region. With option B, use your LINE Login channel's provider: LINE gives each user a different ID in each provider.
 2. Add the Official Account as a friend on your phone.
 3. Copy **Your user ID** from the Messaging API channel's Basic settings into `liff/.env` as `NEXT_PUBLIC_DEMO_LINE_USER_ID`. The mock sign-in then acts as you, as that provider sees you. Restart the app. With option B, skip this step: you sign in as yourself.
-4. Issue a channel access token, and add LINE Bot MCP to Claude Desktop:
+4. Issue a channel access token, and add LINE Bot MCP to Claude Desktop, with `npx` by its absolute path and its folder in `PATH`, as for maison-ops. Run `which npx` in a terminal for the path:
 
    ```json
    "line-bot": {
-     "command": "npx",
+     "command": "<the path which npx prints>",
      "args": ["-y", "@line/line-bot-mcp-server"],
-     "env": { "CHANNEL_ACCESS_TOKEN": "<channel access token>" }
+     "env": {
+       "PATH": "<that path without /npx>:/usr/bin:/bin",
+       "CHANNEL_ACCESS_TOKEN": "<channel access token>"
+     }
    }
    ```
 
@@ -297,6 +302,8 @@ The stage runs on the LIFF mock. Option B runs the same app inside LINE on your 
 How it fits together:
 - **One origin.** ngrok forwards your domain to the app on :3003, a production build. The app passes three of Strapi's paths on to it: `/mcp`, the token endpoint (`/api/strapi-oauth-mcp-manager/oauth/token`) and `/uploads`. Strapi, with its admin, stays on your laptop. `MAISON_APP_ORIGIN` isn't needed, because the browser never calls Strapi on another origin.
 - **The proxy passes on only what those calls need:** the headers they use, and request bodies up to 1 MB. A longer body gets 413 before any of it reaches Strapi. Answers stream through as Strapi writes them, and any other Strapi path, such as `/admin`, answers 404 from the app.
+- **And only what the phone sends:** on `/mcp`, a customer session or no `Authorization` at all (anything else gets 401), and at the token endpoint, the token exchange (anything else gets 400).
+- **Only LINE mode's build serves those paths.** A build for the LIFF mock, and `npm run dev`, answer 404 on them, so a tunnel left open after `npm run mode:local` reaches no Strapi that trusts the verify mock.
 - **LINE verifies the ID tokens.** Strapi checks each one with LINE, for your channel, not with the local mock.
 - **Your values stay in `liff/.env`:** `LINE_MODE_LIFF_ID`, `LINE_MODE_CHANNEL_ID` and `LINE_MODE_DOMAIN`. The scripts never print them. Keep them out of commits.
 
@@ -361,14 +368,14 @@ It refuses because, with the local verify mock behind a tunnel, anyone could sig
 
 ### Back to the stage setup
 
-Stop the tunnel, the app and Strapi (Ctrl-C in each terminal), then:
+Stop ngrok first (Ctrl-C in its terminal). Then stop the app and Strapi (Ctrl-C in each terminal), and:
 
 ```bash
 npm run mode:local
 npm run dev          # Strapi, the app and the verify mock, as on stage
 ```
 
-`npm run mode` says which mode you're in. The tests (`npm run test:e2e`, `npm run test:live`) need local mode.
+`npm run mode` says which mode you're in. `npm run dev` and `npm run dev:app` refuse to start while the app is in LINE mode. The tests (`npm run test:e2e`, `npm run test:live`) need local mode, and refuse to run in LINE mode.
 
 ## Handoff: the integration slide, and what's ready for QBurst
 
@@ -407,7 +414,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
 A LINE MINI App is a LIFF app on a LINE MINI App channel, so this app runs as one with its LIFF ID and channel ID changed. Who can create a MINI App channel depends on LINE's MINI App Policy and your region, for example: an unverified MINI App can be created by an organization with a Japanese corporate number or a Taiwan or Thailand tax ID, an individual business owner in Japan, or an individual in Japan, Taiwan or Thailand. The presenter couldn't create one from his region, so the demo runs on a LINE Login channel (option B), and that path was run on a phone inside LINE on 1 October 2026.
 
 In your provider, create both channels in the same provider. Otherwise user IDs won't match, and confirmations can't be delivered.
-1. **A LINE MINI App channel,** with Japan as its region:
+1. **A LINE MINI App channel,** with your region (Japan, Taiwan or Thailand, per the policy):
    - **Channel icon:** `liff/line/channel-icon.png`, drawn to LINE's icon spec: 130×130 px, with a logo between 54 and 76 px. `liff/scripts/render-channel-icon.mjs` redraws it.
    - **Channel name:** Maison, with no "LINE" in it, and a Japanese name under Localization.
    - **A description,** in English and Japanese, and your **privacy policy URL**.
@@ -415,7 +422,7 @@ In your provider, create both channels in the same provider. Otherwise user IDs 
 2. **A Messaging API channel** (an Official Account), for LINE Bot MCP (option A). A verified MINI App can send service messages instead.
 
 Then, in this repo:
-- **Two values change.** Put the MINI App's LIFF ID and channel ID in `liff/.env` as `LINE_MODE_LIFF_ID` and `LINE_MODE_CHANNEL_ID`, put your host in `LINE_MODE_DOMAIN`, and follow option B. Nothing else changes. To serve it from your own https host instead of ngrok, run `npm run start:line` behind that host, and leave `npm run tunnel` out.
+- **Two values change.** Put the MINI App's LIFF ID and channel ID in `liff/.env` as `LINE_MODE_LIFF_ID` and `LINE_MODE_CHANNEL_ID`, put your host in `LINE_MODE_DOMAIN`, and follow option B. Nothing else changes. To serve it from your own https host instead of ngrok, leave the tunnel out: run `npm run start:line`, check it first with `npm run tunnel -- --dry-run`, which runs every check and starts nothing, and only then put the app behind that host.
 - **Use one pair, from one internal channel.** A MINI App channel has three internal channels, Developing, Review and Published, and each has its own LIFF ID and channel ID. Use Developing's while you test. oauth-mcp-manager accepts one channel at a time, so switch to Published's at launch.
 - **Its URL.** An unverified MINI App opens at `https://miniapp.line.me/<LIFF ID>`. `https://liff.line.me/<LIFF ID>` opens it too, so the confirmations' links (`MAISON_LIFF_URL`) keep working. Its header shows the page's title, Maison, and your domain.
 

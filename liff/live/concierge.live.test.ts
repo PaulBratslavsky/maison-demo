@@ -1,7 +1,8 @@
 /**
  * The concierge end to end on the local model: the real route, a signed-in demo customer, real MCP tool calls to the
- * running Strapi. Opt-in (`npm run test:live`), and skipped when Ollama or Strapi isn't up. It always uses the local
- * model, even when an API key is set, so it costs nothing and runs offline.
+ * running Strapi. Opt-in (`npm run test:live`), and skipped when the app's client ID is missing (`npm run setup` writes
+ * NEXT_PUBLIC_MAISON_CLIENT_ID to liff/.env), or Ollama or Strapi isn't up. In LINE mode it refuses to run
+ * (live/support.ts). It always uses the local model, even when an API key is set, so it costs nothing and runs offline.
  */
 import { randomBytes } from 'node:crypto';
 
