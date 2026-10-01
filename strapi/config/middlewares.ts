@@ -5,8 +5,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   'strapi::errors',
   'strapi::security',
   {
-    // The Maison app calls /mcp and the OAuth token endpoint from the browser, so it needs its origin and
-    // the MCP headers. MAISON_APP_ORIGIN adds the app's public address (option B in the README).
+    // The Maison app calls /mcp and the OAuth token endpoint from the browser, on http://localhost:3003, so CORS allows
+    // that origin and the MCP headers. MAISON_APP_ORIGIN adds one more: a website on another origin that calls Strapi
+    // directly. Option B doesn't need it: there the browser calls Strapi's paths on the app's own origin.
     name: 'strapi::cors',
     config: {
       origin: [
