@@ -1,0 +1,17 @@
+import type { ReactNode } from 'react';
+
+/**
+ * On a phone the app fills the screen, inside LINE's safe area (app/globals.css). On the stage laptop (`stage:`, a
+ * wide screen with a mouse or trackpad) it sits in a phone-sized frame. A phone turned to landscape stays full screen.
+ */
+export function PhoneFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-dvh stage:flex stage:items-center stage:justify-center stage:py-8">
+      <div className="relative min-h-dvh bg-ivory stage:h-[812px] stage:min-h-0 stage:w-[375px] stage:overflow-hidden stage:rounded-[2.5rem] stage:shadow-2xl stage:ring-8 stage:ring-black">
+        <div data-testid="app-area" className="h-full px-[var(--line-safe-x)] pb-[var(--line-safe-bottom)] stage:overflow-y-auto">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}

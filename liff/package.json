@@ -1,0 +1,42 @@
+{
+  "name": "maison-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n app,line-mock -c green,cyan \"next dev -H 127.0.0.1 -p 3003\" \"node --env-file-if-exists=.env scripts/mock-line-verify.mjs\"",
+    "build": "next build",
+    "start": "concurrently -k -n app,line-mock -c green,cyan \"next start -H 127.0.0.1 -p 3003\" \"node --env-file-if-exists=.env scripts/mock-line-verify.mjs\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:live": "node --env-file=../strapi/.env --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.live.config.ts",
+    "test:e2e": "node --env-file=../strapi/.env --env-file=.env node_modules/@playwright/test/cli.js test"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.70",
+    "@ai-sdk/mcp": "^2.0.64",
+    "@ai-sdk/openai-compatible": "^3.0.61",
+    "@ai-sdk/react": "^4.0.127",
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@line/liff": "^2.31.1",
+    "@line/liff-mock": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "ai": "^7.0.124",
+    "next": "^16.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

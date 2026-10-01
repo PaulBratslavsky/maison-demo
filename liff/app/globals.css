@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-neutral-900 font-sans text-ink antialiased;
+}
+
+/*
+ * LINE MINI App safe area (https://developers.line.biz/en/docs/line-mini-app/design/landscape/): 34px at the bottom in
+ * normal mode, and 44px on the left and right and 21px at the bottom in landscape mode. The app's frame and its fixed
+ * and sticky bars pad themselves with these. On the stage laptop the app sits in a phone-sized frame, with no notch.
+ */
+:root {
+  --line-safe-x: 0px;
+  --line-safe-bottom: 34px;
+}
+
+@media (orientation: landscape) {
+  :root {
+    --line-safe-x: 44px;
+    --line-safe-bottom: 21px;
+  }
+}
+
+@media screen(stage) {
+  :root {
+    --line-safe-x: 0px;
+    --line-safe-bottom: 0px;
+  }
+}

@@ -7,9 +7,14 @@
     "node": ">=22.9.0"
   },
   "scripts": {
-    "postinstall": "npm install --prefix strapi && node scripts/init-env.mjs",
+    "postinstall": "npm install --prefix strapi && npm install --prefix liff && node scripts/init-env.mjs",
+    "dev": "concurrently -k -n strapi,app -c magenta,green \"npm run develop --prefix strapi\" \"npm run dev --prefix liff\"",
     "dev:strapi": "npm run develop --prefix strapi",
+    "dev:app": "npm run dev --prefix liff",
     "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",
     "test": "npm test --prefix strapi/src/plugins/maison && node strapi/scripts/share-strapi-utils.mjs --check"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
