@@ -3,13 +3,18 @@
  * running Strapi. Opt-in (`npm run test:live`), and skipped when Ollama or Strapi isn't up. It always uses the local
  * model, even when an API key is set, so it costs nothing and runs offline.
  */
+import { randomBytes } from 'node:crypto';
+
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { POST } from '@/app/api/concierge/route';
+import { COPY } from '@/lib/copy';
+import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
-import { STRAPI_URL, ensureVerifyMock, ollamaUp, sseEvents, strapiUp } from './support';
+import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, sseEvents, strapiUp, weekdaysIn } from './support';
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.AI_GATEWAY_API_KEY;
@@ -21,6 +26,48 @@ const CUSTOMER = `U${'c'.repeat(32)}`;
 const QUESTION = "I'm looking for a travel gift under ¥400,000 that I can see at the Ginza boutique. What would you suggest?";
 
 type Product = { slug: string; name: string };
+
+/** The tool calls in an event stream, in order, and what each returned. */
+const callsIn = (events: Array<Record<string, any>>) =>
+  events
+    .filter((event) => event.type === 'tool-input-available')
+    .map((event) => ({
+      id: event.toolCallId as string,
+      name: event.toolName as string,
+      input: event.input as Record<string, any>,
+      output: events.find((other) => other.type === 'tool-output-available' && other.toolCallId === event.toolCallId)?.output as Record<string, any> | undefined,
+    }));
+const textIn = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta as string).join('');
+/** The assistant's message as the page holds it after a reply, tool parts included: what it sends back with the next one. */
+const assistantMessageOf = async (events: Array<Record<string, any>>): Promise<UIMessage> => {
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const event of events) controller.enqueue(event as UIMessageChunk);
+      controller.close();
+    },
+  });
+  let message: UIMessage | undefined;
+  for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+  return message as UIMessage;
+};
+
+// These run without Ollama or Strapi: they check the checks.
+describe("the booking test's reply checks", () => {
+  it('finds the dates an English reply mentions, and only dates', () => {
+    expect(datesIn('Your visit on Saturday, October 3 at 2 pm is requested.', 2026)).toEqual(['2026-10-03']);
+    expect(datesIn('Saturday, 3 October at 14:00', 2026)).toEqual(['2026-10-03']);
+    expect(datesIn('on the 3rd of October, or Oct. 10th', 2026).sort()).toEqual(['2026-10-03', '2026-10-10']);
+    expect(datesIn('That is 2026-10-03, a Saturday', 2026)).toEqual(['2026-10-03']);
+    expect(datesIn('requestedFor 2026-10-03T14:00:00+09:00', 2026)).toEqual(['2026-10-03']);
+    expect(datesIn('Saturday at 2 pm in Ginza: the Weekender 50 for ¥385,000 and 3 other pieces', 2026)).toEqual([]);
+  });
+
+  it('finds the weekday names an English reply mentions', () => {
+    expect(weekdaysIn('Saturday, October 3, at 2 pm')).toEqual(['Saturday']);
+    expect(weekdaysIn('Closed on Mondays; see you on friday')).toEqual(['Monday', 'Friday']);
+    expect(weekdaysIn('Weekender 50 at the boutique')).toEqual([]);
+  });
+});
 
 describe.skipIf(!ready)('the concierge on the local model', () => {
   let stopMock = () => {};
@@ -74,5 +121,62 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(named.length, `the answer names a product. ${context}`).toBeGreaterThan(0);
     for (const slug of named) expect(returned.has(slug), `${slug} came from a tool call, not from the model. ${context}`).toBe(true);
     expect(named.some((slug) => fits.has(slug)), `a named product fits the question. ${context}`).toBe(true);
+  });
+
+  /**
+   * The demo's two messages, with "Saturday" in the first: it must ask resolve_date for the day, book the next Saturday
+   * in Tokyo with the date that returned, and never name another date or weekday. It books a visit in the demo database,
+   * for a customer of its own each run: the plugin lets one customer have 3 requests waiting for a boutique.
+   */
+  it('books the next Saturday in Tokyo, with the date resolve_date returned', async () => {
+    const customer = `U${randomBytes(16).toString('hex')}`;
+    const customerToken = await createSession({ strapiUrl: STRAPI_URL, clientId, getIdToken: () => `valid.${customer}` }).getToken();
+    const saturday = resolveDate({ weekday: 'saturday' }, 'en').date; // by the code the tool runs
+    const [ask, yes] = COPY.en.suggestions; // the two messages the stage demo sends
+    const say = (id: string, text: string): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+    const converse = async (messages: UIMessage[]) => {
+      const response = await POST(
+        new Request('http://localhost:3003/api/concierge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${customerToken}` },
+          body: JSON.stringify({ locale: 'en', messages }),
+        })
+      );
+      expect(response.status).toBe(200);
+      const events = sseEvents(await response.text());
+      expect(events.filter((event) => event.type === 'error')).toEqual([]);
+      return events;
+    };
+
+    const firstTurn = await converse([say('u1', ask)]);
+    const secondTurn = await converse([say('u1', ask), await assistantMessageOf(firstTurn), say('u2', yes)]);
+    const calls = callsIn([...firstTurn, ...secondTurn]);
+    const replies = [textIn(firstTurn), textIn(secondTurn)];
+    const trace = `Tools: ${calls.map((call) => `${call.name}(${JSON.stringify(call.input)})`).join(', ')}. Replies: ${JSON.stringify(replies)}`;
+
+    // It asked resolve_date for the day, before it booked.
+    const asked = calls.findIndex((call) => call.name === 'resolve_date');
+    const booking = calls.findIndex((call) => call.name === 'request_appointment');
+    expect(asked, `it asks resolve_date. ${trace}`).toBeGreaterThanOrEqual(0);
+    expect(booking, `it requests the visit. ${trace}`).toBeGreaterThanOrEqual(0);
+    expect(asked < booking, `it asks resolve_date before it requests the visit. ${trace}`).toBe(true);
+    expect(
+      calls.some((call) => call.name === 'resolve_date' && call.output?.date === saturday && call.output?.weekday === 'Saturday'),
+      `resolve_date gave it ${saturday}, a Saturday. ${trace}`
+    ).toBe(true);
+
+    // The visit it got is on that Saturday at 2 pm, in the request and as the system stored it.
+    const booked = calls.find((call) => call.name === 'request_appointment' && call.output?.structuredContent?.appointment);
+    const on = new RegExp(`^${saturday}T14:00`);
+    expect(booked, `a visit was requested. ${trace}`).toBeDefined();
+    expect(booked?.input.requestedFor, `it asks for ${saturday} at 14:00. ${trace}`).toMatch(on);
+    expect(booked?.output?.structuredContent.appointment.requestedFor, `the visit is on ${saturday} at 14:00. ${trace}`).toMatch(on);
+
+    // And what it tells the customer, before the yes and after the booking, names no other date or weekday.
+    const year = Number(saturday.slice(0, 4));
+    for (const [which, reply] of [['first', replies[0]], ['second', replies[1]]] as const) {
+      expect(datesIn(reply, year).filter((date) => date !== saturday), `the ${which} reply names another date. ${trace}`).toEqual([]);
+      expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the ${which} reply names another weekday. ${trace}`).toEqual([]);
+    }
   });
 });

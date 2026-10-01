@@ -4,7 +4,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
-import { ChatText, ToolResult, type ToolPart } from '@/components/chat-parts';
+import { ChatText, ToolResult, toolPartOf } from '@/components/chat-parts';
 import { ErrorDetail } from '@/components/error-detail';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
@@ -88,8 +88,8 @@ export default function ConciergePage() {
                     <ChatText key={index} text={part.text} />
                   );
                 }
-                if (part.type === 'dynamic-tool') return <ToolResult key={index} part={part as unknown as ToolPart} locale={locale} />;
-                return null;
+                const tool = toolPartOf(part);
+                return tool ? <ToolResult key={index} part={tool} locale={locale} /> : null;
               })}
             </div>
           ))}

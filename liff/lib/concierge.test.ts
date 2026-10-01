@@ -1,11 +1,13 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { simulateReadableStream } from 'ai';
+import { simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { SURFACE_HEADER, conciergeInstructions, handleConcierge } from './concierge';
 import { conciergeModel } from './model';
+import { resolveDate } from './resolve-date';
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
@@ -26,6 +28,38 @@ const replyModel = () =>
       },
     ],
   });
+/** A model that calls one tool, then answers once it has the result. */
+const callsThenReplies = (toolName: string, input: unknown) =>
+  new MockLanguageModelV4({
+    doStream: [
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'tool-call', toolCallId: 'call-1', toolName, input: JSON.stringify(input) },
+            { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 't1' },
+            { type: 'text-delta', id: 't1', delta: 'Noted.' },
+            { type: 'text-end', id: 't1' },
+            { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+          ],
+        }),
+      },
+    ],
+  });
+/** The events of a server-sent event stream. */
+const eventsOf = (text: string): Array<Record<string, any>> =>
+  text
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim())
+    .filter((data) => data && data !== '[DONE]')
+    .map((data) => JSON.parse(data));
 const fakeMcp = () => {
   const close = vi.fn(async () => {});
   return { close, createMcpClient: vi.fn(async () => ({ tools: async () => ({}), close })) };
@@ -81,6 +115,67 @@ describe('handleConcierge', () => {
     const instructions = JSON.stringify(model.doStreamCalls[0].prompt[0]);
     expect(instructions).toContain('2026-10-07');
     expect(instructions).toContain('Reply in English');
+  });
+
+  it('gives the model resolve_date next to the Maison tools', async () => {
+    const model = replyModel();
+    const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
+    const createMcpClient = vi.fn(async () => ({ tools: async () => ({ search_products: search }), close: vi.fn(async () => {}) }));
+    await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
+  });
+
+  it("answers resolve_date with the pure function's output, in the reply language", async () => {
+    // 11:30 on Thursday 1 October in Tokyo.
+    const now = () => new Date('2026-10-01T02:30:00Z');
+    for (const locale of ['en', 'ja'] as const) {
+      const { createMcpClient } = fakeMcp();
+      const model = callsThenReplies('resolve_date', { weekday: 'saturday' });
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale }), deps({ createMcpClient, model, now }));
+      const result = eventsOf(await response.text()).find((event) => event.type === 'tool-output-available');
+      expect(result?.output, locale).toEqual(resolveDate({ weekday: 'saturday' }, locale, now()));
+      expect(result?.output, locale).toEqual({ date: '2026-10-03', weekday: locale === 'en' ? 'Saturday' : '土曜日', isPast: false });
+    }
+  });
+
+  it('never runs resolve_date on input that names more than one day, and tells the model why', async () => {
+    const { createMcpClient } = fakeMcp();
+    const model = callsThenReplies('resolve_date', { weekday: 'saturday', relative: 'today' });
+    const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }));
+    const events = eventsOf(await response.text());
+    expect(events.some((event) => event.type === 'tool-output-available')).toBe(false);
+    expect(events.some((event) => event.type === 'tool-input-error' || event.type === 'tool-output-error')).toBe(true);
+    // The step after it, the model is shown the reason, so it can ask again with one.
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('exactly one of weekday, date or relative');
+  });
+
+  it('treats the null and "" a model sends for the inputs it is not using as not given, and ignores case and spaces', async () => {
+    const now = () => new Date('2026-10-01T02:30:00Z');
+    const sent = [
+      { weekday: 'saturday' },
+      { weekday: 'saturday', relative: null, date: null },
+      { date: '', weekday: 'saturday', relative: '' },
+      { weekday: 'Saturday' },
+      { weekday: ' SATURDAY ', relative: ' ' },
+    ];
+    for (const input of sent) {
+      const { createMcpClient } = fakeMcp();
+      const model = callsThenReplies('resolve_date', input);
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient, model, now }));
+      const result = eventsOf(await response.text()).find((event) => event.type === 'tool-output-available');
+      expect(result?.output, JSON.stringify(input)).toEqual({ date: '2026-10-03', weekday: 'Saturday', isPast: false });
+    }
+  });
+
+  it("refuses resolve_date input that names no day, or a day it can't take, without running it", async () => {
+    const refused = [{}, { weekday: '', relative: '', date: '' }, { relative: 'the day after tomorrow' }, { weekday: 'today' }, { date: '2026-10-3' }];
+    for (const input of refused) {
+      const { createMcpClient } = fakeMcp();
+      const model = callsThenReplies('resolve_date', input);
+      const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text());
+      expect(events.some((event) => event.type === 'tool-output-available'), JSON.stringify(input)).toBe(false);
+      expect(events.some((event) => event.type === 'tool-input-error' || event.type === 'tool-output-error'), JSON.stringify(input)).toBe(true);
+    }
   });
 
   it("names the model, and the fix, when the model can't be reached", async () => {
@@ -179,10 +274,18 @@ describe('conciergeInstructions', () => {
     }
   });
 
-  it('tells the model where its dates come from, what to send, and where the visit is restated from', () => {
+  it('sends the model to resolve_date for every day a customer names, and never to a weekday from their words', () => {
     const text = conciergeInstructions('en', now);
+    expect(text).toMatch(/never work out or guess a date or weekday yourself/i);
+    expect(text).toMatch(/call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment/);
+    expect(text).toMatch(/weekday for a weekday on its own, relative only for exactly "today" or "tomorrow", date for any other day/);
+    expect(text).toMatch(/If the customer names no day, don't call it, don't pass a date to find_boutiques or look up opening hours, and don't suggest a day yourself/);
+    expect(text).toMatch(/never a weekday from the customer's words/i);
+    expect(text).toMatch(/isPast is true/);
+    expect(text).toMatch(/never say you will look something up and then stop/i);
+    // What to send, and where the restatement after booking comes from.
     expect(text).toContain('YYYY-MM-DDTHH:MM:00+09:00');
-    expect(text).toMatch(/never work out a date or weekday/i);
+    expect(text).toMatch(/the date from resolve_date/);
     expect(text).toMatch(/appointment\.requestedFor/);
     expect(text).toMatch(/never from what the customer asked/i);
     expect(text).toMatch(/no markdown/i);

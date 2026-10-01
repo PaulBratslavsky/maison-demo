@@ -69,9 +69,29 @@ export interface ToolPart {
   errorText?: string;
 }
 
+/**
+ * A message part as a tool call, or null when it isn't one. MCP tools arrive as `dynamic-tool` parts, which carry their
+ * name. The concierge's own tool (resolve_date) arrives as a `tool-<name>` part, with the name in the type.
+ */
+export const toolPartOf = (part: { type: string }): ToolPart | null => {
+  if (part.type === 'dynamic-tool') return part as unknown as ToolPart;
+  if (part.type.startsWith('tool-')) return { ...part, toolName: part.type.slice('tool-'.length) } as unknown as ToolPart;
+  return null;
+};
+
+/** The concierge's own tools. They aren't Maison tools, so their chips say "Local", not "MCP". */
+const LOCAL_TOOLS = ['resolve_date'];
+
+/** What `resolve_date` returned, for its chip: the weekday and date the model was given. */
+const resolvedDay = (output: unknown): string | null => {
+  const day = output as { date?: unknown; weekday?: unknown } | null;
+  return typeof day?.date === 'string' && typeof day.weekday === 'string' ? `${day.weekday} ${day.date}` : null;
+};
+
 /** A chip per tool call, plus cards built from structuredContent, never from the model's text. */
 export function ToolResult({ part, locale }: { part: ToolPart; locale: Locale }) {
   const t = COPY[locale];
+  const local = LOCAL_TOOLS.includes(part.toolName);
   const output = part.state === 'output-available' ? (part.output as CallToolResult) : null;
   const error = output ? toolErrorOf(output) : null;
   const failed = part.state === 'output-error' || error !== null;
@@ -79,7 +99,12 @@ export function ToolResult({ part, locale }: { part: ToolPart; locale: Locale })
   const list = Object.values(data ?? {}).find(Array.isArray) as unknown[] | undefined;
   const products = Array.isArray(data?.products) ? (data?.products as ProductCard[]) : null;
   const appointment = (data?.appointment as Appointment | undefined) ?? null;
-  const label = part.state.startsWith('input') ? '…' : failed ? `✕ ${error?.code ?? 'error'}` : `✓${list ? ` ${t.results(list.length)}` : ''}`;
+  const answer = local && !failed ? resolvedDay(part.output) : null;
+  const label = part.state.startsWith('input')
+    ? '…'
+    : failed
+      ? `✕ ${error?.code ?? 'error'}`
+      : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
 
   return (
     <div className="my-2 space-y-2">
@@ -87,7 +112,7 @@ export function ToolResult({ part, locale }: { part: ToolPart; locale: Locale })
         data-testid="tool-chip"
         className={`inline-block rounded-full px-2 py-0.5 font-mono text-[10px] ${failed ? 'bg-red-100 text-red-900' : 'bg-ink/5 text-ink/70'}`}
       >
-        MCP · {part.toolName} {label}
+        {local ? 'Local' : 'MCP'} · {part.toolName} {label}
       </span>
       {part.toolName === 'search_products' && products && (
         <ul className="flex gap-2 overflow-x-auto">
