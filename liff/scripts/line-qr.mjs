@@ -19,10 +19,28 @@ const BLACK_ON_WHITE = { dark: '#000000', light: '#ffffff' };
 /** A page's path, as the app's own links give it: nothing a link to a page doesn't need, such as a query or a scheme. */
 const isPagePath = (path) => !/[?#\s]|:\/\//.test(path);
 
+/**
+ * Whether a path has a `..` segment, also as a URL reads one (`%2e%2e`). It would climb out of the app's LIFF link:
+ * https://liff.line.me/<LIFF ID>/.. is liff.line.me itself, and /../<another ID> another app.
+ */
+const climbs = (path) => path.split('/').some((segment) => /^(?:\.|%2e){2}$/i.test(segment));
+
 export const main = async (args, { root = ROOT, outDir = join(root, 'liff', 'line', 'qr'), log = console.log } = {}) => {
   const [path = '/'] = args;
+  if (args.length > 1) {
+    log('No QR code: give one page path at most, like /visits, or none for the start page.');
+    return 1;
+  }
+  if (path.startsWith('-')) {
+    log('No QR code: npm run qr takes no options. Give a page path, like /visits, or none for the start page.');
+    return 1;
+  }
   if (!isPagePath(path)) {
     log('No QR code: give a page path, like /visits or /products/weekender-50, without ?, #, :// or spaces.');
+    return 1;
+  }
+  if (climbs(path)) {
+    log('No QR code: give a page path without .. segments, like /visits.');
     return 1;
   }
   // The same rule as npm run mode:line. The code needs the LIFF ID only, not the channel ID or the domain.

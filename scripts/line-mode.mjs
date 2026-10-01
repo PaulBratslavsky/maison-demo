@@ -13,33 +13,44 @@ import { parseEnv } from 'node:util';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MOCK_CHANNEL_ID = '1234567890';
 
-// dotenv's `KEY: value` form, which Node's parser skips.
-const COLON_FORM = /^([ \t]*(?:export[ \t]+)?[\w.-]+):[ \t]+/gm;
+// Whitespace on one line, as dotenv's \s reads it: spaces and tabs, and NBSP, a BOM and the other spaces JavaScript knows.
+const BLANK = String.raw`[^\S\r\n]`;
+// The start of an assignment in every form dotenv reads, whitespace and all: `KEY=`, `export KEY=` (with a space, a tab
+// or an NBSP), `KEY: value`. Node's parser reads only some of them: `export\tKEY=`, ` KEY=` and even `export KEY=`
+// with an empty value come out as other keys, and `KEY: value` not at all. Each becomes KEY=.
+const ASSIGNMENT = new RegExp(String.raw`^${BLANK}*(?:export${BLANK}+)?([\w.-]+)(?:${BLANK}*=${BLANK}*|:${BLANK}+)`, 'gm');
+// An unquoted value's whitespace before its comment or the end of its line, which dotenv trims and Node's parser keeps
+// when it isn't ASCII (an NBSP). Inside a value, and inside quotes, an NBSP stays, as dotenv keeps it.
+const UNQUOTED_END = new RegExp(String.raw`^([\w.-]+=(?!["'\x60])[^#\n]*?)${BLANK}+(?=#|$)`, 'gm');
 
 /**
- * An env file's values ({} when it's missing), read the way Strapi's dotenv reads strapi/.env: Node's own parser (CRLF
- * lines, `export KEY=…`, spaces around `=`, quotes and comments, and a later assignment wins), plus dotenv's
- * `KEY: value`. Read any other way, a line Strapi honours could slip past the tunnel's check of LINE_VERIFY_URL.
+ * An env file's values ({} when it's missing), read the way Strapi's dotenv (16) reads strapi/.env, and Next's liff/.env:
+ * Node's own parser (quotes and comments, and a later assignment wins), after the text is made the same for both. Lines
+ * end at CRLF, LF or CR alone; every assignment's start is KEY= (see ASSIGNMENT); an unquoted value loses its trailing
+ * whitespace. Read any other way, a line Strapi honours could slip past the tunnel's check of LINE_VERIFY_URL.
  */
-export const readEnv = (file) => (existsSync(file) ? parseEnv(readFileSync(file, 'utf8').replace(COLON_FORM, '$1=')) : {});
+export const readEnv = (file) =>
+  existsSync(file)
+    ? parseEnv(readFileSync(file, 'utf8').replace(/\r\n?/g, '\n').replace(ASSIGNMENT, '$1=').replace(UNQUOTED_END, '$1'))
+    : {};
 
 /**
  * Sets each key, and leaves the file readable by you only. Every line that assigns the key, in any form readEnv reads,
- * becomes KEY=value where it stands (keeping an `export`), so no other line can override it; a missing key is added at
- * the end. The file keeps its line endings.
+ * becomes KEY=value where it stands (keeping an `export`, with a space), so no other line can override it, and every
+ * parser reads it; a missing key is added at the end. The file keeps its line endings: LF, CRLF or CR alone.
  */
 export const writeEnv = (file, values) => {
   const exists = existsSync(file);
   let text = exists ? readFileSync(file, 'utf8') : '';
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const eol = text.includes('\r\n') ? '\r\n' : text.includes('\r') ? '\r' : '\n';
   for (const [key, value] of Object.entries(values)) {
-    const assignment = new RegExp(`^([ \\t]*(?:export[ \\t]+)?)${key}(?:[ \\t]*=|:[ \\t])[^\\r\\n]*`, 'gm');
+    const assignment = new RegExp(String.raw`^${BLANK}*(export${BLANK}+)?${key}(?:${BLANK}*=|:${BLANK})[^\r\n]*`, 'gm');
     let found = false;
-    text = text.replace(assignment, (_line, prefix) => {
+    text = text.replace(assignment, (_line, exported) => {
       found = true;
-      return `${prefix}${key}=${value}`;
+      return `${exported ? 'export ' : ''}${key}=${value}`;
     });
-    if (!found) text = `${text}${text === '' || text.endsWith('\n') ? '' : eol}${key}=${value}${eol}`;
+    if (!found) text = `${text}${text === '' || /[\r\n]$/.test(text) ? '' : eol}${key}=${value}${eol}`;
   }
   // `mode` applies only when the file is created, so tighten an existing one before writing into it.
   if (exists) chmodSync(file, 0o600);

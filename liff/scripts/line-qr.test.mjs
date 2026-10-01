@@ -82,3 +82,22 @@ test('refuses a path with ?, #, :// or a space, and writes nothing', async () =>
     assert.deepEqual(filesIn(demoDir.outDir), [], path);
   }
 });
+
+test('refuses a second argument, an option, and a .. segment, each with its reason, and writes nothing', async () => {
+  for (const [args, reason] of [
+    [['/visits', '/products/weekender-50'], /one page path at most/],
+    [['--help'], /takes no options/],
+    // A .. would climb out of the app's LIFF link: https://liff.line.me/<LIFF ID>/.. is liff.line.me itself.
+    [['/visits/../..'], /without \.\. segments/],
+    [['/visits/%2E%2e/admin'], /without \.\. segments/], // as a URL reads it too
+  ]) {
+    const demoDir = demo(`LINE_MODE_LIFF_ID=${LIFF_ID}\n`);
+    const { code, out } = await run(args, demoDir);
+    const label = JSON.stringify(args);
+    assert.equal(code, 1, label);
+    assert.match(out, reason, label);
+    assert.match(out, /^No QR code/, label);
+    assert.doesNotMatch(out, /liff\.line\.me/, label);
+    assert.deepEqual(filesIn(demoDir.outDir), [], label);
+  }
+});

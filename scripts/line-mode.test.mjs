@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -127,28 +128,88 @@ test('npm run dev and npm run dev:app run require-local before they start anythi
   for (const name of ['dev', 'dev:app']) assert.match(scripts[name], /^node scripts\/line-mode\.mjs require-local && /, name);
 });
 
-// Strapi reads strapi/.env with dotenv, which also takes CRLF lines, `export KEY=…`, spaces around `=` and `KEY: value`,
-// and lets a later line override an earlier one. The switch reads and rewrites the files the same way.
+// Strapi reads strapi/.env with dotenv, which also takes CRLF and CR-only lines, `export KEY=…` with a space or a tab,
+// whitespace around `=` (NBSP too: JavaScript's \s), `KEY: value`, and lets a later line override an earlier one. The
+// switch reads and rewrites the files the same way. Strapi's own dotenv is the reference.
+const dotenv = createRequire(new URL('../strapi/package.json', import.meta.url))('dotenv');
 const DOTENV_FORMS = {
   export: 'export LINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
   spaced: 'LINE_VERIFY_URL = http://127.0.0.1:4545/verify\n',
   colon: 'LINE_VERIFY_URL: http://127.0.0.1:4545/verify\n',
   crlf: 'LINE_VERIFY_URL=http://127.0.0.1:4545/verify\r\n',
+  'export and a tab': 'export\tLINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
+  'export and an NBSP': 'export LINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
+  'an NBSP before the key': ' LINE_VERIFY_URL=http://127.0.0.1:4545/verify\n',
+  'NBSPs around = and after the value': 'LINE_VERIFY_URL = http://127.0.0.1:4545/verify \n',
+  'colon and an NBSP': 'LINE_VERIFY_URL: http://127.0.0.1:4545/verify\n',
+  // After a line that ends with CR alone (an old Mac's): Node's parser reads the two as one line.
+  'CR-only line ends': 'MAISON_APP_ORIGIN=\rLINE_VERIFY_URL=http://127.0.0.1:4545/verify\r',
 };
 
 test("reads every form Strapi's dotenv reads: a LINE_VERIFY_URL added later in any of them leaves LINE mode", () => {
   for (const [form, line] of Object.entries(DOTENV_FORMS)) {
     const root = demo(INPUTS);
     run(['line'], root);
-    appendFileSync(join(root, 'strapi', '.env'), line);
-    assert.equal(env(root, 'strapi').LINE_VERIFY_URL, 'http://127.0.0.1:4545/verify', form);
+    const file = join(root, 'strapi', '.env');
+    appendFileSync(file, line);
+    const asStrapiReadsIt = () => dotenv.parse(readFileSync(file));
+    assert.equal(asStrapiReadsIt().LINE_VERIFY_URL, 'http://127.0.0.1:4545/verify', `Strapi's dotenv reads ${form}`);
+    assert.deepEqual(env(root, 'strapi'), asStrapiReadsIt(), form);
     assert.doesNotMatch(run(['status'], root).out, /^Mode: LINE /, form);
     assert.equal(run(['require-line'], root).code, 1, form);
     // Switching again rewrites that line too, so it can't override LINE mode's.
     assert.equal(run(['line'], root).code, 0, form);
     assert.equal(env(root, 'strapi').LINE_VERIFY_URL, '', form);
+    assert.deepEqual(env(root, 'strapi'), asStrapiReadsIt(), form);
     assert.match(run(['status'], root).out, /^Mode: LINE /, form);
   }
+});
+
+test("reads a BOM, CR-only line ends, export and a tab, and NBSP as Strapi's dotenv does, and keeps an NBSP inside a value", () => {
+  const root = demo();
+  const file = join(root, 'strapi', '.env');
+  const text = [
+    '﻿HOST=127.0.0.1',
+    'export\tPORT=1338',
+    ' LINE_VERIFY_URL = http://127.0.0.1:4545/verify # the mock',
+    'MAISON_LIFF_URL: http://localhost:3003',
+    'PUBLIC_URL="a b"',
+    'MAISON_APP_ORIGIN=x y',
+  ]
+    .map((line) => `${line}\r`)
+    .join('');
+  writeFileSync(file, text, { mode: 0o600 });
+  assert.deepEqual(readEnv(file), {
+    HOST: '127.0.0.1',
+    PORT: '1338',
+    LINE_VERIFY_URL: 'http://127.0.0.1:4545/verify',
+    MAISON_LIFF_URL: 'http://localhost:3003',
+    PUBLIC_URL: 'a b',
+    MAISON_APP_ORIGIN: 'x y',
+  });
+  assert.deepEqual(readEnv(file), dotenv.parse(text));
+});
+
+test('rewrites a key behind an NBSP or a tab as plain KEY=value (keeping an export), and keeps CR-only line ends, also for a key it adds', () => {
+  const root = demo(INPUTS);
+  const file = join(root, 'strapi', '.env');
+  const cr = (lines) => lines.map((line) => `${line}\r`).join('');
+  // No PUBLIC_URL: the switch adds it.
+  writeFileSync(file, cr(['PORT=1338', 'export\tLINE_LOGIN_CHANNEL_ID=1234567890', ' LINE_VERIFY_URL = http://127.0.0.1:4545/verify', 'MAISON_LIFF_URL: http://localhost:3003']), { mode: 0o600 });
+  assert.match(run(['status'], root).out, /^Mode: local /);
+  assert.equal(run(['line'], root).code, 0);
+  const { LINE_MODE_CHANNEL_ID, LINE_MODE_LIFF_ID, LINE_MODE_DOMAIN } = INPUTS;
+  const line = cr([
+    'PORT=1338',
+    `export LINE_LOGIN_CHANNEL_ID=${LINE_MODE_CHANNEL_ID}`,
+    'LINE_VERIFY_URL=',
+    `MAISON_LIFF_URL=https://liff.line.me/${LINE_MODE_LIFF_ID}`,
+    `PUBLIC_URL=https://${LINE_MODE_DOMAIN}`,
+  ]);
+  assert.equal(readFileSync(file, 'utf8'), line);
+  assert.match(run(['status'], root).out, /^Mode: LINE /);
+  run(['line'], root);
+  assert.equal(readFileSync(file, 'utf8'), line);
 });
 
 test('rewrites each key where it stands, in its form, keeping CRLF line endings and the file readable by you only', () => {
