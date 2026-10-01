@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { BookingSheet } from '@/components/booking-sheet';
 import { useMaison } from '@/components/maison-provider';
@@ -9,10 +9,25 @@ import { ProductImage } from '@/components/product-grid';
 import { Screen } from '@/components/screen';
 import { StatusNote } from '@/components/status-note';
 import { COPY } from '@/lib/copy';
-import { personalizationKind, yen } from '@/lib/format';
+import { listOf, personalizationKind, sizeCm, yen } from '@/lib/format';
 import type { Product } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
 
+/** One row of a product's details list: the name in graphite on the left, the value on the right, over a hairline. */
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-6 border-t border-hairline py-[11px]">
+      <dt className="shrink-0 text-graphite">{label}</dt>
+      <dd className="text-right">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * A product: its photo, full bleed and square; its collection, name and price; its description and craft; and a details
+ * list. "Book a visit" stays at the bottom of the screen (Screen's `bar`), and the header's link leads up to the
+ * product's collection.
+ */
 export default function ProductPage() {
   // Slugs are lower case: /products/Weekender-50 is the Weekender 50 too.
   const slug = useParams<{ slug: string }>().slug.toLowerCase();
@@ -21,46 +36,52 @@ export default function ProductPage() {
   const product = useTool<{ product: Product }>('product', 'view_product', { slug, locale });
   const [booking, setBooking] = useState(false);
   const item = product.data?.product;
+  const size = item ? sizeCm(item.dimensionsCm) : null;
+  const inStockAt = item ? item.stock.filter((entry) => entry.quantity > 0).map((entry) => entry.name) : [];
 
   return (
-    <Screen name="product" tools={['view_product', 'find_boutiques', 'request_appointment']}>
+    <Screen
+      name="product"
+      tools={['view_product', 'find_boutiques', 'request_appointment']}
+      back={item?.collection ? { href: `/collections/${item.collection.slug}`, label: item.collection.name } : undefined}
+      bar={
+        item && (
+          <button type="button" onClick={() => setBooking(true)} className="btn-primary w-full">
+            {t.bookVisit}
+          </button>
+        )
+      }
+    >
       <StatusNote loading={product.loading} error={product.error} retry={product.retry} fromUrl />
       {item && (
         <article>
-          <ProductImage url={item.images[0]?.url ?? null} alt={item.images[0]?.alt ?? item.name} className="mt-3 aspect-square w-full" />
-          <div className="space-y-5 px-5 pt-5">
-            <div>
-              {item.collection && <p className="text-xs uppercase tracking-widest text-mist">{item.collection.name}</p>}
-              <h1 className="font-serif text-4xl leading-tight">{item.name}</h1>
-              <p className="mt-1 text-lg">{yen(item.priceJpy, locale)}</p>
+          <ProductImage url={item.images[0]?.url ?? null} alt={item.images[0]?.alt ?? item.name} className="aspect-square w-full" />
+          <div className="flex flex-col gap-1.5 px-5 pt-[22px]">
+            {item.collection && <p className="eyebrow">{item.collection.name}</p>}
+            <div className="flex items-baseline justify-between gap-3">
+              <h1 className="text-title">{item.name}</h1>
+              <p className="shrink-0 text-[15px] tabular-nums">{yen(item.priceJpy, locale)}</p>
             </div>
-            <p className="whitespace-pre-line text-sm leading-relaxed">{item.description}</p>
-            {/* Italic in English only: Japanese type has no italic, so the browser would slant the glyphs. */}
-            {item.craftStory && <p className={`border-l-2 border-gold pl-3 font-serif text-lg ${locale === 'en' ? 'italic' : ''}`}>{item.craftStory}</p>}
-            {item.personalization.offered && (
-              <section>
-                <h2 className="text-xs uppercase tracking-widest text-mist">{t.personalization}</h2>
-                <p className="text-sm">
-                  {item.personalization.kinds.map((kind) => personalizationKind(kind, locale)).join(' · ')}
-                  {item.personalization.leadDays ? ` · ${t.leadDays(item.personalization.leadDays)}` : ''}
-                </p>
-              </section>
-            )}
-            <section>
-              <h2 className="text-xs uppercase tracking-widest text-mist">{t.stockByBoutique}</h2>
-              <ul className="mt-1 divide-y divide-ink/10 text-sm">
-                {item.stock.map((entry) => (
-                  <li key={entry.boutique} className="flex justify-between py-2">
-                    <span>{entry.name}</span>
-                    <span className={entry.quantity > 0 ? '' : 'text-mist'}>{entry.quantity > 0 ? t.inStock(entry.quantity) : t.outOfStock}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <button type="button" onClick={() => setBooking(true)} className="min-h-[48px] w-full rounded-full bg-ink text-sm text-ivory">
-              {t.bookVisit}
-            </button>
+            <p className="mt-2 whitespace-pre-line text-body text-graphite">{item.description}</p>
+            {item.craftStory && <p className="mt-1 text-body text-graphite">{item.craftStory}</p>}
           </div>
+          <dl className="mx-5 mt-[18px] border-b border-hairline text-[13px]">
+            {size && (
+              <Detail label={t.size}>
+                <span className="tabular-nums">{size}</span>
+              </Detail>
+            )}
+            {item.personalization.offered && (
+              <Detail label={t.personalization}>
+                {listOf(
+                  item.personalization.kinds.map((kind) => personalizationKind(kind, locale)),
+                  locale
+                )}
+                {item.personalization.leadDays ? ` · ${t.leadDays(item.personalization.leadDays)}` : ''}
+              </Detail>
+            )}
+            <Detail label={t.inStockAt}>{inStockAt.length > 0 ? listOf(inStockAt, locale) : t.outOfStock}</Detail>
+          </dl>
         </article>
       )}
       {booking && item && <BookingSheet product={item} onClose={() => setBooking(false)} />}

@@ -29,9 +29,10 @@ export default function CollectionPage() {
         // The pieces came but the collection's name didn't: say so where the name goes, with a retry.
         <StatusNote loading={false} error={collections.error} retry={collections.retry} />
       ) : (
-        <header className="px-5 pb-5 pt-6">
-          <h1 className="font-serif text-4xl">{collection?.name ?? ''}</h1>
-          {collection && <p className="mt-1 text-sm text-ink/70">{collection.teaser}</p>}
+        // The name holds its line while it loads, so the grid doesn't move when it arrives.
+        <header className="flex flex-col gap-3 px-5 pb-8 pt-5">
+          <h1 className="min-h-[36px] text-headline">{collection?.name ?? ''}</h1>
+          {collection && <p className="text-body text-graphite">{collection.teaser}</p>}
         </header>
       )}
       <StatusNote loading={products.loading} error={products.error} retry={retryAll} fromUrl />
@@ -39,7 +40,7 @@ export default function CollectionPage() {
         (products.data.products.length > 0 ? (
           <ProductGrid products={products.data.products} locale={locale} />
         ) : (
-          <p className="px-5 text-sm text-mist">{t.noProducts}</p>
+          <p className="px-5 text-body text-mist">{t.noProducts}</p>
         ))}
     </Screen>
   );

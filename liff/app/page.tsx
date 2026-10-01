@@ -10,32 +10,40 @@ import { COPY } from '@/lib/copy';
 import type { CollectionSummary } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
 
+/**
+ * Home: the eyebrow, the headline and the concierge's button, then the collections, each a full-bleed photo with its
+ * name and piece count under it.
+ */
 export default function Home() {
   const { locale } = useMaison();
   const t = COPY[locale];
+  const text = t.home;
   const collections = useTool<{ collections: CollectionSummary[] }>('home', 'browse_collections', { locale });
+  const list = collections.data?.collections ?? [];
   return (
     <Screen name="home" tools={['browse_collections']}>
-      <section className="px-5 pb-6 pt-8 text-center">
-        <p className="font-serif text-4xl tracking-[0.35em]">MAISON</p>
-        <p className="mt-2 text-xs tracking-widest text-mist">{t.tagline}</p>
-        <Link href="/concierge" className="mt-6 inline-flex min-h-[44px] items-center rounded-full bg-ink px-6 text-sm text-ivory">
-          {t.askConcierge}
+      <section className="flex flex-col gap-3.5 px-5 pb-8 pt-5">
+        <p className="eyebrow">{text.eyebrow}</p>
+        <h1 className="text-headline">{text.headline}</h1>
+        <Link href="/concierge" className="btn-primary mt-3">
+          {text.ctaLabel}
         </Link>
       </section>
-      <h2 className="px-5 pb-3 font-serif text-2xl">{t.collections}</h2>
+      <div className="flex items-baseline justify-between px-5 pb-3.5">
+        <h2 className="label">{t.collections}</h2>
+        {collections.data && <span className="text-[12px] tabular-nums text-mist">{t.pieces(list.reduce((sum, collection) => sum + collection.productCount, 0))}</span>}
+      </div>
       <StatusNote loading={collections.loading} error={collections.error} retry={collections.retry} />
-      <ul className="space-y-6 px-5">
-        {collections.data?.collections.map((collection) => (
+      <ul>
+        {list.map((collection, index) => (
           <li key={collection.slug}>
-            <Link href={`/collections/${collection.slug}`} data-testid="collection-card" className="block">
+            <Link href={`/collections/${collection.slug}`} data-testid="collection-card" className="flex flex-col">
               {/* Decorative: the link's name is the collection name below it. */}
-              <ProductImage url={collection.heroImageUrl} alt="" className="aspect-[4/3] w-full" />
-              <div className="mt-2 flex items-baseline justify-between">
-                <p className="font-serif text-2xl">{collection.name}</p>
-                <p className="text-xs text-mist">{t.pieces(collection.productCount)}</p>
-              </div>
-              <p className="text-sm text-ink/70">{collection.teaser}</p>
+              <ProductImage url={collection.heroImageUrl} alt="" className="h-60 w-full" loading={index === 0 ? 'eager' : 'lazy'} />
+              <span className="flex items-center justify-between px-5 pb-[26px] pt-3.5">
+                <span className="text-[13px] font-medium uppercase tracking-[0.24em]">{collection.name}</span>
+                <span className="text-[12px] tabular-nums text-graphite">{t.pieces(collection.productCount)}</span>
+              </span>
             </Link>
           </li>
         ))}

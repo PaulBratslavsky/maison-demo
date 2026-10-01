@@ -12,6 +12,10 @@ import { useMaison } from './maison-provider';
 import { OpenInLine } from './open-in-line';
 import { Spinner } from './spinner';
 
+/** The bottom bar (`bar`): a 48 px button with 12 px above and below it. */
+const BAR_PADDING = 12;
+const BAR_HEIGHT = 48 + 2 * BAR_PADDING;
+
 /**
  * Every screen: header, the MCP tools it uses, sign-in state, and the agent view. In LINE mode outside the LINE app,
  * the "Open in LINE" page takes the screen's place, without the tools: nothing is called from it. `back` names the
@@ -24,30 +28,41 @@ import { Spinner } from './spinner';
  * concierge): it makes a column as tall as the whole screen, whose children are the column's flex items. The column runs
  * under the frame's own safe-area padding (`-mb`), so the bar keeps its own, as the agent view's drawer does. On the stage
  * laptop it is as tall as the phone frame.
+ *
+ * `bar` is a page's action pinned to the bottom of the screen (a product's "Book a visit"): white, under a hairline, with
+ * the safe area's padding. With the agent view on, it sits on top of the drawer, so it stays in reach.
  */
 export function Screen({
   name,
   tools,
   fill = false,
   back,
+  bar,
   children,
 }: {
   name: string;
   tools: string[];
   fill?: boolean;
   back?: BackLink;
+  bar?: ReactNode;
   children: ReactNode;
 }) {
   const { status, signInError, openInLine, locale, agentView, retrySignIn } = useMaison();
   const t = COPY[locale];
-  // With the agent view on, the screen ends the drawer's height lower (a page adds a margin too), so the last rows of a
-  // page scroll clear of it, and the pinned bar of a `fill` screen sits above it.
+  // With the agent view on, the screen ends the drawer's height lower, so the last rows of a page scroll clear of it, and
+  // the pinned bar of a `fill` screen sits above it. A page adds a margin, and its bottom bar's height when it has one.
+  // Without the drawer, a page's 8rem clears its bottom bar: 72 px and the safe area.
   const [drawerHeight, setDrawerHeight] = useState(0);
   const drawerOpen = agentView && drawerHeight > 0;
+  const showBar = Boolean(bar) && status === 'ready';
   return (
     <div
       className={fill ? 'flex h-dvh flex-col -mb-[var(--line-safe-bottom)] stage:mb-0 stage:h-full' : 'pb-32'}
-      style={drawerOpen ? { paddingBottom: fill ? `${drawerHeight}px` : `calc(${drawerHeight}px + 2rem)` } : undefined}
+      style={
+        drawerOpen
+          ? { paddingBottom: fill ? `${drawerHeight}px` : `calc(${drawerHeight + (showBar ? BAR_HEIGHT : 0)}px + 2rem)` }
+          : undefined
+      }
     >
       <Header back={back} />
       {status !== 'open-in-line' && (
@@ -83,6 +98,19 @@ export function Screen({
       )}
       {status === 'open-in-line' && openInLine && <OpenInLine url={openInLine.url} os={openInLine.os} />}
       {status === 'ready' && children}
+      {showBar && (
+        <div
+          className="fixed inset-x-0 z-10 border-t border-hairline bg-paper px-[calc(1.25rem+var(--line-safe-x))] stage:absolute"
+          // On the drawer, the drawer keeps the safe area; on its own, the bar does.
+          style={
+            drawerOpen
+              ? { bottom: drawerHeight, paddingTop: BAR_PADDING, paddingBottom: BAR_PADDING }
+              : { bottom: 0, paddingTop: BAR_PADDING, paddingBottom: `calc(${BAR_PADDING}px + var(--line-safe-bottom))` }
+          }
+        >
+          {bar}
+        </div>
+      )}
       <AgentDrawer screen={name} onHeight={setDrawerHeight} />
     </div>
   );

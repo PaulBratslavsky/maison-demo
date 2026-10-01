@@ -23,6 +23,10 @@ export const personalizationKind = (kind: string, locale: Locale): string => {
   return Object.hasOwn(names, kind) ? names[kind] : kind.replace(/-/g, ' ');
 };
 
+/** A piece's size for its details list, width × height × depth: "50 × 29 × 22 cm". Null when the catalog has none. */
+export const sizeCm = (dimensions: { width: number; height: number; depth: number } | null): string | null =>
+  dimensions ? `${dimensions.width} × ${dimensions.height} × ${dimensions.depth} cm` : null;
+
 /** A visit's start in Tokyo time, e.g. "10月10日(土) 14:00" or "Sat 10 Oct, 14:00". */
 export const visitTime = (iso: string, locale: Locale) =>
   new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-GB', {
