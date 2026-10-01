@@ -31,6 +31,13 @@ describe('conciergeModel', () => {
     expect(label).toContain('http://127.0.0.1:11500/v1');
   });
 
+  it("says what to do when the model can't be reached: the internet for Claude, Ollama with its model for the local model", () => {
+    expect(conciergeModel({ ANTHROPIC_API_KEY: 'sk-ant-test' }).fix).toBe("Check the laptop's internet connection.");
+    expect(conciergeModel({ AI_GATEWAY_API_KEY: 'gw' }).fix).toBe("Check the laptop's internet connection.");
+    expect(conciergeModel({}).fix).toBe('Start Ollama with qwen3-14b-32k, or set ANTHROPIC_API_KEY in liff/.env and restart the app.');
+    expect(conciergeModel({ OLLAMA_MODEL: 'gemma4-26b-32k' }).fix).toMatch(/^Start Ollama with gemma4-26b-32k,/);
+  });
+
   it('asks Ollama to skip thinking (reasoning_effort "none")', async () => {
     let request: Record<string, unknown> = {};
     const server = createServer((req, res) => {

@@ -2,6 +2,7 @@ import type { createMCPClient } from '@ai-sdk/mcp';
 import {
   APICallError,
   RetryError,
+  asSchema,
   convertToModelMessages,
   createUIMessageStreamResponse,
   isStepCount,
@@ -9,6 +10,7 @@ import {
   toUIMessageStream,
   tool,
   type LanguageModel,
+  type ToolSet,
   type UIMessage,
 } from 'ai';
 import { z } from 'zod';
@@ -51,7 +53,7 @@ Rules:
 1. Use the tools for every fact about products, prices, stock and opening hours. Never invent products, prices, availability or hours. Name products exactly as the tools return them. Call the tools you need in this reply and answer from their results: never say you will look something up and then stop.
 2. Search broadly first. For a gift, use search_products with the occasion (occasion "travel" for someone who travels), the budget (maxPriceJpy) and the boutique (inStockAt). Add a category or collection only when the customer asks for one. If a search finds nothing, drop a filter and search again before saying nothing fits.
 3. Before calling request_appointment, restate the boutique, the day (the weekday and date resolve_date returned), the time and the products in one short sentence, and wait for the customer's yes.
-4. Call resolve_date only when the customer names a day, never to find out today's date, which is given above.${locale === 'ja' ? ' 日付が出ていないご相談では resolve_date を呼ばないでください。' : ''} Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment: weekday for a weekday name ("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"), relative for exactly "today", "tomorrow" or "day_after_tomorrow" ("the day after tomorrow", 明後日), date for any other day: a calendar date, or a day you read off the calendar, such as "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit. If the customer names no day, look up opening hours only when they ask about them: call find_boutiques without a date, which lists each boutique's weekly hours. Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean. Write requestedFor as YYYY-MM-DDTHH:MM:00+09:00: the date from resolve_date, then T and the time in 24-hour form (2 pm is T14:00:00+09:00).
+4. Call resolve_date only when the customer names a day, never to find out today's date, which is given above.${locale === 'ja' ? ' 日付が出ていないご相談では resolve_date を呼ばないでください。' : ''} Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment: weekday for a weekday name ("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"), relative for exactly "today", "tomorrow" or "day_after_tomorrow" ("the day after tomorrow", 明後日), date for any other day: a calendar date, or a day you read off the calendar, such as "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit, and look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours. Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean. Write requestedFor as YYYY-MM-DDTHH:MM:00+09:00: the date from resolve_date, then T and the time in 24-hour form (2 pm is T14:00:00+09:00).
 5. Never say a visit is confirmed. Say it is requested, and that the boutique will confirm it on LINE. After request_appointment, restate the boutique, date and time from the tool's result (appointment.boutique.name and appointment.requestedFor), with the weekday resolve_date returned for that date, never from what the customer asked for.
 6. If a tool returns an error, follow its hint. not_found means a slug was wrong: look it up with the tool the hint names, never guess. An input validation error means fix the arguments and call again. Otherwise ask the customer.
 7. ${locale === 'ja' ? 'Reply in polite Japanese (keigo).' : 'Reply in English.'} Pass locale "${locale}" to every tool that takes one, so names match your reply and the app's cards. Keep replies to two or three short sentences of plain text: no markdown, no bold, no numbered or bulleted lists. The app shows product cards, so don't repeat their details.
@@ -112,22 +114,58 @@ export interface ConciergeDeps {
   model: LanguageModel;
   /** Which model answers (conciergeModel().label), named in the error when it can't be reached. */
   modelLabel?: string;
+  /** What to do then (conciergeModel().fix): start Ollama for the local model, check the internet for Claude. */
+  modelFix?: string;
   createMcpClient: typeof createMCPClient;
   strapiUrl: string;
   now?: () => Date;
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** How a model call that can't connect fails: the SDK's own words ("Cannot connect to API: …"), or fetch's. */
+const CANNOT_CONNECT = /Cannot connect to API|fetch failed|ECONNREFUSED/i;
+
 /**
- * What the customer sees when the model fails. A model call that can't connect is named, with the fix. Only a model
- * call is: a tool that can't reach Strapi also fails with "fetch failed", and says that, not that the model is down.
+ * Whether a model call failed to connect: the SDK's APICallError says so, on its own, among the attempts of the
+ * RetryError the SDK throws after retrying, or as the cause of the error a provider wraps it in. The AI Gateway's
+ * GatewayError does that, and its own message says only "Gateway request failed".
  */
-export const describeModelError = (error: unknown, modelLabel?: string): string => {
-  const message = error instanceof Error ? error.message : 'The concierge had a problem.';
-  const modelCall = APICallError.isInstance(error) || RetryError.isInstance(error);
-  if (modelCall && /Cannot connect to API|fetch failed|ECONNREFUSED/i.test(message)) {
-    return `The concierge's model${modelLabel ? ` (${modelLabel})` : ''} isn't reachable. Start Ollama, or set ANTHROPIC_API_KEY in liff/.env, then restart the app.`;
+const cannotConnect = (error: unknown, seen = new Set<unknown>()): boolean => {
+  if (!(error instanceof Error) || seen.has(error)) return false;
+  seen.add(error);
+  if (APICallError.isInstance(error) && CANNOT_CONNECT.test(error.message)) return true;
+  return [...(RetryError.isInstance(error) ? error.errors : []), error.cause].some((inner) => cannotConnect(inner, seen));
+};
+
+/**
+ * What the customer sees when the model fails. A model call that can't connect is named, with its provider's fix. Only
+ * a model call is: a tool that can't reach Strapi also fails with "fetch failed" (a TypeError, never an APICallError),
+ * and says that, not that the model is down.
+ */
+export const describeModelError = (error: unknown, modelLabel?: string, modelFix?: string): string => {
+  if (cannotConnect(error)) {
+    return `The concierge's model${modelLabel ? ` (${modelLabel})` : ''} isn't reachable.${modelFix ? ` ${modelFix}` : ''}`;
   }
-  return message;
+  return error instanceof Error ? error.message : 'The concierge had a problem.';
+};
+
+/**
+ * The Maison tools, with the conversation's locale for each tool whose input schema has one, when the model leaves it
+ * out (or sends null or "", the local model's blanks). Rule 7 asks for it, but in an English chat a booking came back
+ * without it, so in the catalog's default language: the card showed 銀座本店. A locale the model gives is kept.
+ */
+export const withConversationLocale = async <TOOLS extends ToolSet>(tools: TOOLS, locale: 'ja' | 'en'): Promise<TOOLS> => {
+  const entries = await Promise.all(
+    Object.entries(tools).map(async ([name, maisonTool]) => {
+      const properties = maisonTool.inputSchema === undefined ? undefined : (await asSchema(maisonTool.inputSchema).jsonSchema).properties;
+      const execute = maisonTool.execute;
+      if (!execute || !properties || !Object.hasOwn(properties, 'locale')) return [name, maisonTool];
+      const withLocale = (input: unknown) => (isObject(input) && (input.locale === undefined || input.locale === null || input.locale === '') ? { ...input, locale } : input);
+      return [name, { ...maisonTool, execute: (input: unknown, options: Parameters<NonNullable<typeof execute>>[1]) => execute(withLocale(input), options) }];
+    })
+  );
+  return Object.fromEntries(entries) as TOOLS;
 };
 
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
@@ -138,8 +176,6 @@ const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string } |
     return null;
   }
 };
-
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * A message as the app sends it: an object with a list of parts, each an object, and a text part's text a string.
@@ -192,11 +228,14 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
 
   try {
     const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
+    const tools = { ...(await withConversationLocale(await mcp.tools(), locale)), resolve_date: resolveDateTool(locale, now) };
     const result = streamText({
       model: deps.model,
       instructions: conciergeInstructions(locale, now),
-      messages: await convertToModelMessages(messages),
-      tools: { ...(await mcp.tools()), resolve_date: resolveDateTool(locale, now) },
+      // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as
+      // they did in that turn, and not as the raw MCP result.
+      messages: await convertToModelMessages(messages, { tools }),
+      tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
       // onEnd is skipped on abort, and when no step completes, so close in all three.
@@ -204,7 +243,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       onAbort: close,
       onError: async ({ error }) => {
         // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).
-        console.error('[concierge]', describeModelError(error, deps.modelLabel), error);
+        console.error('[concierge]', describeModelError(error, deps.modelLabel, deps.modelFix), error);
         await close();
       },
     });
@@ -212,7 +251,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       stream: toUIMessageStream({
         stream: result.stream,
         originalMessages: messages,
-        onError: (error) => describeModelError(error, deps.modelLabel),
+        onError: (error) => describeModelError(error, deps.modelLabel, deps.modelFix),
       }),
     });
   } catch (error) {

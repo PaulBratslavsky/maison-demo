@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { APICallError, RetryError, simulateReadableStream, tool } from 'ai';
+import { APICallError, RetryError, dynamicTool, jsonSchema, simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -204,6 +204,78 @@ describe('handleConcierge', () => {
     expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
   });
 
+  /**
+   * Maison tools as mcp.tools() gives them: dynamic tools with a JSON schema (from the MCP server's tools/list) and no
+   * validation of their own. Each records the input its execute gets.
+   */
+  const maisonTools = () => {
+    const received: Array<{ name: string; input: unknown }> = [];
+    const maisonTool = (name: string, properties: Record<string, unknown>) =>
+      dynamicTool({
+        description: name,
+        inputSchema: jsonSchema({ type: 'object', properties, additionalProperties: false }),
+        execute: async (input) => {
+          received.push({ name, input });
+          return { content: [{ type: 'text', text: '{}' }] };
+        },
+      });
+    const tools = {
+      request_appointment: maisonTool('request_appointment', { boutique: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } }),
+      my_appointments: maisonTool('my_appointments', {}),
+    };
+    return { received, createMcpClient: vi.fn(async () => ({ tools: async () => tools, close: vi.fn(async () => {}) })) };
+  };
+
+  it("sends the conversation's locale to a Maison tool that takes one when the model leaves it out", async () => {
+    // In an English chat the model booked without a locale, and the card showed 銀座本店, the catalog's default.
+    for (const input of [{ boutique: 'ginza' }, { boutique: 'ginza', locale: null }, { boutique: 'ginza', locale: '' }]) {
+      for (const locale of ['en', 'ja'] as const) {
+        const { received, createMcpClient } = maisonTools();
+        const model = callsThenReplies('request_appointment', input);
+        await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale }), deps({ createMcpClient, model }))).text();
+        expect(received, `${JSON.stringify(input)} in ${locale}`).toEqual([{ name: 'request_appointment', input: { boutique: 'ginza', locale } }]);
+      }
+    }
+  });
+
+  it("keeps the locale the model gives, and adds none to a tool that doesn't take one", async () => {
+    const { received, createMcpClient } = maisonTools();
+    const model = callsThenReplies('request_appointment', { boutique: 'ginza', locale: 'ja' });
+    await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient, model }))).text();
+    expect(received).toEqual([{ name: 'request_appointment', input: { boutique: 'ginza', locale: 'ja' } }]);
+
+    const other = maisonTools();
+    await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient: other.createMcpClient, model: callsThenReplies('my_appointments', {}) }))).text();
+    expect(other.received).toEqual([{ name: 'my_appointments', input: {} }]);
+  });
+
+  it("shows the model an earlier turn's tool result as the tool shapes it (toModelOutput), as in the turn it came from", async () => {
+    const model = replyModel();
+    const search = dynamicTool({
+      description: 'Search the catalog.',
+      inputSchema: jsonSchema({ type: 'object', properties: { locale: { type: 'string' } } }),
+      execute: async () => ({ content: [{ type: 'text', text: 'raw MCP result' }] }),
+      toModelOutput: () => ({ type: 'text', value: 'shaped by toModelOutput' }),
+    });
+    const createMcpClient = vi.fn(async () => ({ tools: async () => ({ search_products: search }), close: vi.fn(async () => {}) }));
+    const conversation = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'A travel gift?' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'dynamic-tool', toolName: 'search_products', toolCallId: 'call-0', state: 'output-available', input: {}, output: { content: [{ type: 'text', text: 'raw MCP result' }] } },
+          { type: 'text', text: 'Here are two.' },
+        ],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'The first, please.' }] },
+    ];
+    await (await handleConcierge(ask('Bearer mcp_at_x', { messages: conversation, locale: 'en' }), deps({ createMcpClient, model }))).text();
+    const prompt = JSON.stringify(model.doStreamCalls[0].prompt);
+    expect(prompt).toContain('shaped by toModelOutput');
+    expect(prompt).not.toContain('raw MCP result');
+  });
+
   it("answers resolve_date with the pure function's output, in the reply language", async () => {
     // 11:30 on Thursday 1 October in Tokyo.
     const now = () => new Date('2026-10-01T02:30:00Z');
@@ -388,11 +460,12 @@ describe('handleConcierge', () => {
       const { port } = closed.address() as AddressInfo;
       await new Promise((resolve) => closed.close(resolve));
       const { createMcpClient, close } = fakeMcp();
-      const { model, label } = conciergeModel({ OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1` });
-      const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model, modelLabel: label }));
+      const { model, label, fix } = conciergeModel({ OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1` });
+      const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model, modelLabel: label, modelFix: fix }));
       const text = await response.text();
-      expect(text).toContain(`The concierge's model (qwen3-14b-32k (Ollama at http://127.0.0.1:${port}/v1)) isn't reachable`);
-      expect(text).toContain('ANTHROPIC_API_KEY');
+      expect(text).toContain(
+        `The concierge's model (qwen3-14b-32k (Ollama at http://127.0.0.1:${port}/v1)) isn't reachable. Start Ollama with qwen3-14b-32k, or set ANTHROPIC_API_KEY in liff/.env and restart the app.`
+      );
       // The log says which model, too: in LINE mode the customer's screen never shows the detail.
       expect(log).toHaveBeenCalledWith('[concierge]', expect.stringContaining(`(qwen3-14b-32k (Ollama at http://127.0.0.1:${port}/v1)) isn't reachable`), expect.any(Error));
       // And the MCP client is closed, whatever went wrong.
@@ -412,7 +485,7 @@ describe('handleConcierge', () => {
 });
 
 describe('describeModelError', () => {
-  const label = 'qwen3-14b-32k (Ollama at http://localhost:11434/v1)';
+  const { label, fix } = conciergeModel({});
   const refused = () =>
     new APICallError({
       message: 'Cannot connect to API: connect ECONNREFUSED 127.0.0.1:11434',
@@ -420,20 +493,51 @@ describe('describeModelError', () => {
       requestBodyValues: {},
       isRetryable: true,
     });
+  const retried = (errors: unknown[]) =>
+    new RetryError({ message: `Failed after 3 attempts. Last error: ${(errors.at(-1) as Error).message}`, reason: 'maxRetriesExceeded', errors });
 
-  it("names the model, with the fix, when a model call can't connect", () => {
-    const retried = new RetryError({ message: 'Failed after 3 attempts. Last error: Cannot connect to API', reason: 'maxRetriesExceeded', errors: [refused()] });
-    for (const error of [refused(), retried]) {
-      expect(describeModelError(error, label)).toBe(`The concierge's model (${label}) isn't reachable. Start Ollama, or set ANTHROPIC_API_KEY in liff/.env, then restart the app.`);
+  it("names the local model, with the fix for Ollama, when a model call can't connect", () => {
+    for (const error of [refused(), retried([refused(), refused(), refused()])]) {
+      expect(describeModelError(error, label, fix)).toBe(
+        "The concierge's model (qwen3-14b-32k (Ollama at http://localhost:11434/v1)) isn't reachable. Start Ollama with qwen3-14b-32k, or set ANTHROPIC_API_KEY in liff/.env and restart the app."
+      );
     }
-    expect(describeModelError(refused())).toMatch(/^The concierge's model isn't reachable\./); // with no label to name
+    expect(describeModelError(refused())).toBe("The concierge's model isn't reachable."); // with no model or fix to name
+  });
+
+  it("sends Claude's customer to the laptop's internet connection, not to Ollama", () => {
+    const claude = conciergeModel({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const offline = new APICallError({
+      message: 'Cannot connect to API: getaddrinfo ENOTFOUND api.anthropic.com',
+      url: 'https://api.anthropic.com/v1/messages',
+      requestBodyValues: {},
+      isRetryable: true,
+    });
+    expect(describeModelError(retried([offline, offline, offline]), claude.label, claude.fix)).toBe(
+      "The concierge's model (Claude Sonnet 5 (Anthropic)) isn't reachable. Check the laptop's internet connection."
+    );
+  });
+
+  it('sees the failed connection inside the error the AI Gateway wraps it in', () => {
+    // @ai-sdk/gateway wraps the SDK's APICallError in a GatewayError of its own, with the APICallError as its cause
+    // (asGatewayError), and the SDK retries that. Its message names no connection: "Gateway request failed".
+    const wrapped = () => Object.assign(new Error('Invalid error response format: Gateway request failed'), { cause: refused() });
+    const gateway = conciergeModel({ AI_GATEWAY_API_KEY: 'gw' });
+    for (const error of [wrapped(), retried([wrapped(), wrapped(), wrapped()])]) {
+      expect(describeModelError(error, gateway.label, gateway.fix)).toBe(
+        "The concierge's model (Claude Sonnet 5 (AI Gateway)) isn't reachable. Check the laptop's internet connection."
+      );
+    }
   });
 
   it("leaves a tool's own failure to reach Strapi as it is", () => {
     for (const message of ['fetch failed', 'connect ECONNREFUSED 127.0.0.1:1338', 'Cannot connect to API: nope']) {
-      expect(describeModelError(new TypeError(message), label)).toBe(message);
-      expect(describeModelError(new Error(message), label)).toBe(message);
+      expect(describeModelError(new TypeError(message), label, fix)).toBe(message);
+      expect(describeModelError(new Error(message), label, fix)).toBe(message);
     }
+    // As fetch throws it: the reason is the cause, which is never a model call's APICallError.
+    const refusedByStrapi = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1338'), { code: 'ECONNREFUSED' }) });
+    expect(describeModelError(refusedByStrapi, label, fix)).toBe('fetch failed');
   });
 
   it('passes any other model error through, and has words for what is not an Error', () => {
@@ -522,7 +626,10 @@ describe('conciergeInstructions', () => {
     // day is named: a booking turn names one, and checks it with find_boutiques and that date.
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
-      expect(text, locale).toMatch(/If the customer names no day, look up opening hours only when they ask about them: call find_boutiques without a date, which lists each boutique's weekly hours\./);
+      expect(text, locale).toContain(
+        "If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit, and look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours."
+      );
+      expect(text.match(/If the customer names no day/g), locale).toHaveLength(1); // one sentence, not two that start alike
       expect(text, locale).not.toMatch(/Don't look up opening hours unless/); // the old wording, which had no scope
       expect(text, locale).toMatch(/Use the tools for every fact about products, prices, stock and opening hours/);
       // The sentence after it names its tool: "it" would point at find_boutiques.
