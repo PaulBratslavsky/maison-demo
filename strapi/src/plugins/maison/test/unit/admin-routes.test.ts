@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import controllers from '../../server/src/controllers';
 import appointmentsController from '../../server/src/controllers/appointments';
 import routes from '../../server/src/routes';
 import { fakeStrapi } from './fake-strapi';
@@ -26,11 +27,31 @@ describe('admin routes', () => {
 
   it('each require a signed-in admin with the matching Maison permission', () => {
     expect(routes.admin.type).toBe('admin');
-    expect(routes.admin.routes).toHaveLength(4);
+    expect(routes.admin.routes).toHaveLength(5);
     expect(policiesOf('GET', '/appointments')).toEqual(gate('plugin::maison.appointments.review'));
+    expect(policiesOf('GET', '/appointments/summary')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('POST', '/appointments/:reference/confirm')).toEqual(gate('plugin::maison.appointments.confirm'));
     expect(policiesOf('POST', '/demo/seed')).toEqual(gate('plugin::maison.demo.manage'));
     expect(policiesOf('POST', '/demo/reset')).toEqual(gate('plugin::maison.demo.manage'));
+  });
+
+  it('name controller actions that exist', () => {
+    const instances = Object.fromEntries(
+      Object.entries(controllers).map(([name, factory]) => [name, (factory as any)({ strapi: fakeStrapi() })])
+    );
+    for (const { handler } of routes.admin.routes) {
+      const [controller, action] = handler.split('.');
+      expect(typeof instances[controller]?.[action], handler).toBe('function');
+    }
+  });
+
+  it('list the summary before any route whose :parameter could take "summary" for a value', () => {
+    // The first route that matches a request answers it, so nothing ahead of the summary may match its path.
+    const paths = routes.admin.routes.filter((route) => route.method === 'GET').map((route) => route.path);
+    const summaryAt = paths.indexOf('/appointments/summary');
+    expect(summaryAt, 'GET /appointments/summary is registered').toBeGreaterThanOrEqual(0);
+    const matchesSummary = (path: string) => new RegExp(`^${path.replace(/:[^/]+/g, '[^/]+')}$`).test('/appointments/summary');
+    expect(paths.slice(0, summaryAt).filter(matchesSummary)).toEqual([]);
   });
 });
 
@@ -52,6 +73,35 @@ describe('appointments controller', () => {
       expect(ctx.body.error.details.code).toBe('invalid_input');
     }
     expect(listRequests).not.toHaveBeenCalled();
+  });
+
+  describe('summary', () => {
+    const summary = {
+      counts: { waitingForStaff: 2, confirmedUpcoming: 1, confirmationsSent: 1 },
+      recent: [{ reference: 'APT-4821', status: 'requested', customer: 'line:U4af…88', boutique: null, requestedFor: '2026-10-10T14:00:00+09:00', confirmationSent: false }],
+    };
+
+    it("returns the service's summary", async () => {
+      const summarizeRequests = vi.fn(async () => summary);
+      const ctx = fakeCtx();
+      await controllerWith({ summarizeRequests }).summary(ctx);
+      expect(ctx.body).toEqual(summary);
+    });
+
+    it('counts at the real time: nothing in the request can move the service clock', async () => {
+      const summarizeRequests = vi.fn(async () => summary);
+      await controllerWith({ summarizeRequests }).summary(fakeCtx({ query: { now: '2020-01-01T00:00:00Z', limit: '1' } }));
+      expect(summarizeRequests).toHaveBeenCalledWith();
+    });
+
+    it("lets a service failure reach Strapi's error handling, so the widget shows its error and not made-up numbers", async () => {
+      const summarizeRequests = vi.fn(async () => {
+        throw new Error('database is down');
+      });
+      const ctx = fakeCtx();
+      await expect(controllerWith({ summarizeRequests }).summary(ctx)).rejects.toThrow('database is down');
+      expect(ctx.body).toBeUndefined();
+    });
   });
 
   it('returns the confirmed appointment', async () => {

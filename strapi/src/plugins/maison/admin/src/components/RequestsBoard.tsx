@@ -30,7 +30,8 @@ interface StaffAppointment {
   requestedFor: string;
   products: Array<{ slug: string; name: string }>;
   note: string;
-  createdVia: 'concierge' | 'app';
+  /** "web" for a request a website made through the REST routes. */
+  createdVia: 'concierge' | 'app' | 'web';
   confirmationSent: boolean;
   createdAt: string;
 }

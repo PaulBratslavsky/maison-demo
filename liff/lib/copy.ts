@@ -34,6 +34,8 @@ export const COPY = {
     note: 'メッセージ（任意）',
     request: 'リクエストを送る',
     closedOnDate: 'この日は休業日です。別の日をお選びください。',
+    // A request the boutique's hours refused (boutique_closed), naming the boutique.
+    closedAtTime: (boutique: string) => `${boutique}はこの時間、営業時間外です。`,
     close: '閉じる',
     requested: 'ブティックの確認待ち',
     confirmed: '確定',
@@ -99,6 +101,7 @@ export const COPY = {
     note: 'Note (optional)',
     request: 'Send request',
     closedOnDate: 'Closed on this day. Please pick another.',
+    closedAtTime: (boutique: string) => `${boutique} is closed at that time.`,
     close: 'Close',
     requested: 'Awaiting the boutique',
     confirmed: 'Confirmed',

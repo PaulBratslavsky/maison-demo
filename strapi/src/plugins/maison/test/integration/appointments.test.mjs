@@ -43,6 +43,20 @@ describe('appointments service', () => {
     assert.equal(await strapi.documents(UID).count({ status: 'published', filters: { reference: view.reference } }), 0, 'never published');
   });
 
+  it("names the boutique and products in the customer's language, and in the default locale without one", async () => {
+    const subject = `line:U${'c'.repeat(32)}`; // a customer of its own, so the other tests' open requests stay as they are
+    const english = await request({ subject, locale: 'en', requestedFor: '2026-10-11T14:00:00+09:00' });
+    assert.equal(english.ok, true, JSON.stringify(english));
+    assert.deepEqual(english.value.boutique, { slug: 'ginza', name: 'Ginza Flagship' });
+    assert.deepEqual(english.value.products, [{ slug: 'weekender-50', name: 'Weekender 50' }]);
+
+    const japanese = await request({ subject, locale: 'ja', requestedFor: '2026-10-11T15:00:00+09:00' });
+    assert.deepEqual(japanese.value.boutique, { slug: 'ginza', name: '銀座本店' });
+    const unnamed = await request({ subject, requestedFor: '2026-10-11T16:00:00+09:00' });
+    assert.deepEqual(unnamed.value.boutique, { slug: 'ginza', name: '銀座本店' }, 'the default locale, ja');
+    assert.deepEqual(unnamed.value.products, [{ slug: 'weekender-50', name: 'ウィークエンダー 50' }]);
+  });
+
   it('rejects unknown slugs and times that are too soon or outside opening hours', async () => {
     assert.equal((await request({ boutique: 'kyoto' })).code, 'not_found');
     assert.equal((await request({ productSlugs: ['weekender-50', 'no-such-piece'] })).code, 'not_found');

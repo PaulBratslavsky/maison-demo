@@ -4,7 +4,7 @@ import { getConfig } from '../../config';
 import { ACTION } from '../../constants';
 import { toolSuccess } from '../../domain/tool-result';
 import { defineTool } from '../define';
-import { localeInput } from '../schemas';
+import { browseCollectionsInput } from '../schemas';
 
 export const browseCollectionsTool = defineTool({
   name: 'browse_collections',
@@ -12,7 +12,7 @@ export const browseCollectionsTool = defineTool({
   description:
     "Lists the house's published collections with a short story and product count. Start here when a customer wants to browse; then call search_products with a collection slug. It doesn't list products or prices.",
   auth: { policies: [{ action: ACTION.catalogRead }] },
-  resolveInputSchema: () => z.object({ locale: localeInput }),
+  resolveInputSchema: () => browseCollectionsInput,
   resolveOutputSchema: () =>
     z.object({
       locale: z.enum(['ja', 'en']),

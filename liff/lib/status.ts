@@ -33,12 +33,18 @@ export const errorOf = (error: unknown): ScreenError => {
 /**
  * An error in the customer's words. An unknown code, or a name Object inherits such as `constructor`, gets the generic
  * copy: nothing falls back to the raw message, which is in English and written for developers or agents. When the
- * server named a wait (Retry-After), the copy says how long it is.
+ * server named a wait (Retry-After), the copy says how long it is. The booking sheet passes the boutique's name, in the
+ * customer's language, so boutique_closed can name it: the tool's own message names it in the catalog's default language.
  */
-export const errorText = (error: Pick<ScreenError, 'code' | 'retryAfterSeconds'>, locale: Locale): string => {
+export const errorText = (error: Pick<ScreenError, 'code' | 'retryAfterSeconds'>, locale: Locale, boutique?: string): string => {
   const t = COPY[locale];
   const errors: Readonly<Record<string, string>> = t.errors;
-  const text = Object.hasOwn(errors, error.code) ? errors[error.code] : errors.error;
+  const text =
+    error.code === 'boutique_closed' && boutique
+      ? t.closedAtTime(boutique)
+      : Object.hasOwn(errors, error.code)
+        ? errors[error.code]
+        : errors.error;
   return error.retryAfterSeconds ? `${text} ${t.tryAgainIn(error.retryAfterSeconds)}` : text;
 };
 

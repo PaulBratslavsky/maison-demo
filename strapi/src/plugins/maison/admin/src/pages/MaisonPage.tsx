@@ -16,7 +16,7 @@ const MaisonPage = () => {
   return (
     <Page.Main>
       <Page.Title>Maison</Page.Title>
-      <Layouts.Header title="Maison" subtitle="Boutique appointment requests from the app and the concierge, as they arrive." />
+      <Layouts.Header title="Maison" subtitle="Boutique appointment requests from the app, the concierge and the web, as they arrive." />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={8}>
           {allowedActions.canReview && <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} />}

@@ -643,7 +643,7 @@ export interface PluginMaisonAppointment extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    createdVia: Schema.Attribute.Enumeration<['concierge', 'app']> &
+    createdVia: Schema.Attribute.Enumeration<['concierge', 'app', 'web']> &
       Schema.Attribute.DefaultTo<'app'>;
     customer: Schema.Attribute.String &
       Schema.Attribute.Required &

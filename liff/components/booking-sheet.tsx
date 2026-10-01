@@ -70,6 +70,8 @@ export function BookingSheet({ product, onClose }: { product: Product; onClose: 
         productSlugs: [product.slug],
         requestedFor: `${date}T${startTime}:00+09:00`,
         ...(note.trim() ? { note: note.trim() } : {}),
+        // The answer names the boutique and products in the customer's language.
+        locale,
       });
       const error = toolErrorOf(result);
       if (error) {
@@ -168,7 +170,8 @@ export function BookingSheet({ product, onClose }: { product: Product; onClose: 
 
         {problem && (
           <div role="alert" className="rounded bg-red-50 p-3 text-sm text-red-900">
-            <p>{errorText(problem, locale)}</p>
+            {/* `chosen` is the boutique the request was for: picking another clears the problem. */}
+            <p>{errorText(problem, locale, chosen?.name)}</p>
             <ErrorDetail error={problem} />
           </div>
         )}

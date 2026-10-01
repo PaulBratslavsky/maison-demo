@@ -1,7 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
-import { UID, type Locale } from '../constants';
+import { CREATED_VIA, UID, type CreatedVia, type Locale } from '../constants';
 import { checkOpenAt, validateOpeningHours, type Weekday } from '../domain/hours';
 import { generateReference } from '../domain/reference';
 import { failure, type ServiceResult } from '../domain/service-result';
@@ -26,7 +26,9 @@ export interface AppointmentRequest {
   productSlugs: string[];
   requestedFor: string;
   note?: string;
-  createdVia: 'concierge' | 'app';
+  createdVia: CreatedVia;
+  /** The language of the boutique and product names in the answer. Defaults to defaultLocale. */
+  locale?: Locale;
   /** Only for tests. Defaults to the current time. */
   now?: Date;
 }
@@ -40,7 +42,7 @@ export interface StaffAppointmentView {
   requestedFor: string;
   products: Array<{ slug: string; name: string }>;
   note: string;
-  createdVia: 'concierge' | 'app';
+  createdVia: CreatedVia;
   confirmationSent: boolean;
   createdAt: string;
 }
@@ -60,13 +62,46 @@ export interface ConfirmedAppointment {
   alreadyConfirmed: boolean;
 }
 
+/**
+ * What staff see at a glance on the admin homepage: the board's headline numbers, and its newest rows. The three
+ * counts follow one pipeline of visits still ahead: waiting for staff, then confirmed, then sent over LINE.
+ */
+export interface RequestsSummary {
+  counts: {
+    /** Requested and not confirmed yet, with the visit still ahead: what the board's "Waiting for staff" view lists. */
+    waitingForStaff: number;
+    /** Confirmed by staff, with the visit still ahead. */
+    confirmedUpcoming: number;
+    /** Of those confirmed upcoming visits, the ones whose LINE confirmation has been sent: the board's "LINE sent" rows among them. */
+    confirmationsSent: number;
+  };
+  /** The newest requests, newest first: the top of the board's "All requests" view, without the products and the note. */
+  recent: Array<Pick<StaffAppointmentView, 'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'confirmationSent'>>;
+}
+
 const MIN_LEAD_MINUTES = 30;
+const RECENT_REQUESTS = 5;
 const DAY_NAMES: Record<Weekday, string> = {
   mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
 };
 const POPULATE = { boutique: { fields: ['slug', 'name'] }, products: { fields: ['slug', 'name'] } };
 /** Staff views read only documentIds from the draft's relations; every label comes from a published version. */
 const STAFF_POPULATE = { boutique: { fields: ['documentId'] }, products: { fields: ['documentId'] } };
+
+/*
+ * The board's views, as conditions on the appointment drafts. The board's list and the homepage summary both use
+ * these, so a count always matches the rows the board shows. `confirmed` is every confirmed appointment's documentId.
+ */
+
+/** A visit that hasn't started at `now`. */
+const ahead = (now: Date): Doc => ({ requestedFor: { $gte: now.toISOString() } });
+
+/** The board's "requested" view: what staff can still confirm, not confirmed yet and with the visit still ahead. */
+const requestedConditions = (confirmed: string[], now: Date): Doc[] =>
+  confirmed.length > 0 ? [{ documentId: { $notIn: confirmed } }, ahead(now)] : [ahead(now)];
+
+/** The board's "confirmed" view, whenever the visit is. null when nothing is confirmed, so nothing can match. */
+const confirmedConditions = (confirmed: string[]): Doc[] | null => (confirmed.length > 0 ? [{ documentId: { $in: confirmed } }] : null);
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const publishedBySlug = (uid: string, slug: string, locale: Locale) =>
@@ -160,7 +195,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       requestedFor: toZonedIso(new Date(doc.requestedFor), timezone),
       products: ((doc.products ?? []) as Doc[]).flatMap((product) => products.get(product.documentId) ?? []),
       note: doc.customerNote ?? '',
-      createdVia: doc.createdVia === 'concierge' ? 'concierge' : 'app',
+      createdVia: (CREATED_VIA as readonly string[]).includes(doc.createdVia) ? (doc.createdVia as CreatedVia) : 'app',
       confirmationSent: sent.has(doc.reference),
       createdAt: toZonedIso(new Date(doc.createdAt), timezone),
     }));
@@ -187,7 +222,24 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     throw new Error('[maison] Could not find a free appointment reference after 20 attempts.');
   };
 
-  return {
+  /**
+   * The references of the confirmed visits still ahead at `now`, on the drafts the board lists. Appointments aren't
+   * localized, so there's one draft per confirmed documentId, and this limit never cuts the list short.
+   */
+  const confirmedUpcomingReferences = async (confirmed: string[], now: Date): Promise<string[]> => {
+    const view = confirmedConditions(confirmed);
+    if (!view) return [];
+    const rows = await strapi.documents(UID.appointment).findMany({
+      status: 'draft',
+      filters: { $and: [...view, ahead(now)] },
+      fields: ['reference'],
+      limit: confirmed.length,
+    });
+    return (rows as Doc[]).map((row) => row.reference as string);
+  };
+
+  // `summarizeRequests` reads the board's own rows through `listRequests`, so it refers to the service by name.
+  const service = {
     /** Checks, in the spec's order, then creates a draft. Nothing here can publish. */
     async request(input: AppointmentRequest): Promise<ServiceResult<AppointmentView>> {
       const { defaultLocale, timezone, maxOpenRequestsPerCustomer } = getConfig(strapi);
@@ -245,7 +297,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         },
       });
       const saved = await strapi.documents(UID.appointment).findOne({ documentId: created.documentId, status: 'draft', populate: POPULATE });
-      const [view] = await toViews([saved as Doc], defaultLocale);
+      const [view] = await toViews([saved as Doc], input.locale ?? defaultLocale);
       return { ok: true, value: view };
     },
 
@@ -283,13 +335,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       }
       if (status !== 'all') {
         const confirmed = await allConfirmedIds();
-        if (status === 'confirmed') {
-          if (confirmed.length === 0) return { ok: true, value: [] };
-          conditions.push({ documentId: { $in: confirmed } });
-        } else {
-          if (confirmed.length > 0) conditions.push({ documentId: { $notIn: confirmed } });
-          conditions.push({ requestedFor: { $gte: (filters.now ?? new Date()).toISOString() } });
-        }
+        const view = status === 'confirmed' ? confirmedConditions(confirmed) : requestedConditions(confirmed, filters.now ?? new Date());
+        if (!view) return { ok: true, value: [] };
+        conditions.push(...view);
       }
 
       const docs = await strapi.documents(UID.appointment).findMany({
@@ -334,5 +382,33 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const [appointment] = await toStaffViews([saved as Doc], defaultLocale);
       return { ok: true, value: { appointment, alreadyConfirmed } };
     },
+
+    /**
+     * The numbers and rows behind the admin homepage's "Maison requests" widget. The counts use the board's own
+     * conditions, on the drafts the board lists, and follow one pipeline of visits still ahead: "waiting" is its
+     * "requested" view, "confirmed, upcoming" is its "confirmed" view with the past visits left out, and "LINE sent"
+     * counts those confirmed upcoming rows with `confirmationSent`. Only their `sent` notifications are read.
+     * The rows are the board's "All requests" rows, so they are masked, ordered and labelled the way the board has them.
+     * `now` is only for tests. It defaults to the current time.
+     */
+    async summarizeRequests(now: Date = new Date()): Promise<RequestsSummary> {
+      const confirmed = await allConfirmedIds();
+      const [waitingForStaff, upcoming, newest] = await Promise.all([
+        strapi.documents(UID.appointment).count({ status: 'draft', filters: { $and: requestedConditions(confirmed, now) } }),
+        confirmedUpcomingReferences(confirmed, now),
+        service.listRequests({ status: 'all', limit: RECENT_REQUESTS, now }),
+      ]);
+      // Only an unknown boutique filter can fail, and there is none here.
+      if (newest.ok === false) throw new Error(`[maison] The newest requests could not be listed: ${newest.message}`);
+      const sent = await sentReferences(upcoming);
+
+      return {
+        counts: { waitingForStaff, confirmedUpcoming: upcoming.length, confirmationsSent: sent.size },
+        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, confirmationSent }) => ({
+          reference, status, customer, boutique, requestedFor, confirmationSent,
+        })),
+      };
+    },
   };
+  return service;
 };

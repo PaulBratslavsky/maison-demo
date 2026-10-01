@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { expect, test } from '@playwright/test';
 
 import { createSession } from '../lib/session';
+import type { Appointment } from '../lib/types';
 
 const strapiUrl = (process.env.NEXT_PUBLIC_STRAPI_URL ?? 'http://localhost:1338').replace(/\/+$/, '');
 const clientId = process.env.NEXT_PUBLIC_MAISON_CLIENT_ID ?? '';
@@ -17,9 +18,12 @@ const visitOn = (weekday: number, time: string) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${time}:00+09:00`;
 };
 
-/** A demo customer's own MCP connection, signed in the way the app signs in: a LIFF mock ID token, exchanged. */
+/** A demo customer's session, signed in the way the app signs in: a LIFF mock ID token, exchanged. */
+const sessionOf = (lineUserId: string) => createSession({ strapiUrl, clientId, getIdToken: () => `valid.${lineUserId}` }).getToken();
+
+/** A demo customer's own MCP connection. */
 const signIn = async (lineUserId: string) => {
-  const token = await createSession({ strapiUrl, clientId, getIdToken: () => `valid.${lineUserId}` }).getToken();
+  const token = await sessionOf(lineUserId);
   const client = new Client({ name: 'maison-e2e', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${strapiUrl}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
   return client;
@@ -61,4 +65,69 @@ test("the admin API never returns an appointment's customer, and its list search
   const configuration = await request.get(`${strapiUrl}/content-manager/content-types/plugin::maison.appointment/configuration`, { headers: asAdmin() });
   expect(configuration.ok()).toBe(true);
   expect(((await configuration.json()) as { data: { contentType: { settings: { mainField: string } } } }).data.contentType.settings.mainField).toBe('reference');
+});
+
+test.describe('the REST door at /api/maison', () => {
+  const rest = `${strapiUrl}/api/maison`;
+  // Customers of their own, apart from every other test's: A books one visit (a customer may hold three open), B none.
+  const CUSTOMER_A = `U${'a'.repeat(32)}`;
+  const CUSTOMER_B = `U${'9'.repeat(32)}`;
+  const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  test('serves the catalog with no credentials: the Public role reads it', async ({ request }) => {
+    const response = await request.get(`${rest}/collections?locale=en`);
+    expect(response.status()).toBe(200);
+    const { collections } = (await response.json()) as { collections: Array<{ name: string }> };
+    expect(collections.map((collection) => collection.name).sort()).toEqual(['Atelier', 'Gifts', 'Voyage']);
+  });
+
+  test("answers a product by its slug, and an unknown slug with view_product's hint", async ({ request }) => {
+    const found = await request.get(`${rest}/products/weekender-50?locale=en`);
+    expect(found.status()).toBe(200);
+    expect(((await found.json()) as { product: { slug: string; name: string } }).product).toMatchObject({ slug: 'weekender-50', name: 'Weekender 50' });
+    const unknown = await request.get(`${rest}/products/no-such-piece?locale=en`);
+    expect(unknown.status()).toBe(404);
+    expect(await unknown.json()).toEqual({
+      error: { code: 'not_found', message: 'No published product "no-such-piece".', hint: 'Call search_products to find valid product slugs.' },
+    });
+  });
+
+  test("books only with a LINE customer's session, as a web request, and lists the visit for that customer alone", async ({ request }) => {
+    const booking = { boutique: 'ginza', productSlugs: ['weekender-50'], requestedFor: visitOn(6, '14:00'), locale: 'en' };
+    // Every request as the staff board lists it. How a request came in (createdVia) is for staff, so only the board shows it.
+    const board = async () => {
+      const response = await request.get(`${strapiUrl}/maison/appointments?status=all&limit=50`, { headers: asAdmin() });
+      expect(response.ok()).toBe(true);
+      return ((await response.json()) as { appointments: Array<{ reference: string; createdVia: string }> }).appointments;
+    };
+    const requestsBefore = (await board()).length;
+
+    for (const [caller, headers] of [['no session', {}], ['the admin session', asAdmin()]] as const) {
+      const refused = await request.post(`${rest}/appointments`, { data: booking, headers });
+      expect(refused.status(), caller).toBe(401);
+      expect(refused.headers()['www-authenticate'], caller).toBe('Bearer');
+      expect(((await refused.json()) as { error: { code: string } }).error.code, caller).toBe('not_signed_in');
+    }
+    expect(await board(), 'a refused request books nothing').toHaveLength(requestsBefore);
+
+    const asA = bearer(await sessionOf(CUSTOMER_A));
+    const created = await request.post(`${rest}/appointments`, { data: booking, headers: asA });
+    expect(created.status()).toBe(201);
+    const { appointment } = (await created.json()) as { appointment: Appointment };
+    expect(appointment).toMatchObject({
+      status: 'requested',
+      boutique: { slug: 'ginza', name: 'Ginza Flagship' },
+      requestedFor: booking.requestedFor,
+      products: [{ slug: 'weekender-50', name: 'Weekender 50' }],
+    });
+    expect((await board()).find((row) => row.reference === appointment.reference)?.createdVia).toBe('web');
+
+    const visitsOf = async (headers: Record<string, string>) => {
+      const response = await request.get(`${rest}/my-appointments?locale=en`, { headers });
+      expect(response.status()).toBe(200);
+      return ((await response.json()) as { appointments: Appointment[] }).appointments.map((visit) => visit.reference);
+    };
+    expect(await visitsOf(asA)).toEqual([appointment.reference]);
+    expect(await visitsOf(bearer(await sessionOf(CUSTOMER_B))), "B never sees A's visit").toEqual([]);
+  });
 });

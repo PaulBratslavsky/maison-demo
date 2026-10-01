@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authorizationOf, lineUserIdOf, maskSubject, parseSubject } from '../../server/src/domain/subject';
+import { authorizationOf, bearerTokenOf, lineUserIdOf, maskSubject, parseSubject } from '../../server/src/domain/subject';
 
 const VALID = 'line:U4af4980629c1a7b3f1e2d3c4b5a69788';
 
@@ -35,6 +35,22 @@ describe('authorizationOf', () => {
     expect(authorizationOf({})).toBeNull();
     expect(authorizationOf({ authorization: '' })).toBeNull();
     expect(authorizationOf({ authorization: ['Bearer a', 'Bearer b'] })).toBeNull();
+  });
+});
+
+describe('bearerTokenOf', () => {
+  it('returns the token of a Bearer header, read the way oauth-mcp-manager reads it', () => {
+    expect(bearerTokenOf('Bearer mcp_at_abc')).toBe('mcp_at_abc');
+    expect(bearerTokenOf('bearer   mcp_at_abc')).toBe('mcp_at_abc');
+  });
+
+  it.each([
+    ['no header', null],
+    ['another scheme', 'Basic dXNlcjpwYXNz'],
+    ['no token', 'Bearer '],
+    ['two tokens', 'Bearer a b'],
+  ])('returns null for %s', (_label, value) => {
+    expect(bearerTokenOf(value)).toBeNull();
   });
 });
 

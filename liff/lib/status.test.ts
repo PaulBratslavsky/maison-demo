@@ -59,6 +59,22 @@ describe('errorText', () => {
     }
   });
 
+  it("names the boutique for boutique_closed when the screen passes its name, in the customer's language", () => {
+    // The tool's own message names the boutique in the catalog's default language, whatever locale the request had.
+    const closed = { code: 'boutique_closed', message: '銀座本店 is not open at 2026-10-03T21:00:00+09:00.' };
+    expect(errorText(closed, 'en', 'Ginza Flagship')).toBe('Ginza Flagship is closed at that time.');
+    expect(errorText(closed, 'ja', '銀座本店')).toBe('銀座本店はこの時間、営業時間外です。');
+    expect(errorText(closed, 'en', 'Ginza Flagship')).not.toContain('銀座本店');
+  });
+
+  it('keeps the general closed-boutique copy without a name, and names no boutique in other errors', () => {
+    const closed = { code: 'boutique_closed', message: '銀座本店 is not open at 2026-10-03T21:00:00+09:00.' };
+    expect(errorText(closed, 'en')).toBe(COPY.en.errors.boutique_closed);
+    expect(errorText(closed, 'ja', '')).toBe(COPY.ja.errors.boutique_closed);
+    expect(errorText({ code: 'in_the_past', message: 'x' }, 'en', 'Ginza Flagship')).toBe(COPY.en.errors.in_the_past);
+    expect(errorText({ code: 'too_many_open_requests', message: 'x' }, 'ja', '銀座本店')).toBe(COPY.ja.errors.too_many_open_requests);
+  });
+
   it('says how long to wait when the server named a wait (Retry-After)', () => {
     const busy = { code: 'temporarily_unavailable', message: 'LINE sign-in could not be checked right now.' };
     expect(errorText({ ...busy, retryAfterSeconds: 5 }, 'en')).toBe(`${COPY.en.errors.temporarily_unavailable} ${COPY.en.tryAgainIn(5)}`);

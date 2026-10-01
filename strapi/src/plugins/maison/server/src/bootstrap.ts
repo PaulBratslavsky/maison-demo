@@ -2,6 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from './config';
 import { PLUGIN_ID } from './constants';
+import { answerCustomerSessionErrors } from './policies/customer-session';
 
 const ACTIONS = [
   { uid: 'catalog.read', displayName: 'MCP: browse the catalog', subCategory: 'mcp' },
@@ -17,6 +18,10 @@ const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   await strapi
     .service('admin::permission')
     .actionProvider.registerMany(ACTIONS.map((action) => ({ section: 'plugins', pluginName: PLUGIN_ID, ...action })));
+
+  // Strapi has added its global middlewares by now and mounts the routes after every bootstrap, so this sits
+  // inside its error middleware and around the customer routes' policy.
+  strapi.server.use(answerCustomerSessionErrors);
 
   if (!getConfig(strapi).liffUrl) {
     strapi.log.warn('[maison] config.liffUrl is not set, so pending_confirmations will return not_configured.');

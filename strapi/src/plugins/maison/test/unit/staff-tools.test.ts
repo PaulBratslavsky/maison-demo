@@ -40,6 +40,12 @@ describe('appointment_requests', () => {
     expect(errorOf(result)).toEqual({ code: 'not_found', message: failure.message, hint: failure.hint });
   });
 
+  it('shows requests made through the REST routes as createdVia "web"', async () => {
+    const listRequests = vi.fn(async () => ({ ok: true, value: [{ ...staffView, createdVia: 'web' }] }));
+    const result = await appointmentRequestsTool.createHandler(withAppointments({ listRequests }), context)({ args: {}, extra: {} });
+    expect(appointmentRequestsTool.resolveOutputSchema(context).parse(result.structuredContent).appointments[0].createdVia).toBe('web');
+  });
+
   it('validates status, date and limit', () => {
     const input = appointmentRequestsTool.resolveInputSchema!(context);
     expect(input.safeParse({}).success).toBe(true);

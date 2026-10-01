@@ -5,6 +5,24 @@ import path from 'node:path';
 export const SUBJECT_A = `line:U${'a'.repeat(32)}`;
 export const SUBJECT_B = `line:U${'b'.repeat(32)}`;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TOKYO_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/**
+ * The calendar date in Tokyo `days` days from now, as YYYY-MM-DD. Tests that run against the real clock book their
+ * visits relative to it, so they never expire. With `weekday` (0 is Sunday, 2 Tuesday), the first such day on or
+ * after that date.
+ */
+export const tokyoDate = (days, { weekday } = {}) => {
+  // Shifted by Tokyo's offset, the UTC fields read as Tokyo's calendar (Japan has no daylight saving time).
+  const day = new Date(Date.now() + TOKYO_OFFSET_MS + days * DAY_MS);
+  if (weekday !== undefined) day.setUTCDate(day.getUTCDate() + ((weekday - day.getUTCDay() + 7) % 7));
+  return day.toISOString().slice(0, 10);
+};
+
+/** `date` at `time` (HH:MM) in Tokyo, the way the app sends a visit and the services answer it. */
+export const tokyoTime = (date, time) => `${date}T${time}:00+09:00`;
+
 const appDirectory = () => {
   const appDir = process.env.STRAPI_APP_DIR;
   if (!appDir) {

@@ -7,4 +7,6 @@ export const PERMISSIONS = {
   page: [REVIEW, MANAGE],
   /** Checked with useRBAC, which answers canReview, canConfirm and canManage. */
   sections: [REVIEW, CONFIRM, MANAGE],
+  /** The Homepage widget, which shows the requests board's numbers: staff who review requests. */
+  widget: [REVIEW],
 };

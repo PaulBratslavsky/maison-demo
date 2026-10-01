@@ -17,6 +17,10 @@ export const authorizationOf = (
   return typeof value === 'string' && value.length > 0 ? value : null;
 };
 
+/** The token in `Bearer <token>`, or null. Read the way oauth-mcp-manager reads it, so both agree on what the token is. */
+export const bearerTokenOf = (authorization: string | null): string | null =>
+  /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1] ?? null;
+
 /** A customer as staff see them, e.g. `line:U4af…88`. Never the full subject; anything that isn't one is "unknown". */
 export const maskSubject = (value: unknown): string => {
   const subject = parseSubject(value);

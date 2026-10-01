@@ -4,13 +4,7 @@ import { getConfig } from '../../config';
 import { ACTION } from '../../constants';
 import { toolError, toolSuccess } from '../../domain/tool-result';
 import { defineTool } from '../define';
-import { isoDateInput, localeInput, slugInput } from '../schemas';
-
-const input = z.object({
-  productSlugs: z.array(slugInput).max(5).optional().describe('Products to report stock for.'),
-  date: isoDateInput.optional().describe('A calendar day (YYYY-MM-DD) to check opening hours for.'),
-  locale: localeInput,
-});
+import { findBoutiquesInput } from '../schemas';
 
 export const findBoutiquesTool = defineTool({
   name: 'find_boutiques',
@@ -18,7 +12,7 @@ export const findBoutiquesTool = defineTool({
   description:
     "Lists boutiques with opening hours, whether each is open on a given date, and stock for up to five products. Use it before requesting an appointment. It doesn't book anything.",
   auth: { policies: [{ action: ACTION.catalogRead }] },
-  resolveInputSchema: () => input,
+  resolveInputSchema: () => findBoutiquesInput,
   resolveOutputSchema: () =>
     z.object({
       date: z.string().nullable(),

@@ -38,6 +38,24 @@ describe('request_appointment', () => {
     expect(requestAppointmentTool.resolveOutputSchema(context).parse(result.structuredContent)).toEqual({ appointment: view });
   });
 
+  it("asks for the names in the customer's language, and leaves the default to the service without one", async () => {
+    const request = vi.fn(async () => ({ ok: true, value: view }));
+    const { strapi } = setup(SUBJECT, { request });
+    const handler = requestAppointmentTool.createHandler(strapi, context);
+    await handler({ args: { ...args, locale: 'en' }, extra: extraWith({ authorization: 'Bearer t' }) });
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ subject: SUBJECT, locale: 'en' }));
+    await handler({ args, extra: extraWith({ authorization: 'Bearer t' }) });
+    expect(request.mock.calls[1][0].locale).toBeUndefined();
+  });
+
+  it('takes a locale the way the other customer tools do: ja or en', () => {
+    const input = requestAppointmentTool.resolveInputSchema!(context);
+    expect(input.safeParse({ ...args, locale: 'en' }).data?.locale).toBe('en');
+    const french = input.safeParse({ ...args, locale: 'fr' });
+    expect(french.success).toBe(false);
+    expect(french.error?.issues[0].path).toEqual(['locale']);
+  });
+
   it('marks every other call as app', async () => {
     const request = vi.fn(async () => ({ ok: true, value: view }));
     const { strapi } = setup(SUBJECT, { request });

@@ -2,9 +2,10 @@ import { z } from '@strapi/utils';
 
 import { getConfig } from '../../config';
 import { ACTION } from '../../constants';
+import { productNotFound } from '../../domain/failures';
 import { toolError, toolSuccess } from '../../domain/tool-result';
 import { defineTool } from '../define';
-import { localeInput, slugInput } from '../schemas';
+import { viewProductInput } from '../schemas';
 
 const product = z.object({
   locale: z.enum(['ja', 'en']).describe('The language actually returned; falls back to ja when no translation exists.'),
@@ -29,13 +30,14 @@ export const viewProductTool = defineTool({
   description:
     "Full details for one published product: description, craft story, dimensions, personalization options and stock per boutique. Use the slug from search_products. Never invent details the product doesn't have.",
   auth: { policies: [{ action: ACTION.catalogRead }] },
-  resolveInputSchema: () => z.object({ slug: slugInput, locale: localeInput }),
+  resolveInputSchema: () => viewProductInput,
   resolveOutputSchema: () => z.object({ product }),
   createHandler: (strapi) => async ({ args }) => {
     const locale = args.locale ?? getConfig(strapi).defaultLocale;
     const found = await strapi.plugin('maison').service('catalog').getProduct(locale, args.slug);
     if (!found) {
-      return toolError('not_found', `No published product "${args.slug}".`, 'Call search_products to find valid product slugs.');
+      const { code, message, hint } = productNotFound(args.slug);
+      return toolError(code, message, hint);
     }
     return toolSuccess({ product: found });
   },

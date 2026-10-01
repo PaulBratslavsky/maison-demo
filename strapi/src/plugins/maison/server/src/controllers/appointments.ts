@@ -23,6 +23,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     ctx.body = { appointments: result.value };
   },
 
+  /** The admin homepage widget: the board's headline counts and its newest rows, counted at the current time. */
+  async summary(ctx) {
+    ctx.body = await strapi.plugin('maison').service('appointments').summarizeRequests();
+  },
+
   async confirm(ctx) {
     const reference = referenceInput.safeParse(ctx.params.reference);
     if (!reference.success) {

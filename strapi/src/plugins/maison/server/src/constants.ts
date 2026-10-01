@@ -40,6 +40,10 @@ export const CATEGORIES = ['trunk', 'bag', 'small-leather', 'travel', 'objet'] a
 export const OCCASIONS = ['travel', 'anniversary', 'birthday', 'wedding', 'new-job'] as const;
 export const PERSONALIZATION_KINDS = ['initials-hot-stamp', 'hand-painted-stripes', 'monogram-color'] as const;
 
+/** Where a visit was requested: the AI concierge, the app's own screens, or a website through the REST routes. */
+export const CREATED_VIA = ['concierge', 'app', 'web'] as const;
+export type CreatedVia = (typeof CREATED_VIA)[number];
+
 /** Provides resolveSubject(authorization) for customer identity (oauth-mcp-manager 1.1). */
 export const OAUTH_PLUGIN_ID = 'strapi-oauth-mcp-manager';
 /** Informational only: which surface made the call ("concierge" or absent). Never used for identity. */
