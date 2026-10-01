@@ -3,6 +3,7 @@ import '@fontsource/cormorant-garamond/600.css';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
+import { MaisonProvider } from '@/components/maison-provider';
 import { PhoneFrame } from '@/components/phone-frame';
 
 import './globals.css';
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ja">
       <body>
-        <PhoneFrame>{children}</PhoneFrame>
+        <PhoneFrame>
+          <MaisonProvider>{children}</MaisonProvider>
+        </PhoneFrame>
       </body>
     </html>
   );
