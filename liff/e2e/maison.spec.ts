@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { nextWeekday } from './support';
 
 const SECOND_CUSTOMER = `U${'b'.repeat(32)}`;
+const JAPANESE_CUSTOMER = `U${'c'.repeat(32)}`;
 
 /** Today's date on Tokyo's calendar, as the app counts it (YYYY-MM-DD: en-CA writes dates that way). */
 const tokyoToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
@@ -35,9 +36,11 @@ const openSheet = async (page: Page) => {
   await expect(page.getByLabel(/Time|時間/)).toBeVisible();
 };
 
-/** The name of every MCP tool the page calls on Strapi's /mcp, in order, from now on. */
+type ToolCall = { name: string; arguments: Record<string, unknown> };
+
+/** Every MCP tool the page calls on Strapi's /mcp, in order, from now on: its name, and the arguments it was sent. */
 const toolCalls = (page: Page) => {
-  const names: string[] = [];
+  const calls: ToolCall[] = [];
   page.on('request', (request) => {
     if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/mcp') return;
     let body: unknown;
@@ -47,12 +50,15 @@ const toolCalls = (page: Page) => {
       return; // not JSON, so not a tool call
     }
     for (const message of Array.isArray(body) ? body : [body]) {
-      const { method, params } = (message ?? {}) as { method?: string; params?: { name?: string } };
-      if (method === 'tools/call' && typeof params?.name === 'string') names.push(params.name);
+      const { method, params } = (message ?? {}) as { method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
+      if (method === 'tools/call' && typeof params?.name === 'string') calls.push({ name: params.name, arguments: params.arguments ?? {} });
     }
   });
-  return names;
+  return calls;
 };
+const namesOf = (calls: ToolCall[]) => calls.map((call) => call.name);
+/** The arguments of each call to the tool `name`, in order. */
+const argumentsOf = (calls: ToolCall[], name: string) => calls.filter((call) => call.name === name).map((call) => call.arguments);
 
 /**
  * Submits the booking form without its Send button, which is disabled: the way Enter in a field or a script could. The
@@ -78,19 +84,33 @@ const forceSubmit = (page: Page) =>
 const settle = (page: Page) => page.waitForTimeout(500);
 
 /** No request_appointment leaves the sheet: Send is disabled, and a submit that gets past the button is refused too. */
-const expectNothingSent = async (page: Page, calls: string[]) => {
+const expectNothingSent = async (page: Page, calls: ToolCall[]) => {
   await expect(page.getByRole('button', { name: /Send request|リクエストを送る/ })).toBeDisabled();
   expect(await forceSubmit(page), 'the form was submitted').toBe(true);
   await settle(page);
-  expect(calls).not.toContain('request_appointment');
+  expect(namesOf(calls)).not.toContain('request_appointment');
 };
 
 test('a customer browses, books a visit and finds it in My visits', async ({ page }) => {
+  const calls = toolCalls(page);
   const reference = await bookWeekender(page);
+  // The sheet sends the customer's language (English here, the app's default), so the answer names the boutique and
+  // products in it.
+  expect(argumentsOf(calls, 'request_appointment').map((args) => args.locale)).toEqual(['en']);
   // The visit just booked, found by its reference: the list isn't assumed to be in any order.
   const visit = page.getByTestId('visit').filter({ hasText: reference });
   await expect(visit).toContainText(/Ginza|銀座/);
   await expect(visit).toContainText(/Awaiting the boutique|ブティックの確認待ち/);
+});
+
+test("the booking sheet sends the customer's language: a request made in Japanese says ja", async ({ page }) => {
+  // A customer of their own, so this visit isn't one of the default customer's three open requests. The switch's choice
+  // is remembered by the browser, so the pages that follow start in Japanese.
+  await page.goto(`/?demoUser=${JAPANESE_CUSTOMER}`);
+  await page.getByRole('group', { name: /Language|言語/ }).getByRole('button', { name: 'JA' }).click();
+  const calls = toolCalls(page);
+  await bookWeekender(page);
+  expect(argumentsOf(calls, 'request_appointment').map((args) => args.locale)).toEqual(['ja']);
 });
 
 test('Osaka is closed on Tuesdays, and the sheet says so before any request', async ({ page }) => {
@@ -105,7 +125,7 @@ test('Osaka is closed on Tuesdays, and the sheet says so before any request', as
 test('a cleared date asks for one, and sends no request', async ({ page }) => {
   const calls = toolCalls(page);
   await openSheet(page);
-  expect(calls, 'the sheet checked its first date').toContain('find_boutiques');
+  expect(namesOf(calls), 'the sheet checked its first date').toContain('find_boutiques');
   const before = [...calls];
   await page.getByLabel(/Date|日付/).fill('');
   await expect(page.getByText(/^(Please choose a date\.|日付をお選びください。)$/)).toBeVisible();
@@ -116,7 +136,7 @@ test('a cleared date asks for one, and sends no request', async ({ page }) => {
 test("today's date asks for a later one, and sends no request", async ({ page }) => {
   const calls = toolCalls(page);
   await openSheet(page);
-  expect(calls, 'the sheet checked its first date').toContain('find_boutiques');
+  expect(namesOf(calls), 'the sheet checked its first date').toContain('find_boutiques');
   const before = [...calls];
   await page.getByLabel(/Date|日付/).fill(tokyoToday());
   await expect(page.getByText(/^(Please choose a date from tomorrow on\.|明日以降の日付をお選びください。)$/)).toBeVisible();

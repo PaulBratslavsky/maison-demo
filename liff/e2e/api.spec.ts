@@ -16,13 +16,25 @@ const visitOn = (weekday: number, time: string) => `${nextWeekday(weekday)}T${ti
 /**
  * An HTTP request with Node's fetch, never Playwright's `request` fixture: when a call of the fixture fails, Playwright
  * prints its request headers, the Authorization header among them, in the error's call log (and a trace stores them too).
+ * The answer has its body read once, as text and as JSON.
  */
-const send = (method: 'GET' | 'POST', url: string, { headers, data }: { headers?: Record<string, string>; data?: unknown } = {}) =>
-  fetch(url, {
+const send = async (method: 'GET' | 'POST', url: string, { headers, data }: { headers?: Record<string, string>; data?: unknown } = {}) => {
+  const response = await fetch(url, {
     method,
     headers: data === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
     body: data === undefined ? undefined : JSON.stringify(data),
   });
+  const text = await response.text();
+  return { status: response.status, headers: response.headers, text, json: <T = any>() => JSON.parse(text) as T };
+};
+type Answer = Awaited<ReturnType<typeof send>>;
+
+/**
+ * The status a call should answer with. A failure carries Strapi's own reason, the start of the answer's body, so a 403
+ * for a missing grant explains itself. Nothing of the request, such as a header, goes into the message.
+ */
+const expectStatus = (answer: Answer, status: number, label?: string) =>
+  expect(answer.status, [label, answer.text.slice(0, 400)].filter(Boolean).join(': ')).toBe(status);
 
 /** A demo customer's session, signed in the way the app signs in: a LIFF mock ID token, exchanged. */
 const sessionOf = (lineUserId: string) => createSession({ strapiUrl, clientId, getIdToken: () => `valid.${lineUserId}` }).getToken();
@@ -70,9 +82,9 @@ test("the Content Manager's appointment list never returns a customer, and its s
   const contentManager = `${strapiUrl}/content-manager`;
   // Only the Content Manager's list route runs here. The admin API's other routes use the same sanitizer, but aren't called.
   const list = async (query = '') => {
-    const response = await send('GET', `${contentManager}/collection-types/plugin::maison.appointment?page=1&pageSize=20${query}`, { headers: asAdmin() });
-    expect(response.status, 'the appointment list').toBe(200);
-    return ((await response.json()) as { results: Array<{ reference: string }> }).results;
+    const answer = await send('GET', `${contentManager}/collection-types/plugin::maison.appointment?page=1&pageSize=20${query}`, { headers: asAdmin() });
+    expectStatus(answer, 200, 'the appointment list');
+    return answer.json<{ results: Array<{ reference: string }> }>().results;
   };
   const rows = await list();
   expect(rows.length).toBeGreaterThan(0);
@@ -86,9 +98,9 @@ test("the Content Manager's appointment list never returns a customer, and its s
   // `appointments` relation of a boutique and of a product (picked from their edit views).
   type Configuration = { data: { contentType: { settings: { mainField: string }; metadatas: Record<string, { edit?: { mainField?: string } }> } } };
   const configuration = async (type: string) => {
-    const response = await send('GET', `${contentManager}/content-types/plugin::maison.${type}/configuration`, { headers: asAdmin() });
-    expect(response.status, `the ${type} configuration`).toBe(200);
-    return ((await response.json()) as Configuration).data.contentType;
+    const answer = await send('GET', `${contentManager}/content-types/plugin::maison.${type}/configuration`, { headers: asAdmin() });
+    expectStatus(answer, 200, `the ${type} configuration`);
+    return answer.json<Configuration>().data.contentType;
   };
   expect((await configuration('appointment')).settings.mainField).toBe('reference');
   for (const type of ['boutique', 'product']) {
@@ -104,19 +116,40 @@ test.describe('the REST door at /api/maison', () => {
   const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
   test('serves the catalog with no credentials: the Public role reads it', async () => {
-    const response = await send('GET', `${rest}/collections?locale=en`);
-    expect(response.status).toBe(200);
-    const { collections } = (await response.json()) as { collections: Array<{ name: string }> };
-    expect(collections.map((collection) => collection.name).sort()).toEqual(['Atelier', 'Gifts', 'Voyage']);
+    const collections = await send('GET', `${rest}/collections?locale=en`);
+    expectStatus(collections, 200, 'collections');
+    expect(
+      collections
+        .json<{ collections: Array<{ name: string }> }>()
+        .collections.map((collection) => collection.name)
+        .sort()
+    ).toEqual(['Atelier', 'Gifts', 'Voyage']);
+
+    // The query narrows the search: the Weekender is found, and the Tote isn't.
+    const products = await send('GET', `${rest}/products?query=weekender&locale=en`);
+    expectStatus(products, 200, 'a product search');
+    const found = products.json<{ locale: string; products: Array<{ slug: string }> }>();
+    expect(found.locale).toBe('en');
+    expect(found.products.map((product) => product.slug)).toContain('weekender-50');
+    expect(found.products.map((product) => product.slug)).not.toContain('tote-soleil');
+
+    const boutiques = await send('GET', `${rest}/boutiques?locale=en`);
+    expectStatus(boutiques, 200, 'boutiques');
+    expect(
+      boutiques
+        .json<{ boutiques: Array<{ slug: string }> }>()
+        .boutiques.map((boutique) => boutique.slug)
+        .sort()
+    ).toEqual(['ginza', 'omotesando', 'osaka']);
   });
 
   test("answers a product by its slug, and an unknown slug with view_product's hint", async () => {
     const found = await send('GET', `${rest}/products/weekender-50?locale=en`);
-    expect(found.status).toBe(200);
-    expect(((await found.json()) as { product: { slug: string; name: string } }).product).toMatchObject({ slug: 'weekender-50', name: 'Weekender 50' });
+    expectStatus(found, 200, 'a product by its slug');
+    expect(found.json<{ product: { slug: string; name: string } }>().product).toMatchObject({ slug: 'weekender-50', name: 'Weekender 50' });
     const unknown = await send('GET', `${rest}/products/no-such-piece?locale=en`);
-    expect(unknown.status).toBe(404);
-    expect(await unknown.json()).toEqual({
+    expectStatus(unknown, 404, 'an unknown product');
+    expect(unknown.json()).toEqual({
       error: { code: 'not_found', message: 'No published product "no-such-piece".', hint: 'Call search_products to find valid product slugs.' },
     });
   });
@@ -125,24 +158,29 @@ test.describe('the REST door at /api/maison', () => {
     const booking = { boutique: 'ginza', productSlugs: ['weekender-50'], requestedFor: visitOn(6, '14:00'), locale: 'en' };
     // Every request as the staff board lists it. How a request came in (createdVia) is for staff, so only the board shows it.
     const board = async () => {
-      const response = await send('GET', `${strapiUrl}/maison/appointments?status=all&limit=50`, { headers: asAdmin() });
-      expect(response.status, 'the staff board').toBe(200);
-      return ((await response.json()) as { appointments: Array<{ reference: string; createdVia: string }> }).appointments;
+      const answer = await send('GET', `${strapiUrl}/maison/appointments?status=all&limit=50`, { headers: asAdmin() });
+      expectStatus(answer, 200, 'the staff board');
+      return answer.json<{ appointments: Array<{ reference: string; createdVia: string }> }>().appointments;
     };
     const requestsBefore = (await board()).length;
 
+    // Both customer routes refuse a caller with no session, and an admin session is no customer's: 401, and the
+    // WWW-Authenticate header that tells a client to sign in.
     for (const [caller, headers] of [['no session', {}], ['the admin session', asAdmin()]] as const) {
-      const refused = await send('POST', `${rest}/appointments`, { data: booking, headers });
-      expect(refused.status, caller).toBe(401);
-      expect(refused.headers.get('www-authenticate'), caller).toBe('Bearer');
-      expect(((await refused.json()) as { error: { code: string } }).error.code, caller).toBe('not_signed_in');
+      for (const [method, path, data] of [['POST', '/appointments', booking], ['GET', '/my-appointments?locale=en', undefined]] as const) {
+        const label = `${caller}, ${method} ${path}`;
+        const refused = await send(method, `${rest}${path}`, { data, headers });
+        expectStatus(refused, 401, label);
+        expect(refused.headers.get('www-authenticate'), label).toBe('Bearer');
+        expect(refused.json<{ error: { code: string } }>().error.code, label).toBe('not_signed_in');
+      }
     }
     expect(await board(), 'a refused request books nothing').toHaveLength(requestsBefore);
 
     const asA = bearer(await sessionOf(CUSTOMER_A));
     const created = await send('POST', `${rest}/appointments`, { data: booking, headers: asA });
-    expect(created.status).toBe(201);
-    const { appointment } = (await created.json()) as { appointment: Appointment };
+    expectStatus(created, 201, "customer A's booking");
+    const { appointment } = created.json<{ appointment: Appointment }>();
     expect(appointment).toMatchObject({
       status: 'requested',
       boutique: { slug: 'ginza', name: 'Ginza Flagship' },
@@ -152,9 +190,9 @@ test.describe('the REST door at /api/maison', () => {
     expect((await board()).find((row) => row.reference === appointment.reference)?.createdVia).toBe('web');
 
     const visitsOf = async (headers: Record<string, string>) => {
-      const response = await send('GET', `${rest}/my-appointments?locale=en`, { headers });
-      expect(response.status).toBe(200);
-      return ((await response.json()) as { appointments: Appointment[] }).appointments.map((visit) => visit.reference);
+      const answer = await send('GET', `${rest}/my-appointments?locale=en`, { headers });
+      expectStatus(answer, 200, 'my-appointments');
+      return answer.json<{ appointments: Appointment[] }>().appointments.map((visit) => visit.reference);
     };
     expect(await visitsOf(asA)).toEqual([appointment.reference]);
     expect(await visitsOf(bearer(await sessionOf(CUSTOMER_B))), "B never sees A's visit").toEqual([]);
