@@ -1,15 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const isoDay = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-/** The next given weekday (0 = Sunday … 6 = Saturday) at least two days away. */
-const next = (weekday: number) => {
-  const date = new Date();
-  const ahead = (weekday - date.getDay() + 7) % 7;
-  date.setDate(date.getDate() + (ahead < 2 ? ahead + 7 : ahead));
-  return isoDay(date);
-};
+import { nextWeekday } from './support';
+
 const SECOND_CUSTOMER = `U${'b'.repeat(32)}`;
+
+/** Today's date on Tokyo's calendar, as the app counts it (YYYY-MM-DD: en-CA writes dates that way). */
+const tokyoToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(new Date());
 
 const openWeekender = async (page: Page) => {
   await page.goto('/');
@@ -18,45 +14,114 @@ const openWeekender = async (page: Page) => {
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/Weekender|ウィークエンダー/);
 };
 
-/** Every request_appointment the page sends to Strapi's /mcp, from now on. */
-const appointmentRequests = (page: Page) => {
-  const sent: string[] = [];
-  page.on('request', (request) => {
-    if (new URL(request.url()).pathname === '/mcp' && request.postData()?.includes('"request_appointment"')) sent.push(request.url());
-  });
-  return sent;
-};
-
-test('a customer browses, books a visit and finds it in My visits', async ({ page }) => {
+/** Books the Weekender at Ginza on the next Saturday at 14:00, and returns the new visit's reference (the URL has it). */
+const bookWeekender = async (page: Page) => {
   await openWeekender(page);
   await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
   await page.getByLabel(/Boutique|ブティック/).selectOption('ginza');
-  await page.getByLabel(/Date|日付/).fill(next(6));
+  await page.getByLabel(/Date|日付/).fill(nextWeekday(6));
   await page.getByLabel(/Time|時間/).selectOption('14:00');
   await page.getByRole('button', { name: /Send request|リクエストを送る/ }).click();
   await expect(page).toHaveURL(/\/visits\?ref=APT-\d{4}/);
-  await expect(page.getByTestId('visit').first()).toContainText(/Awaiting the boutique|ブティックの確認待ち/);
+  const reference = new URL(page.url()).searchParams.get('ref');
+  expect(reference).toMatch(/^APT-\d{4}$/);
+  return reference as string;
+};
+
+/** Opens the booking sheet on the Weekender, and waits for the answer to its first availability check: the Time select. */
+const openSheet = async (page: Page) => {
+  await openWeekender(page);
+  await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
+  await expect(page.getByLabel(/Time|時間/)).toBeVisible();
+};
+
+/** The name of every MCP tool the page calls on Strapi's /mcp, in order, from now on. */
+const toolCalls = (page: Page) => {
+  const names: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/mcp') return;
+    let body: unknown;
+    try {
+      body = request.postDataJSON();
+    } catch {
+      return; // not JSON, so not a tool call
+    }
+    for (const message of Array.isArray(body) ? body : [body]) {
+      const { method, params } = (message ?? {}) as { method?: string; params?: { name?: string } };
+      if (method === 'tools/call' && typeof params?.name === 'string') names.push(params.name);
+    }
+  });
+  return names;
+};
+
+/**
+ * Submits the booking form without its Send button, which is disabled: the way Enter in a field or a script could. The
+ * browser's own validation is switched off too (a date before the input's `min` would stop the submit), so it's the sheet's
+ * own guard that gets tested. Resolves to whether the form's submit event fired: without a submit, "nothing was sent" proves
+ * nothing.
+ */
+const forceSubmit = (page: Page) =>
+  page
+    .getByRole('dialog')
+    .locator('form')
+    .evaluate(
+      (form: HTMLFormElement) =>
+        new Promise<boolean>((resolve) => {
+          form.noValidate = true;
+          form.addEventListener('submit', () => resolve(true), { once: true });
+          form.requestSubmit(); // fires the submit event synchronously, or not at all
+          resolve(false);
+        })
+    );
+
+/** Lets whatever the page was about to send go out first, so that checking it sent nothing is fair. */
+const settle = (page: Page) => page.waitForTimeout(500);
+
+/** No request_appointment leaves the sheet: Send is disabled, and a submit that gets past the button is refused too. */
+const expectNothingSent = async (page: Page, calls: string[]) => {
+  await expect(page.getByRole('button', { name: /Send request|リクエストを送る/ })).toBeDisabled();
+  expect(await forceSubmit(page), 'the form was submitted').toBe(true);
+  await settle(page);
+  expect(calls).not.toContain('request_appointment');
+};
+
+test('a customer browses, books a visit and finds it in My visits', async ({ page }) => {
+  const reference = await bookWeekender(page);
+  // The visit just booked, found by its reference: the list isn't assumed to be in any order.
+  const visit = page.getByTestId('visit').filter({ hasText: reference });
+  await expect(visit).toContainText(/Ginza|銀座/);
+  await expect(visit).toContainText(/Awaiting the boutique|ブティックの確認待ち/);
 });
 
 test('Osaka is closed on Tuesdays, and the sheet says so before any request', async ({ page }) => {
-  const sent = appointmentRequests(page);
-  await openWeekender(page);
-  await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
+  const calls = toolCalls(page);
+  await openSheet(page);
   await page.getByLabel(/Boutique|ブティック/).selectOption('osaka');
-  await page.getByLabel(/Date|日付/).fill(next(2));
+  await page.getByLabel(/Date|日付/).fill(nextWeekday(2));
   await expect(page.getByText(/Closed on this day|この日は休業日です/)).toBeVisible();
-  await expect(page.getByRole('button', { name: /Send request|リクエストを送る/ })).toBeDisabled();
-  expect(sent).toEqual([]);
+  await expectNothingSent(page, calls);
 });
 
 test('a cleared date asks for one, and sends no request', async ({ page }) => {
-  const sent = appointmentRequests(page);
-  await openWeekender(page);
-  await page.getByRole('button', { name: /Book a visit|来店を予約/ }).click();
+  const calls = toolCalls(page);
+  await openSheet(page);
+  expect(calls, 'the sheet checked its first date').toContain('find_boutiques');
+  const before = [...calls];
   await page.getByLabel(/Date|日付/).fill('');
-  await expect(page.getByText(/Please choose a date|日付をお選びください/)).toBeVisible();
-  await expect(page.getByRole('button', { name: /Send request|リクエストを送る/ })).toBeDisabled();
-  expect(sent).toEqual([]);
+  await expect(page.getByText(/^(Please choose a date\.|日付をお選びください。)$/)).toBeVisible();
+  await expectNothingSent(page, calls);
+  expect(calls, 'no tool is called for a date that is not there').toEqual(before);
+});
+
+test("today's date asks for a later one, and sends no request", async ({ page }) => {
+  const calls = toolCalls(page);
+  await openSheet(page);
+  expect(calls, 'the sheet checked its first date').toContain('find_boutiques');
+  const before = [...calls];
+  await page.getByLabel(/Date|日付/).fill(tokyoToday());
+  await expect(page.getByText(/^(Please choose a date from tomorrow on\.|明日以降の日付をお選びください。)$/)).toBeVisible();
+  await expectNothingSent(page, calls);
+  expect(calls, 'no tool is called for a date that is too soon').toEqual(before);
 });
 
 test('the agent view shows the MCP tools behind each screen', async ({ page }) => {
@@ -73,13 +138,26 @@ test('an unknown product says so, and leads back to the start', async ({ page })
   await expect(page.getByRole('link', { name: /Back to the start|トップへ戻る/ })).toBeVisible();
 });
 
-test("a second customer doesn't see the first customer's visits", async ({ page }) => {
-  await page.goto(`/visits?demoUser=${SECOND_CUSTOMER}`);
-  await expect(page.getByText(/No visits yet|ご来店予約はまだありません/)).toBeVisible();
-  await expect(page.getByTestId('visit')).toHaveCount(0);
+test("a second customer doesn't see the first customer's visits", async ({ context }) => {
+  // One browser, two customers. The first tab is the default demo customer, who books a visit here; the second tab
+  // signs in as another customer with ?demoUser=.
+  const first = await context.newPage();
+  const reference = await bookWeekender(first);
+  const firstVisit = first.getByTestId('visit').filter({ hasText: reference });
+  await expect(firstVisit).toBeVisible();
+
+  const second = await context.newPage();
+  await second.goto(`/visits?demoUser=${SECOND_CUSTOMER}`);
+  await expect(second.getByText(/No visits yet|ご来店予約はまだありません/)).toBeVisible();
+  await expect(second.getByTestId('visit')).toHaveCount(0);
+
+  // Signing the second customer in changed nothing for the first: looking again, they still have their visit.
+  await first.reload();
+  await expect(firstVisit).toBeVisible();
 });
 
-// LINE's MINI App safe area (Task 3). Phone emulation makes the pointer coarse, so there's no stage frame.
+// LINE's MINI App safe area. On a phone the app fills the screen, without the phone-sized frame it draws on a laptop:
+// emulating a phone makes the pointer coarse, which is what turns that frame off.
 test.describe('a phone in portrait', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
