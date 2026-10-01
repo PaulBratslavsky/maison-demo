@@ -28,7 +28,12 @@ const jobs = [
   ...content.boutiques.map((b) => [b.image, b.name.en, b.city.en.toUpperCase(), palette.boutique]),
 ];
 
-for (const [file, title, subtitle, colors] of jobs) {
+// Only entries that name a .png are placeholders. Any other file name is a photo (see images/SOURCES.md): never write over it.
+const placeholders = jobs.filter(([file]) => file.toLowerCase().endsWith('.png'));
+
+for (const [file, title, subtitle, colors] of placeholders) {
   await sharp(Buffer.from(svg(title, subtitle, colors))).png({ compressionLevel: 9 }).toFile(`${seedDir}images/${file}`);
 }
-console.log(`Generated ${jobs.length} images in server/seed/images`);
+console.log(
+  `Generated ${placeholders.length} placeholder images in server/seed/images, skipped ${jobs.length - placeholders.length} that aren't .png`
+);

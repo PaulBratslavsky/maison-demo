@@ -1,69 +1,17 @@
-import * as React from 'react';
+import { Badge, Box, Flex, Table, Tbody, Td, Th, Thead, Tr, Typography } from '@strapi/design-system';
+import { Widget } from '@strapi/strapi/admin';
 
-import { Badge, Divider, Flex, Typography } from '@strapi/design-system';
-import { useFetchClient, Widget } from '@strapi/strapi/admin';
-
-import { startPolling } from '../poll';
-
-/** GET /maison/appointments/summary (RequestsSummary on the server). */
-interface RequestsSummary {
-  counts: { waitingForStaff: number; confirmedUpcoming: number; confirmationsSent: number };
-  /** The newest requests, newest first. Each is a row of the board's All requests view, without the products and the note. */
-  recent: Array<{
-    reference: string;
-    status: 'requested' | 'confirmed';
-    /** Masked on the server, like line:U4af…88. */
-    customer: string;
-    boutique: { slug: string; name: string } | null;
-    requestedFor: string;
-    confirmationSent: boolean;
-  }>;
-}
-
-const REFRESH_MS = 5000;
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+import { fullTime, timeAgo, visitTime } from '../time';
+import { useRequestsSummary } from '../useRequestsSummary';
+import { RequestCounts } from './RequestCounts';
 
 /** The board's words and colours for a request's status, so staff who read one read the other. */
 const STATUS_VARIANT = { requested: 'warning', confirmed: 'success' } as const;
 
-const COUNTS = [
-  { key: 'waitingForStaff', label: 'Waiting for staff', tone: 'warning700' },
-  { key: 'confirmedUpcoming', label: 'Confirmed, upcoming', tone: 'success700' },
-  { key: 'confirmationsSent', label: 'LINE sent', tone: 'success700' },
-] as const;
-
-/** "2026-10-10T14:00:00+09:00" → "Oct 10, 14:00": the boutique's own time, whatever the browser's time zone. */
-const visitTime = (iso: string) => {
-  const parts = /^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(iso);
-  return parts ? `${MONTHS[Number(parts[1]) - 1]} ${Number(parts[2])}, ${parts[3]}` : iso;
-};
+const COLUMNS = ['Requested', 'Reference', 'Customer', 'Boutique', 'Visit', 'Note', 'Status', 'LINE'];
 
 const RequestsWidget = () => {
-  const { get } = useFetchClient();
-  const [summary, setSummary] = React.useState<RequestsSummary | null>(null);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const { data } = await get<RequestsSummary>('/maison/appointments/summary');
-        if (!data?.counts || !Array.isArray(data.recent)) throw new Error('The server sent something else than a summary.');
-        if (!mounted) return;
-        setSummary(data);
-        setLoadError(null);
-      } catch (error) {
-        // The last summary stays on screen, with a note, until a refresh works again.
-        if (mounted) setLoadError((error as Error).message);
-      }
-    };
-    // The next refresh starts only after the last one finished, so a slow server never gets overlapping requests.
-    const stop = startPolling(load, REFRESH_MS);
-    return () => {
-      mounted = false;
-      stop();
-    };
-  }, [get]);
+  const { summary, loadError } = useRequestsSummary();
 
   if (summary === null) {
     return loadError === null ? <Widget.Loading /> : <Widget.Error>{`Couldn't load the requests: ${loadError}`}</Widget.Error>;
@@ -85,45 +33,72 @@ const RequestsWidget = () => {
     );
   }
 
+  // Each refresh renders again, so "12 min ago" moves on with the clock.
+  const now = new Date();
+
   return (
     <Flex direction="column" alignItems="stretch" gap={3}>
-      <Flex gap={4} alignItems="flex-start">
-        {COUNTS.map(({ key, label, tone }) => (
-          <Flex key={key} direction="column" alignItems="flex-start" grow={1} basis={0} minWidth="0">
-            <Typography variant="alpha" textColor={tone}>
-              {summary.counts[key]}
-            </Typography>
-            <Typography variant="pi" textColor="neutral600">
-              {label}
-            </Typography>
-          </Flex>
-        ))}
-      </Flex>
+      <RequestCounts counts={summary.counts} />
 
-      <Divider />
-
-      <Flex tag="ul" aria-label="Newest requests" direction="column" alignItems="stretch">
-        {summary.recent.map((request) => (
-          // One line at the widget's default width. In a narrower widget the customer and status drop to a second line,
-          // because the boutique keeps room for most of its name.
-          <Flex key={request.reference} tag="li" alignItems="center" wrap="wrap" gap={2} paddingTop={1} paddingBottom={1}>
-            <Typography variant="pi" textColor="neutral600">
-              {visitTime(request.requestedFor)}
-            </Typography>
-            <Typography fontWeight="semiBold" ellipsis grow={1} basis={0} minWidth="8rem" title={request.boutique?.name}>
-              {request.boutique?.name ?? '—'}
-            </Typography>
-            <Flex gap={2} alignItems="center" marginLeft="auto">
-              <Typography variant="pi" textColor="neutral600">
-                {request.customer}
-              </Typography>
-              <Badge size="S" variant={STATUS_VARIANT[request.status]}>
-                {request.status}
-              </Badge>
-            </Flex>
-          </Flex>
-        ))}
-      </Flex>
+      {/*
+        The table keeps its own width and scrolls sideways inside the widget when that is wider than the widget. Strapi
+        sizes the widget's body to its content, so a table that is wider would widen the body and the cards with it. The
+        width of 0 makes the table add nothing to that size, and the minimum width of 100% then gives it the widget's.
+      */}
+      <Box width="0" minWidth="100%">
+        <Table colCount={COLUMNS.length} rowCount={summary.recent.length + 1} aria-label="Newest requests">
+          <Thead>
+            <Tr>
+              {COLUMNS.map((column) => (
+                <Th key={column}>
+                  <Typography variant="sigma">{column}</Typography>
+                </Th>
+              ))}
+            </Tr>
+          </Thead>
+          <Tbody>
+            {summary.recent.map((request) => (
+              <Tr key={request.reference}>
+                <Td title={fullTime(request.createdAt)}>
+                  <Typography>{timeAgo(request.createdAt, now)}</Typography>
+                </Td>
+                <Td>
+                  <Typography fontWeight="bold">{request.reference}</Typography>
+                </Td>
+                <Td>
+                  <Typography>{request.customer}</Typography>
+                </Td>
+                <Td>
+                  <Typography>{request.boutique?.name ?? '—'}</Typography>
+                </Td>
+                <Td>
+                  <Typography>{visitTime(request.requestedFor)}</Typography>
+                </Td>
+                {/* The customer's own words, as plain text. One line here, and all of it in the tooltip. */}
+                <Td title={request.note || undefined}>
+                  {request.note ? (
+                    <Typography ellipsis maxWidth="16rem">
+                      {request.note}
+                    </Typography>
+                  ) : (
+                    <Typography textColor="neutral600">—</Typography>
+                  )}
+                </Td>
+                <Td>
+                  <Badge size="S" variant={STATUS_VARIANT[request.status]}>
+                    {request.status}
+                  </Badge>
+                </Td>
+                <Td>
+                  <Badge size="S" variant={request.confirmationSent ? 'success' : 'neutral'}>
+                    {request.confirmationSent ? 'LINE sent' : 'not sent'}
+                  </Badge>
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </Box>
 
       {staleNote}
     </Flex>

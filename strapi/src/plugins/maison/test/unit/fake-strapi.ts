@@ -7,10 +7,12 @@ interface FakeOptions {
   plugins?: Record<string, Record<string, unknown>>;
   /** Stand-in for strapi.ai.mcp */
   mcp?: { isEnabled: () => boolean; registerTool: (...args: any[]) => void; registerPrompt: (...args: any[]) => void };
+  /** Stand-in for strapi.documents(uid), for a service that reads the Document Service. */
+  documents?: (uid: string) => Record<string, (...args: any[]) => unknown>;
 }
 
 /** Just enough of Core.Strapi for services and tool handlers under test. */
-export const fakeStrapi = ({ services = {}, config = {}, plugins = {}, mcp }: FakeOptions = {}) =>
+export const fakeStrapi = ({ services = {}, config = {}, plugins = {}, mcp, documents }: FakeOptions = {}) =>
   ({
     plugin: (id: string) => {
       if (id === 'maison') return { service: (name: string) => services[name] };
@@ -21,6 +23,7 @@ export const fakeStrapi = ({ services = {}, config = {}, plugins = {}, mcp }: Fa
       get: (key: string) => (key === 'plugin::maison' ? config : key === 'server.url' ? 'https://cms.example.test' : undefined),
     },
     ai: mcp ? { mcp } : undefined,
+    documents,
     log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
   }) as any;
 

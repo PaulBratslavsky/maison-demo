@@ -4,8 +4,16 @@ import { Flex } from '@strapi/design-system';
 import { Layouts, Page, useRBAC } from '@strapi/strapi/admin';
 
 import { DemoData } from '../components/DemoData';
+import { RequestCounts } from '../components/RequestCounts';
 import { RequestsBoard } from '../components/RequestsBoard';
 import { PERMISSIONS } from '../permissions';
+import { useRequestsSummary } from '../useRequestsSummary';
+
+/** The request counts above the board. Nothing until a summary has loaded: the board shows its own loading and errors. */
+const BoardCounts = ({ refreshKey }: { refreshKey: number }) => {
+  const { summary } = useRequestsSummary(refreshKey);
+  return summary ? <RequestCounts counts={summary.counts} /> : null;
+};
 
 const MaisonPage = () => {
   const { allowedActions, isLoading } = useRBAC(PERMISSIONS.sections);
@@ -13,14 +21,23 @@ const MaisonPage = () => {
 
   if (isLoading) return <Page.Loading />;
 
+  /** A new refreshKey makes the board and the counts load again at once. */
+  const refresh = () => setRefreshKey((key) => key + 1);
+
   return (
     <Page.Main>
       <Page.Title>Maison</Page.Title>
       <Layouts.Header title="Maison" subtitle="Boutique appointment requests from the app, the concierge and the web, as they arrive." />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={8}>
-          {allowedActions.canReview && <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} />}
-          {allowedActions.canManage && <DemoData onChange={() => setRefreshKey((key) => key + 1)} />}
+          {allowedActions.canReview && (
+            // The counts come from the review route, so only these admins get them.
+            <>
+              <BoardCounts refreshKey={refreshKey} />
+              <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onConfirmed={refresh} />
+            </>
+          )}
+          {allowedActions.canManage && <DemoData onChange={refresh} />}
         </Flex>
       </Layouts.Content>
     </Page.Main>

@@ -75,8 +75,13 @@ export interface RequestsSummary {
     /** Of those confirmed upcoming visits, the ones whose LINE confirmation has been sent: the board's "LINE sent" rows among them. */
     confirmationsSent: number;
   };
-  /** The newest requests, newest first: the top of the board's "All requests" view, without the products and the note. */
-  recent: Array<Pick<StaffAppointmentView, 'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'confirmationSent'>>;
+  /**
+   * The newest requests, newest first: the top of the board's "All requests" view, without the products. `createdAt` is
+   * when the request came in and `note` is what the customer wrote, both as the board's rows have them.
+   */
+  recent: Array<
+    Pick<StaffAppointmentView, 'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'note' | 'confirmationSent' | 'createdAt'>
+  >;
 }
 
 const MIN_LEAD_MINUTES = 30;
@@ -389,6 +394,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * "requested" view, "confirmed, upcoming" is its "confirmed" view with the past visits left out, and "LINE sent"
      * counts those confirmed upcoming rows with `confirmationSent`. Only their `sent` notifications are read.
      * The rows are the board's "All requests" rows, so they are masked, ordered and labelled the way the board has them.
+     * They leave out the products and how the request was made.
      * `now` is only for tests. It defaults to the current time.
      */
     async summarizeRequests(now: Date = new Date()): Promise<RequestsSummary> {
@@ -404,8 +410,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
       return {
         counts: { waitingForStaff, confirmedUpcoming: upcoming.length, confirmationsSent: sent.size },
-        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, confirmationSent }) => ({
-          reference, status, customer, boutique, requestedFor, confirmationSent,
+        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt }) => ({
+          reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt,
         })),
       };
     },

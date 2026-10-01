@@ -11,13 +11,29 @@ const paragraph = (text: string) => [{ type: 'paragraph', children: [{ type: 'te
 /** At runtime this file is bundled into dist/server/index.js, so the package root is two levels up. */
 const seedDir = () => path.resolve(__dirname, '..', '..', 'server', 'seed');
 
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+/** The upload type of a seed image, from its file name's extension. Throws for any other extension. */
+export const imageMimeType = (fileName: string): string => {
+  const mimeType = IMAGE_MIME_TYPES[path.extname(fileName).toLowerCase()];
+  if (!mimeType) {
+    throw new Error(`Unsupported seed image "${fileName}": use a file ending in ${Object.keys(IMAGE_MIME_TYPES).join(', ')}.`);
+  }
+  return mimeType;
+};
+
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const uploadImage = async (fileName: string, alternativeText: string): Promise<number> => {
     const filepath = path.join(seedDir(), 'images', fileName);
     const { size } = await stat(filepath);
     const [file] = await strapi.plugin('upload').service('upload').upload({
       data: { fileInfo: { name: fileName, alternativeText } },
-      files: { filepath, originalFilename: fileName, mimetype: 'image/png', size },
+      files: { filepath, originalFilename: fileName, mimetype: imageMimeType(fileName), size },
     });
     return file.id;
   };

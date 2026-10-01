@@ -49,7 +49,16 @@ const visitTime = (iso: string) => iso.slice(0, 16).replace('T', ' ');
 const canStillConfirm = (appointment: StaffAppointment) =>
   appointment.status === 'requested' && Date.parse(appointment.requestedFor) > Date.now();
 
-export const RequestsBoard = ({ canConfirm, refreshKey }: { canConfirm: boolean; refreshKey: number }) => {
+export const RequestsBoard = ({
+  canConfirm,
+  refreshKey,
+  onConfirmed,
+}: {
+  canConfirm: boolean;
+  refreshKey: number;
+  /** Called after staff confirmed a request, so what else shows the numbers can refresh at once. */
+  onConfirmed?: () => void;
+}) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
   const [status, setStatus] = React.useState<Status>('requested');
@@ -84,6 +93,7 @@ export const RequestsBoard = ({ canConfirm, refreshKey }: { canConfirm: boolean;
     try {
       await post(`/maison/appointments/${reference}/confirm`);
       toggleNotification({ type: 'success', message: `Confirmed ${reference}. The LINE ops agent sends the customer's confirmation.` });
+      onConfirmed?.();
       await load();
     } catch (error) {
       toggleNotification({ type: 'danger', message: (error as Error).message });
@@ -92,7 +102,7 @@ export const RequestsBoard = ({ canConfirm, refreshKey }: { canConfirm: boolean;
     }
   };
 
-  const columns = ['Reference', 'Customer', 'Boutique', 'Visit', 'Products', 'Status', 'LINE', 'Created via', ...(canConfirm ? [''] : [])];
+  const columns = ['Reference', 'Customer', 'Boutique', 'Visit', 'Products', 'Note', 'Status', 'LINE', 'Created via', ...(canConfirm ? [''] : [])];
 
   return (
     <Flex direction="column" alignItems="stretch" gap={4}>
@@ -161,6 +171,12 @@ export const RequestsBoard = ({ canConfirm, refreshKey }: { canConfirm: boolean;
                 </Td>
                 <Td>
                   <Typography>{appointment.products.map((product) => product.name).join(', ') || '—'}</Typography>
+                </Td>
+                {/* The customer's own words, as plain text. The table keeps its cells on one line, so this one wraps, within about 20rem. */}
+                <Td>
+                  <Typography display="block" maxWidth="20rem" style={{ whiteSpace: 'normal', overflowWrap: 'break-word' }}>
+                    {appointment.note || '—'}
+                  </Typography>
                 </Td>
                 <Td>
                   <Badge variant={appointment.status === 'confirmed' ? 'success' : 'warning'}>{appointment.status}</Badge>

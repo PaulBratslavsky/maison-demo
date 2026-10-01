@@ -23,6 +23,9 @@ export const tokyoDate = (days, { weekday } = {}) => {
 /** `date` at `time` (HH:MM) in Tokyo, the way the app sends a visit and the services answer it. */
 export const tokyoTime = (date, time) => `${date}T${time}:00+09:00`;
 
+/** A moment the way the services write one: Tokyo wall-clock time and offset, in whole seconds ("2026-10-10T14:00:00+09:00"). */
+export const tokyoIso = (moment) => `${new Date(moment.getTime() + TOKYO_OFFSET_MS).toISOString().slice(0, 19)}+09:00`;
+
 const appDirectory = () => {
   const appDir = process.env.STRAPI_APP_DIR;
   if (!appDir) {

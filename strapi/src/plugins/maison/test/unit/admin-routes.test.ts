@@ -78,7 +78,12 @@ describe('appointments controller', () => {
   describe('summary', () => {
     const summary = {
       counts: { waitingForStaff: 2, confirmedUpcoming: 1, confirmationsSent: 1 },
-      recent: [{ reference: 'APT-4821', status: 'requested', customer: 'line:U4af…88', boutique: null, requestedFor: '2026-10-10T14:00:00+09:00', confirmationSent: false }],
+      recent: [
+        {
+          reference: 'APT-4821', status: 'requested', customer: 'line:U4af…88', boutique: null, requestedFor: '2026-10-10T14:00:00+09:00',
+          note: 'A gift for a friend who travels', confirmationSent: false, createdAt: '2026-10-01T09:00:00+09:00',
+        },
+      ],
     };
 
     it("returns the service's summary", async () => {

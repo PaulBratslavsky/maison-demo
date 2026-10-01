@@ -19,3 +19,6 @@
 - `request_appointment` takes an optional `locale` (`ja` or `en`), like the other customer tools, and names the boutique and products in its answer in that language. Until now it always answered in `defaultLocale`, which is still the default. The booking body of `POST /api/maison/appointments` takes it too.
 - The customer tools' input schemas live in `server/src/mcp/schemas.ts`, shared with the REST routes. Apart from `request_appointment`'s `locale`, the tools' inputs, outputs and errors are unchanged.
 - A failed customer lookup is logged without oauth-mcp-manager's error message, which could quote the token.
+- Demo catalog photos from Pexels replace all eighteen generated images. See `server/seed/images/SOURCES.md`.
+- The LINE confirmation message uses the app's black-and-white palette: an ink header with the house name in white, grey labels and an ink button, in place of the cream on near-black.
+- The Homepage widget shows its three counts as cards and its five newest requests as a table, with when each request came in and the customer's note, and the Maison page shows the same cards above the board, whose rows show the note too. The `recent` rows of `GET /maison/appointments/summary` gain `createdAt` and `note`.

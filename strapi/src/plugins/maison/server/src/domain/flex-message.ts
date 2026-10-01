@@ -13,9 +13,10 @@ export interface FlexMessage {
   contents: Record<string, unknown>;
 }
 
-const INK = '#1c1c1c';
-const GOLD = '#e9dcc0';
-const MUTED = '#8a8a8a';
+// The app's black-and-white palette: ink on white, white on ink, and a grey that keeps 4.6:1 on white.
+const INK = '#0a0a0a';
+const WHITE = '#ffffff';
+const MUTED = '#737373';
 
 /** LINE rejects empty text nodes, so empty values become a dash. */
 const nonEmpty = (value: string) => (value.trim().length > 0 ? value : '—');
@@ -41,7 +42,7 @@ export function buildConfirmationMessage(input: ConfirmationMessageInput): FlexM
         layout: 'vertical',
         backgroundColor: INK,
         paddingAll: '16px',
-        contents: [{ type: 'text', text: nonEmpty(input.houseName), color: GOLD, align: 'center', weight: 'bold' }],
+        contents: [{ type: 'text', text: nonEmpty(input.houseName), color: WHITE, align: 'center', weight: 'bold' }],
       },
       body: {
         type: 'box',

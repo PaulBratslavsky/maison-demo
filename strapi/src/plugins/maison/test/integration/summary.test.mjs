@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
-import { SUBJECT_A, SUBJECT_B, bootStrapi, tokyoDate, tokyoTime } from './harness.mjs';
+import { SUBJECT_A, SUBJECT_B, bootStrapi, tokyoDate, tokyoIso, tokyoTime } from './harness.mjs';
 
 // The service counts at NOW, when this file starts, and the admin route at the real clock a moment later. The visits
 // still ahead are 10, 20 and 30 days out, so both clocks see them ahead, and the tests never expire. The visits that
@@ -17,7 +17,7 @@ const APPOINTMENT = 'plugin::maison.appointment';
 const NOTIFICATION = 'plugin::maison.notification';
 const REVIEW = 'plugin::maison.appointments.review';
 const CONFIRM = 'plugin::maison.appointments.confirm';
-const ROW_FIELDS = ['boutique', 'confirmationSent', 'customer', 'reference', 'requestedFor', 'status'];
+const ROW_FIELDS = ['boutique', 'confirmationSent', 'createdAt', 'customer', 'note', 'reference', 'requestedFor', 'status'];
 /** A customer's LINE user ID: their subject without "line:". No staff surface ever shows it. */
 const lineUserIdOf = (subject) => subject.slice('line:'.length);
 
@@ -40,6 +40,9 @@ describe('the requests summary behind the admin homepage widget', () => {
   const sendConfirmation = async (key) =>
     assert.equal((await confirmations.record({ reference: refs[key], status: 'sent', detail: 'ok' })).ok, true);
   const summarize = (now = NOW) => appointments.summarizeRequests(now);
+  /** When the request's draft was stored, as the services write a moment. Read from the Document Service, not from the summary. */
+  const createdAtOf = async (reference) =>
+    tokyoIso(new Date((await strapi.documents(APPOINTMENT).findFirst({ status: 'draft', filters: { reference } })).createdAt));
 
   before(async () => {
     strapi = await bootStrapi('summary');
@@ -109,24 +112,49 @@ describe('the requests summary behind the admin homepage widget', () => {
         customer: 'line:Uaaa…aa',
         boutique: { slug: 'ginza', name: '銀座本店' },
         requestedFor: tokyoTime(IN_30_DAYS, '14:00'),
+        note: '',
         confirmationSent: false,
+        createdAt: await createdAtOf(refs.late),
       });
       for (const row of recent) assert.deepEqual(Object.keys(row).sort(), ROW_FIELDS);
     });
 
-    it("shows each row exactly as the board's All requests view does, with the customer masked and the note left out", async () => {
+    it('gives each row the time its request came in, which is not its visit time, and so reads newest first', async () => {
+      const { recent } = await summarize();
+      for (const row of recent) {
+        assert.equal(row.createdAt, await createdAtOf(row.reference), `${row.reference} carries its own request's time`);
+        assert.match(row.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/, 'Tokyo time with its offset, like the visit time');
+      }
+      // Requested as if it were 2020, done's visit is in 2020 and its request is from today.
+      const done = recent.find((row) => row.reference === refs.done);
+      assert.equal(done.requestedFor, '2020-01-05T15:00:00+09:00');
+      assert.notEqual(done.createdAt, done.requestedFor);
+      assert.ok(Date.parse(done.createdAt) >= NOW.getTime() - 1000, "done's createdAt is when it was requested in this run (to the second), not its 2020 visit");
+      const times = recent.map((row) => Date.parse(row.createdAt));
+      assert.deepEqual(times, [...times].sort((a, b) => b - a), 'newest request first (to the second)');
+    });
+
+    it("carries each request's note exactly as the customer left it, and an empty one when there is none", async () => {
+      const { recent } = await summarize();
+      assert.deepEqual(
+        recent.map((row) => [row.reference, row.note]),
+        [[refs.late, ''], [refs.soon, ''], [refs.booked, ''], [refs.other, 'For my sister'], [refs.done, '']]
+      );
+    });
+
+    it("shows each row as the board's All requests view does, with the customer masked and without the products", async () => {
       const { recent } = await summarize();
       const board = (await appointments.listRequests({ status: 'all', limit: 5, now: NOW })).value;
       assert.deepEqual(
         recent,
-        board.map(({ reference, status, customer, boutique, requestedFor, confirmationSent }) => ({
-          reference, status, customer, boutique, requestedFor, confirmationSent,
+        board.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt }) => ({
+          reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt,
         }))
       );
       assert.deepEqual(recent.map((row) => row.customer), ['line:Uaaa…aa', 'line:Uaaa…aa', 'line:Uaaa…aa', 'line:Ubbb…bb', 'line:Ubbb…bb']);
       const text = JSON.stringify(recent);
       for (const [who, subject] of [["A's", SUBJECT_A], ["B's", SUBJECT_B]]) assert.ok(!text.includes(lineUserIdOf(subject)), `never ${who} LINE user ID`);
-      assert.ok(!text.includes('For my sister'), "none of the customer's note");
+      assert.ok(!text.includes('weekender-50') && !text.includes('passport-cover'), 'no products');
     });
 
     it("agrees with the board's own views at any moment, boundaries included", async () => {
@@ -224,7 +252,7 @@ describe('the requests summary behind the admin homepage widget', () => {
       await request('sentA', { requestedFor: tokyoTime(IN_30_DAYS, '13:00') });
       await confirm('sentA');
       await sendConfirmation('sentA');
-      await request('waitingA2', { requestedFor: tokyoTime(IN_30_DAYS, '15:00') });
+      await request('waitingA2', { requestedFor: tokyoTime(IN_30_DAYS, '15:00'), note: 'Window seat, please' });
 
       reviewer = await adminWith('reviewer', [REVIEW]);
       confirmer = await adminWith('confirmer', [CONFIRM]); // holds a Maison permission, but not the one for reviewing
@@ -258,6 +286,8 @@ describe('the requests summary behind the admin homepage widget', () => {
       assert.deepEqual(body.recent[0].boutique, { slug: 'ginza', name: '銀座本店' });
       assert.deepEqual(body.recent.map((row) => row.customer), ['line:Uaaa…aa', 'line:Uaaa…aa', 'line:Ubbb…bb', 'line:Ubbb…bb', 'line:Uaaa…aa']);
       for (const row of body.recent) assert.deepEqual(Object.keys(row).sort(), ROW_FIELDS);
+      assert.deepEqual(body.recent.map((row) => row.note), ['Window seat, please', '', '', '', ''], "each request's note, as the customer left it");
+      for (const row of body.recent) assert.equal(row.createdAt, await createdAtOf(row.reference), `${row.reference}: the time its request came in`);
       const text = JSON.stringify(body);
       for (const [who, subject] of [["A's", SUBJECT_A], ["B's", SUBJECT_B]]) assert.ok(!text.includes(lineUserIdOf(subject)), `never ${who} LINE user ID`);
     });
