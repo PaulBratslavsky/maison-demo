@@ -2,9 +2,9 @@
 
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
-import { ToolResult, type ToolPart } from '@/components/chat-parts';
+import { ChatText, ToolResult, type ToolPart } from '@/components/chat-parts';
 import { ErrorDetail } from '@/components/error-detail';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
@@ -37,9 +37,19 @@ export default function ConciergePage() {
   const busy = status === 'submitted' || status === 'streaming';
   const failure = error ? errorOf(error) : null;
 
+  // The conversation scrolls inside the screen. It follows the newest words as they stream in, until the customer
+  // scrolls up to read; sending a message, or scrolling back to the end, makes it follow again.
+  const conversation = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    const list = conversation.current;
+    if (list && following.current) list.scrollTop = list.scrollHeight;
+  }, [messages, busy, error]);
+
   const send = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    following.current = true;
     void sendMessage({ text: trimmed });
     setDraft('');
   };
@@ -49,38 +59,50 @@ export default function ConciergePage() {
   };
 
   return (
-    <Screen name="concierge" tools={CONCIERGE_TOOLS}>
-      <div className="space-y-3 px-5 pb-4 pt-5">
-        <h1 className="font-serif text-4xl">{t.concierge}</h1>
-        <p className="text-sm text-ink/70">{t.conciergeIntro}</p>
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            data-testid={`message-${message.role}`}
-            className={message.role === 'user' ? 'ml-10 rounded-2xl bg-ink px-4 py-2 text-sm text-ivory' : 'mr-4 text-sm'}
-          >
-            {message.parts.map((part, index) => {
-              if (part.type === 'text') {
-                return (
-                  <p key={index} className="whitespace-pre-wrap leading-relaxed">
-                    {part.text}
-                  </p>
-                );
-              }
-              if (part.type === 'dynamic-tool') return <ToolResult key={index} part={part as unknown as ToolPart} locale={locale} />;
-              return null;
-            })}
-          </div>
-        ))}
-        {busy && <Spinner label={t.loading} className="py-2" />}
-        {failure && (
-          <div role="alert" className="text-sm text-red-800">
-            <p>{errorText(failure, locale)}</p>
-            <ErrorDetail error={failure} />
-          </div>
-        )}
+    <Screen name="concierge" tools={CONCIERGE_TOOLS} fill>
+      <div
+        ref={conversation}
+        onScroll={(event) => {
+          const list = event.currentTarget;
+          following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        }}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="space-y-3 px-5 pb-4 pt-5">
+          <h1 className="font-serif text-4xl">{t.concierge}</h1>
+          <p className="text-sm text-ink/70">{t.conciergeIntro}</p>
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              data-testid={`message-${message.role}`}
+              className={message.role === 'user' ? 'ml-10 rounded-2xl bg-ink px-4 py-2 text-sm text-ivory' : 'mr-4 text-sm'}
+            >
+              {message.parts.map((part, index) => {
+                if (part.type === 'text') {
+                  // The customer's words are shown as typed. The assistant's get simple formatting (bold, lists).
+                  return message.role === 'user' ? (
+                    <p key={index} className="whitespace-pre-wrap leading-relaxed">
+                      {part.text}
+                    </p>
+                  ) : (
+                    <ChatText key={index} text={part.text} />
+                  );
+                }
+                if (part.type === 'dynamic-tool') return <ToolResult key={index} part={part as unknown as ToolPart} locale={locale} />;
+                return null;
+              })}
+            </div>
+          ))}
+          {busy && <Spinner label={t.loading} className="py-2" />}
+          {failure && (
+            <div role="alert" className="text-sm text-red-800">
+              <p>{errorText(failure, locale)}</p>
+              <ErrorDetail error={failure} />
+            </div>
+          )}
+        </div>
       </div>
-      <div className="sticky bottom-0 space-y-2 border-t border-ink/10 bg-ivory px-5 pb-[calc(0.75rem+var(--line-safe-bottom))] pt-3">
+      <div className="shrink-0 space-y-2 border-t border-ink/10 bg-ivory px-5 pb-[calc(0.75rem+var(--line-safe-bottom))] pt-3">
         <div className="flex gap-2 overflow-x-auto">
           {t.suggestions.map((suggestion) => (
             <button

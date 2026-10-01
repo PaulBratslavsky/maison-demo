@@ -2,12 +2,64 @@
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import Link from 'next/link';
+import { Fragment } from 'react';
 
+import { parseChatText, type Line } from '@/lib/chat-text';
 import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
 import { toolErrorOf } from '@/lib/mcp';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
 import { ProductImage } from './product-grid';
+
+function Lines({ lines }: { lines: Line[] }) {
+  return (
+    <>
+      {lines.map((line, index) => (
+        <Fragment key={index}>
+          {index > 0 && <br />}
+          {line.map((span, spanIndex) => (span.bold ? <strong key={spanIndex}>{span.text}</strong> : <Fragment key={spanIndex}>{span.text}</Fragment>))}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/**
+ * The assistant's words: paragraphs, line breaks, **bold** and simple lists (lib/chat-text.ts). The text becomes React
+ * elements and text nodes, never HTML, so nothing in it can add markup to the page. The customer's own messages don't
+ * pass through here: what they type is shown as typed.
+ */
+export function ChatText({ text }: { text: string }) {
+  const blocks = parseChatText(text);
+  if (blocks.length === 0) return null;
+  return (
+    <div className="space-y-2 leading-relaxed">
+      {blocks.map((block, index) => {
+        if (block.kind === 'paragraph') {
+          return (
+            <p key={index}>
+              <Lines lines={block.lines} />
+            </p>
+          );
+        }
+        const items = block.items.map((item, itemIndex) => (
+          <li key={itemIndex}>
+            <Lines lines={item} />
+          </li>
+        ));
+        return block.kind === 'ordered' ? (
+          <ol key={index} start={block.start} className="list-decimal space-y-1 pl-5">
+            {items}
+          </ol>
+        ) : (
+          <ul key={index} className="list-disc space-y-1 pl-5">
+            {items}
+          </ul>
+        );
+      })}
+    </div>
+  );
+}
 
 /** What the chat needs from AI SDK 7's dynamic-tool UI part (MCP tools arrive as dynamic tools). */
 export interface ToolPart {

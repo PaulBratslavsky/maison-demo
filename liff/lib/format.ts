@@ -63,6 +63,17 @@ export const tomorrow = (from = new Date()): string => {
   return isoDay(date);
 };
 
+/**
+ * The next `count` days on Tokyo's calendar, today first, each as YYYY-MM-DD and its weekday (0 is Sunday). They are the
+ * days `tomorrow` and `nextSaturday` count, whatever the machine's clock and time zone say.
+ */
+export const tokyoDays = (count: number, from = new Date()): Array<{ date: string; weekday: number }> =>
+  Array.from({ length: count }, (_, ahead) => {
+    const day = tokyoClock(from);
+    day.setUTCDate(day.getUTCDate() + ahead);
+    return { date: isoDay(day), weekday: day.getUTCDay() };
+  });
+
 /** Half-hour start times from opening until 30 minutes before closing. */
 export const timeSlots = (opens: string, closes: string): string[] => {
   const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));

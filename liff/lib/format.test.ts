@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRealDate, listOf, mediaUrl, nextSaturday, personalizationKind, timeSlots, tomorrow, visitTime, yen } from './format';
+import { isRealDate, listOf, mediaUrl, nextSaturday, personalizationKind, timeSlots, tokyoDays, tomorrow, visitTime, yen } from './format';
 
 // Every date below is an instant, so the results don't depend on the machine's time zone. The suite passes under
 // TZ=America/Los_Angeles and TZ=Asia/Tokyo alike. Tokyo is UTC+9 all year: noon in Tokyo is 03:00Z.
@@ -50,6 +50,21 @@ describe('format', () => {
     // And from Thursday 8 October into Friday 9 October, where the default Saturday moves a week on.
     expect(nextSaturday(new Date('2026-10-08T14:59:00Z'))).toBe('2026-10-10');
     expect(nextSaturday(new Date('2026-10-08T15:00:00Z'))).toBe('2026-10-17');
+  });
+
+  it("lists days on Tokyo's calendar, today first, whatever the machine's clock says", () => {
+    // 11:30 on Thursday 1 October in Tokyo, while it's still Wednesday evening in California.
+    expect(tokyoDays(3, new Date('2026-10-01T02:30:00Z'))).toEqual([
+      { date: '2026-10-01', weekday: 4 },
+      { date: '2026-10-02', weekday: 5 },
+      { date: '2026-10-03', weekday: 6 },
+    ]);
+    // A minute either side of midnight in Tokyo.
+    expect(tokyoDays(1, new Date('2026-10-01T14:59:00Z'))).toEqual([{ date: '2026-10-01', weekday: 4 }]);
+    expect(tokyoDays(1, new Date('2026-10-01T15:00:00Z'))).toEqual([{ date: '2026-10-02', weekday: 5 }]);
+    // Month and year ends, and a leap day.
+    expect(tokyoDays(4, new Date('2026-12-30T03:00:00Z')).map((day) => day.date)).toEqual(['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+    expect(tokyoDays(3, new Date('2028-02-28T03:00:00Z')).map((day) => day.date)).toEqual(['2028-02-28', '2028-02-29', '2028-03-01']);
   });
 
   it('offers half-hour slots that end 30 minutes before closing', () => {
