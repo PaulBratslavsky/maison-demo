@@ -1,9 +1,10 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 
 import { BookingSheet } from '@/components/booking-sheet';
+import { Detail, Details } from '@/components/details';
 import { useMaison } from '@/components/maison-provider';
 import { ProductImage } from '@/components/product-grid';
 import { Screen } from '@/components/screen';
@@ -12,16 +13,6 @@ import { COPY } from '@/lib/copy';
 import { listOf, personalizationKind, sizeCm, yen } from '@/lib/format';
 import type { Product } from '@/lib/types';
 import { useTool } from '@/lib/use-tool';
-
-/** One row of a product's details list: the name in graphite on the left, the value on the right, over a hairline. */
-function Detail({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex justify-between gap-6 border-t border-hairline py-[11px]">
-      <dt className="shrink-0 text-graphite">{label}</dt>
-      <dd className="text-right">{children}</dd>
-    </div>
-  );
-}
 
 /**
  * A product: its photo, full bleed and square; its collection, name and price; its description and craft; and a details
@@ -65,7 +56,7 @@ export default function ProductPage() {
             <p className="mt-2 whitespace-pre-line text-body text-graphite">{item.description}</p>
             {item.craftStory && <p className="mt-1 text-body text-graphite">{item.craftStory}</p>}
           </div>
-          <dl className="mx-5 mt-[18px] border-b border-hairline text-[13px]">
+          <Details className="mx-5 mt-[18px]">
             {size && (
               <Detail label={t.size}>
                 <span className="tabular-nums">{size}</span>
@@ -81,7 +72,7 @@ export default function ProductPage() {
               </Detail>
             )}
             <Detail label={t.inStockAt}>{inStockAt.length > 0 ? listOf(inStockAt, locale) : t.outOfStock}</Detail>
-          </dl>
+          </Details>
         </article>
       )}
       {booking && item && <BookingSheet product={item} onClose={() => setBooking(false)} />}

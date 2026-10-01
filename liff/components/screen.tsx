@@ -19,8 +19,9 @@ const BAR_HEIGHT = 48 + 2 * BAR_PADDING;
 
 /**
  * Every screen: header, the MCP tools it uses, sign-in state, and the agent view. In LINE mode outside the LINE app,
- * the "Open in LINE" page takes the screen's place, without the tools: nothing is called from it. `back` names the
- * screen's parent for the header's link, when it's closer than the header's own guess (a product's collection).
+ * the "Open in LINE" page takes the screen's place, without the tools or the agent view: nothing is called from it, so
+ * there's nothing to show and no switch to show it with. `back` names the screen's parent for the header's link, when
+ * it's closer than the header's own guess (a product's collection).
  *
  * Under the header, one quiet line: the screen's MCP tools on the left, and on the right the agent view's switch, which
  * the header has no room for on a phone. On a page it scrolls away with the content; on a `fill` screen it stays. A screen
@@ -122,7 +123,7 @@ export function Screen({
           {bar}
         </div>
       )}
-      <AgentDrawer screen={name} onHeight={setDrawerHeight} />
+      {status !== 'open-in-line' && <AgentDrawer screen={name} onHeight={setDrawerHeight} />}
     </div>
   );
 }

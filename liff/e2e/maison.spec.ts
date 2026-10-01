@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { strapiOrigin } from '../lib/strapi-proxy';
 import { nextWeekday } from './support';
 
 const SECOND_CUSTOMER = `U${'b'.repeat(32)}`;
@@ -169,6 +170,24 @@ test('a day that has become today asks for a later one, and sends no request', a
   await expect(page.getByText(/^(Please choose a date from tomorrow on\.|明日以降の日付をお選びください。)$/)).toBeVisible();
   await expectNothingSent(page, calls);
   expect(calls, 'no tool is called for a date that is too soon').toEqual(before);
+});
+
+/** The Home page's published headline in Strapi, in one language, as the app's server reads it (lib/home-page.ts). */
+const publishedHeadline = async (locale: 'en' | 'ja'): Promise<string> => {
+  const response = await fetch(`${strapiOrigin()}/api/home-page?locale=${locale}`);
+  expect(response.status, `GET /api/home-page?locale=${locale}`).toBe(200);
+  return ((await response.json()) as { data: { headline: string } }).data.headline.trim();
+};
+
+test("Home shows the Home page's headline from Strapi, in English, then in Japanese after the switch", async ({ page }) => {
+  // Read from Strapi, not written here: the headline is Paul's to edit in the Content Manager.
+  const [en, ja] = await Promise.all([publishedHeadline('en'), publishedHeadline('ja')]);
+  await page.goto('/');
+  const language = page.getByRole('group', { name: /Language|言語/ });
+  await language.getByRole('button', { name: 'EN' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(en);
+  await language.getByRole('button', { name: 'JA' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(ja);
 });
 
 test('the agent view shows the MCP tools behind each screen', async ({ page }) => {

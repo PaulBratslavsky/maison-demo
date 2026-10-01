@@ -67,6 +67,9 @@ export const COPY = {
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
     noVisits: 'ご来店予約はまだありません。',
     visitNotFound: 'この予約は見つかりませんでした。',
+    // A visit's details list: the pieces it's for, and the customer's note.
+    visitPieces: 'お品物',
+    visitNote: 'メッセージ',
     concierge: 'コンシェルジュ',
     // The concierge's title bar: the button that lists the screen's MCP tools.
     mcpTools: (n: number) => `${n}つのMCPツール`,
@@ -152,6 +155,8 @@ export const COPY = {
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
     noVisits: 'No visits yet.',
     visitNotFound: "We couldn't find this visit.",
+    visitPieces: 'Pieces',
+    visitNote: 'Note',
     concierge: 'Concierge',
     mcpTools: (n: number) => `${n} MCP tools`,
     conciergeIntro: 'I can help you choose a gift and book a boutique visit.',

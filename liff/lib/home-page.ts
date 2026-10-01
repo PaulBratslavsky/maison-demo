@@ -1,3 +1,7 @@
+// Server-only: a client component that imports this module fails the build, so the reader never ships to the phone.
+// Next resolves the package from its own compiled copy; vitest.config.ts maps it to an empty module.
+import 'server-only';
+
 import { COPY } from './copy';
 import { strapiOrigin } from './strapi-proxy';
 import type { Locale } from './types';
