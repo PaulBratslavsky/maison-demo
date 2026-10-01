@@ -20,6 +20,32 @@ const client = (callTool: () => Promise<unknown>) => ({
   callTool: vi.fn(callTool),
   close: vi.fn(async () => {}),
 });
+/** A connection whose calls settle when the test says. Like the MCP SDK's client, closing it rejects what's in flight. */
+const controllable = () => {
+  const pending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+  const inFlight = new Set<(error: Error) => void>();
+  let closed = false;
+  const connection = {
+    callTool: vi.fn(({ name }: { name: string }) => {
+      if (closed) return Promise.reject(new Error('Not connected'));
+      return new Promise((resolve, reject) => {
+        inFlight.add(reject);
+        pending.set(name, { resolve, reject });
+      });
+    }),
+    close: vi.fn(async () => {
+      closed = true;
+      inFlight.forEach((reject) =>
+        reject(new Error('MCP error -32000: Connection closed'))
+      );
+    }),
+  };
+  return { connection, pending };
+};
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('createMcp', () => {
   it('connects once with the session token and records every call for the agent view', async () => {
@@ -165,6 +191,92 @@ describe('createMcp', () => {
       mcp.callTool('home', 'browse_collections', {})
     ).rejects.toThrow(/boom/);
     expect(session.refresh).not.toHaveBeenCalled();
+  });
+
+  for (const order of [
+    'the call starts, then the 401 lands',
+    'the 401 lands, then the call starts',
+  ]) {
+    it(`a call that takes the old connection in the same tick as a 401 is not cut off by the reconnect (${order})`, async () => {
+      const old = controllable();
+      const renewed = controllable();
+      const connect = vi
+        .fn()
+        .mockResolvedValueOnce(old.connection)
+        .mockResolvedValueOnce(renewed.connection);
+      const session = fakeSession();
+      const mcp = createMcp({
+        strapiUrl: 'x',
+        session: session as any,
+        onRecord: () => {},
+        connect,
+      });
+      const first = mcp.callTool('visits', 'first', {});
+      await flush();
+      let second!: Promise<unknown>;
+      if (order.startsWith('the call starts')) {
+        second = mcp.callTool('visits', 'second', {});
+        old.pending.get('first')!.reject(unauthorized());
+      } else {
+        old.pending.get('first')!.reject(unauthorized());
+        second = mcp.callTool('visits', 'second', {});
+      }
+      await flush();
+      expect(old.pending.has('second')).toBe(true); // it went out on the old connection...
+      expect(old.connection.close).not.toHaveBeenCalled(); // ...which stays open for it
+      renewed.pending.get('first')!.resolve(ok({}));
+      old.pending.get('second')!.reject(unauthorized()); // it hears its own 401
+      await flush();
+      expect(old.connection.close).toHaveBeenCalledTimes(1);
+      renewed.pending.get('second')!.resolve(ok({}));
+      expect(
+        (await Promise.allSettled([first, second])).map(
+          (result) => result.status
+        )
+      ).toEqual(['fulfilled', 'fulfilled']);
+      expect(session.refresh).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('a listener that throws changes nothing: the call resolves with its result, and is recorded once', async () => {
+    const seen: Array<string | null> = [];
+    const mcp = createMcp({
+      strapiUrl: 'x',
+      session: fakeSession() as any,
+      onRecord: (record) => {
+        seen.push(record.error);
+        throw new Error('listener broke');
+      },
+      connect: vi.fn(async () =>
+        client(async () => ok({ booked: true }))
+      ) as any,
+    });
+    expect(
+      (await mcp.callTool('visits', 'request_appointment', {}))
+        .structuredContent
+    ).toEqual({ booked: true });
+    expect(seen).toEqual([null]);
+  });
+
+  it("a listener that throws does not hide the call's own failure", async () => {
+    const seen: Array<string | null> = [];
+    const mcp = createMcp({
+      strapiUrl: 'x',
+      session: fakeSession() as any,
+      onRecord: (record) => {
+        seen.push(record.error);
+        throw new Error('listener broke');
+      },
+      connect: vi.fn(async () =>
+        client(async () => {
+          throw new StreamableHTTPError(500, 'boom');
+        })
+      ) as any,
+    });
+    await expect(
+      mcp.callTool('home', 'browse_collections', {})
+    ).rejects.toThrow(/boom/);
+    expect(seen).toEqual([expect.stringMatching(/boom/)]);
   });
 });
 

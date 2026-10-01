@@ -71,7 +71,8 @@ const isUnauthorized = (error: unknown) =>
 /**
  * The screens' MCP connection to Strapi. Every call is recorded for the agent view.
  * A 401 (the session expired or was revoked) triggers one new token exchange and one retry.
- * Calls that get their 401 together share that one exchange and reconnect.
+ * Calls that get their 401 together share that one exchange and reconnect. If it is refused they all fail with that
+ * refusal, a call whose 401 lands later included: none starts a second exchange.
  */
 export const createMcp = ({
   strapiUrl,
@@ -84,7 +85,13 @@ export const createMcp = ({
   onRecord: (record: ToolCallRecord) => void;
   connect?: Connect;
 }) => {
+  /**
+   * The newest connection, or the newest attempt to open one. An attempt that failed stays here, flagged in `failed`,
+   * until a call that starts afterwards replaces it: calls that got their 401 on the connection it replaced share
+   * that failure.
+   */
   let connection: Promise<Lease> | null = null;
+  const failed = new WeakSet<Promise<Lease>>();
   let nextId = 1;
 
   const close = async (lease: Lease) => {
@@ -111,18 +118,23 @@ export const createMcp = ({
         retired: false,
       }))
       .catch((error) => {
-        // Forget this connection, unless a newer one has already replaced it.
-        if (connection === opened) connection = null;
+        failed.add(opened);
         throw error;
       });
     return opened;
   };
 
-  const getConnection = (): Promise<Lease> => (connection ??= open(false));
+  /** The connection for a call that starts now: the newest, or a new one when the newest failed to open. */
+  const getConnection = (): Promise<Lease> => {
+    if (!connection || failed.has(connection)) connection = open(false);
+    return connection;
+  };
 
   /**
    * The connection to retry on after a 401 on `stale`. The first call to notice exchanges a new token and
-   * reconnects; calls that got their 401 on the same connection join that reconnect instead of making their own.
+   * reconnects; calls that got their 401 on the same connection join that reconnect instead of making their own,
+   * and so do calls whose 401 lands after it was replaced again. If the reconnect failed, they share that failure
+   * rather than exchanging again: it stays in `connection` until a call that starts afterwards starts over.
    * The stale connection is closed once no call is still in flight on it: closing it sooner makes the MCP SDK
    * reject those calls with "Connection closed" instead of their own 401, so they would never be retried.
    */
@@ -157,19 +169,24 @@ export const createMcp = ({
     args: Record<string, unknown> = {}
   ): Promise<CallToolResult> => {
     const started = performance.now();
-    const record = (result: CallToolResult | null, error: string | null) =>
-      onRecord({
-        id: nextId++,
-        screen,
-        name,
-        args,
-        result,
-        error,
-        ms: Math.round(performance.now() - started),
-        at: new Date().toISOString(),
-      });
+    const record = (result: CallToolResult | null, error: string | null) => {
+      try {
+        onRecord({
+          id: nextId++,
+          screen,
+          name,
+          args,
+          result,
+          error,
+          ms: Math.round(performance.now() - started),
+          at: new Date().toISOString(),
+        });
+      } catch {
+        // A listener that throws must not change how the call ended, such as a booking that went through.
+      }
+    };
+    let result: CallToolResult;
     try {
-      let result: CallToolResult;
       const used = getConnection();
       try {
         result = await invoke(await used, name, args);
@@ -177,12 +194,12 @@ export const createMcp = ({
         if (!isUnauthorized(error)) throw error;
         result = await invoke(await renewConnection(used), name, args);
       }
-      record(result, null);
-      return result;
     } catch (error) {
       record(null, (error as Error).message);
       throw error;
     }
+    record(result, null); // outside the try, so a failure while recording can't record the call a second time
+    return result;
   };
 
   return { callTool };

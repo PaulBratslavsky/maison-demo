@@ -116,7 +116,7 @@ describe('createSession', () => {
   it('gives up after that one retry, and says when to try again', async () => {
     const sleep = vi.fn(async () => {});
     const busy = () =>
-      refused(503, 'temporarily_unavailable', { 'Retry-After': '120' });
+      refused(503, 'temporarily_unavailable', { 'Retry-After': '10' });
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(busy())
@@ -125,9 +125,77 @@ describe('createSession', () => {
     await expect(session.getToken()).rejects.toMatchObject({
       code: 'temporarily_unavailable',
       retryLater: true,
-      retryAfterSeconds: 120,
+      retryAfterSeconds: 10,
     });
-    expect(sleep).toHaveBeenCalledWith(10_000); // capped, so a screen never waits two minutes
+    expect(sleep).toHaveBeenCalledWith(10_000); // 10 seconds is the longest it waits
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits 5 seconds when Retry-After says nothing', async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(refused(503, 'temporarily_unavailable'))
+      .mockResolvedValueOnce(granted('mcp_at_1'));
+    const session = createSession({ ...base, fetchImpl, sleep });
+    expect(await session.getToken()).toBe('mcp_at_1');
+    expect(sleep).toHaveBeenCalledWith(5000);
+  });
+
+  it('does not wait out a Retry-After over 10 seconds: it fails at once, carrying the wait for the screen to show', async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        refused(503, 'temporarily_unavailable', { 'Retry-After': '11' })
+      )
+      .mockResolvedValueOnce(granted('mcp_at_1'));
+    const session = createSession({ ...base, fetchImpl, sleep });
+    await expect(session.getToken()).rejects.toMatchObject({
+      code: 'temporarily_unavailable',
+      retryLater: true,
+      retryAfterSeconds: 11,
+    });
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // no automatic retry
+    expect(await session.getToken()).toBe('mcp_at_1'); // the next call tries again
+  });
+
+  it('refresh() drops the token that was just refused, so getToken() joins the new exchange instead of handing it out', async () => {
+    let answer!: () => void;
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(granted('mcp_at_1'))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = () => resolve(granted('mcp_at_2'));
+          })
+      );
+    const session = createSession({ ...base, fetchImpl });
+    expect(await session.getToken()).toBe('mcp_at_1');
+    const renewed = session.refresh(); // mcp_at_1 just got a 401
+    const joined = session.getToken(); // while that exchange is under way
+    answer();
+    expect(await Promise.all([renewed, joined])).toEqual([
+      'mcp_at_2',
+      'mcp_at_2',
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // getToken() made no exchange of its own
+  });
+
+  it('after a failed re-exchange, getToken() exchanges again instead of handing out the refused token', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(granted('mcp_at_1'))
+      .mockResolvedValueOnce(refused(400, 'invalid_grant'))
+      .mockResolvedValueOnce(granted('mcp_at_3'));
+    const session = createSession({ ...base, fetchImpl });
+    expect(await session.getToken()).toBe('mcp_at_1');
+    await expect(session.refresh()).rejects.toMatchObject({
+      code: 'invalid_grant',
+    });
+    expect(await session.getToken()).toBe('mcp_at_3'); // not mcp_at_1: it was refused
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 });

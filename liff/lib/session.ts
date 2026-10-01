@@ -32,7 +32,10 @@ export interface SessionOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/** The longest the app waits before its one automatic retry, whatever Retry-After says, so a screen never hangs. */
+/**
+ * The longest the app waits for its one automatic retry, so a screen never hangs. A longer Retry-After isn't
+ * waited out: the error carries it (`retryAfterSeconds`), so the screen can say when to try again.
+ */
 const MAX_RETRY_WAIT_SECONDS = 10;
 const DEFAULT_RETRY_WAIT_SECONDS = 5;
 
@@ -83,27 +86,36 @@ export const createSession = ({
     return current.token;
   };
 
-  /** One exchange. temporarily_unavailable is retried once, after Retry-After; invalid_grant never is. */
+  /**
+   * One exchange. temporarily_unavailable is retried once, after Retry-After, when that is 10 seconds or less
+   * (5 when it says nothing). A longer wait fails at once. invalid_grant is never retried.
+   */
   const exchange = async (): Promise<string> => {
     try {
       return await exchangeOnce();
     } catch (error) {
       if (!(error instanceof SessionError) || !error.retryLater) throw error;
-      await sleep(
-        Math.min(
-          error.retryAfterSeconds ?? DEFAULT_RETRY_WAIT_SECONDS,
-          MAX_RETRY_WAIT_SECONDS
-        ) * 1000
-      );
+      const wait = error.retryAfterSeconds ?? DEFAULT_RETRY_WAIT_SECONDS;
+      if (wait > MAX_RETRY_WAIT_SECONDS) throw error;
+      await sleep(wait * 1000);
       return exchangeOnce();
     }
   };
 
-  /** A new exchange. Concurrent callers share it. */
-  const refresh = (): Promise<string> =>
-    (pending ??= exchange().finally(() => {
-      pending = null;
-    }));
+  /**
+   * A new exchange. Concurrent callers share it.
+   * It drops the token handed out so far: that one was just refused (or is about to expire), so it isn't handed out
+   * again while the exchange is under way, or after it fails. `getToken()` joins the exchange instead.
+   */
+  const refresh = (): Promise<string> => {
+    if (!pending) {
+      current = null;
+      pending = exchange().finally(() => {
+        pending = null;
+      });
+    }
+    return pending;
+  };
 
   return {
     /** The current session token, or a new one when there is none or it expires within a minute. */

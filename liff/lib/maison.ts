@@ -22,6 +22,16 @@ export const onToolCall = (listener: Listener) => {
   };
 };
 
+/** Every listener hears every record. One that throws is logged and skipped: it can't hide the record from the rest. */
+const notifyListeners = (record: ToolCallRecord) =>
+  listeners.forEach((listener) => {
+    try {
+      listener(record);
+    } catch (error) {
+      console.error('A tool-call listener threw.', error);
+    }
+  });
+
 let maison: Promise<Maison> | null = null;
 
 const start = async (): Promise<Maison> => {
@@ -51,7 +61,7 @@ const start = async (): Promise<Maison> => {
   const mcp = createMcp({
     strapiUrl: config.strapiUrl,
     session,
-    onRecord: (record) => listeners.forEach((listener) => listener(record)),
+    onRecord: notifyListeners,
   });
   return {
     locale: liff.locale,
