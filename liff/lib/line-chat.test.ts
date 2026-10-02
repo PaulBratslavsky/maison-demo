@@ -15,10 +15,10 @@ describe("the button's copy", () => {
 
   it('and in Japanese', () => {
     expect(COPY.ja.lineChat).toEqual({
-      button: 'LINEでメゾンにメッセージ',
-      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
-      addButton: 'メゾンを友だち追加',
-      addLine: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+      button: 'LINEでMaisonにメッセージ',
+      line: '確定のご連絡はMaisonのLINEトークにお届けします。',
+      addButton: 'Maisonを友だち追加',
+      addLine: '確定のご連絡をLINEで受け取るには、Maisonを友だち追加してください。',
     });
   });
 });
@@ -30,8 +30,8 @@ describe('lineChatWords: the nudge, from what liff.getFriendship() said', () => 
       line: 'Add Maison on LINE to get your confirmation there.',
     });
     expect(lineChatWords(COPY.ja.lineChat, false)).toEqual({
-      button: 'メゾンを友だち追加',
-      line: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+      button: 'Maisonを友だち追加',
+      line: '確定のご連絡をLINEで受け取るには、Maisonを友だち追加してください。',
     });
   });
 
@@ -41,8 +41,8 @@ describe('lineChatWords: the nudge, from what liff.getFriendship() said', () => 
       line: 'Your confirmation arrives in the Maison chat.',
     });
     expect(lineChatWords(COPY.ja.lineChat, true)).toEqual({
-      button: 'LINEでメゾンにメッセージ',
-      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
+      button: 'LINEでMaisonにメッセージ',
+      line: '確定のご連絡はMaisonのLINEトークにお届けします。',
     });
   });
 

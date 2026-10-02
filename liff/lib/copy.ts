@@ -69,10 +69,10 @@ export const COPY = {
     // Account: on My visits under `line`, on a visit's page, and after a booking. For a customer who hasn't added Maison
     // yet (liff.getFriendship() in LINE mode), the add-friend words take their place (lineChatWords in lib/line-chat.ts).
     lineChat: {
-      button: 'LINEでメゾンにメッセージ',
-      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
-      addButton: 'メゾンを友だち追加',
-      addLine: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+      button: 'LINEでMaisonにメッセージ',
+      line: '確定のご連絡はMaisonのLINEトークにお届けします。',
+      addButton: 'Maisonを友だち追加',
+      addLine: '確定のご連絡をLINEで受け取るには、Maisonを友だち追加してください。',
     },
     noVisits: 'ご来店予約はまだありません。',
     visitNotFound: 'この予約は見つかりませんでした。',

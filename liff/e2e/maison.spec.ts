@@ -236,7 +236,7 @@ const expectLineChat = async (page: Page) => {
   const button = page.getByTestId('line-chat');
   await expect(button).toHaveCount(1);
   // The plain words: these tests run on the LIFF mock, which is never asked whether the customer has added Maison.
-  await expect(button).toHaveText(/^(Chat with Maison on LINE|LINEでメゾンにメッセージ)$/);
+  await expect(button).toHaveText(/^(Chat with Maison on LINE|LINEでMaisonにメッセージ)$/);
   const href = `https://line.me/R/ti/p/%40${LINE_OA_ID.slice(1)}`;
   expect((await button.getAttribute('href')) === href, 'the button links to https://line.me/R/ti/p/ and the encoded basic ID').toBe(true);
 };
@@ -245,7 +245,7 @@ const expectLineChat = async (page: Page) => {
 const expectNoLineChat = async (page: Page) => {
   await expect(page.getByTestId('line-chat')).toHaveCount(0);
   await expect(page.locator('a[href^="https://line.me/"]')).toHaveCount(0);
-  await expect(page.getByText(/Maison chat|Add Maison on LINE|メゾンのLINEトーク|メゾンを友だち追加/)).toHaveCount(0);
+  await expect(page.getByText(/Maison chat|Add Maison on LINE|MaisonのLINEトーク|Maisonを友だち追加/)).toHaveCount(0);
 };
 
 test.describe('Chat with Maison on LINE', () => {
@@ -262,7 +262,7 @@ test.describe('Chat with Maison on LINE', () => {
     await page.goto('/visits');
     const visit = page.getByTestId('visit').filter({ hasText: reference });
     await expect(visit).toBeVisible();
-    await expect(page.getByText(/^(Your confirmation arrives in the Maison chat\.|確定のご連絡はメゾンのLINEトークにお届けします。)$/)).toBeVisible();
+    await expect(page.getByText(/^(Your confirmation arrives in the Maison chat\.|確定のご連絡はMaisonのLINEトークにお届けします。)$/)).toBeVisible();
     await expectLineChat(page);
     // The visit's page.
     await visit.click();
