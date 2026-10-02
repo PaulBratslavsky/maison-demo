@@ -223,23 +223,29 @@ describe('handleConcierge', () => {
     expect(instructions).toContain('Reply in English');
   });
 
-  it('gives the model resolve_date and hand_off_to_staff next to the Maison tools', async () => {
+  it('gives the model resolve_date next to the Maison tools, and no tool of its own besides', async () => {
     const model = replyModel();
     const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
     const createMcpClient = vi.fn(async () => ({ tools: async () => ({ search_products: search }), close: vi.fn(async () => {}) }));
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['hand_off_to_staff', 'resolve_date', 'search_products']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
   });
 
-  it("tells the model, in hand_off_to_staff's own description, to call it before it writes its answer, to leave the chat to the app, and that it sends nothing", async () => {
-    const { createMcpClient } = fakeMcp();
+  it('leaves hand_off_to_staff to Strapi: the model gets the Maison tool, as Strapi describes it, and none when Strapi has none', async () => {
+    const description = "Hands the customer's question to Maison's client advisors, through Strapi.";
+    const handOff = tool({ description, inputSchema: z.object({}), execute: async () => ({}) });
     const model = replyModel();
+    const createMcpClient = vi.fn(async () => ({ tools: async () => ({ hand_off_to_staff: handOff }), close: vi.fn(async () => {}) }));
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    const handOff = model.doStreamCalls[0].tools?.find((entry) => entry.name === 'hand_off_to_staff');
-    const description = handOff?.type === 'function' ? handOff.description : undefined;
-    expect(description).toMatch(/Call it when search_knowledge returns no entry that answers the customer's question, before you write your answer\./);
-    expect(description).toMatch(/The app then shows the customer a note and a button to Maison's LINE chat, so don't mention the chat yourself\./);
-    expect(description).toMatch(/It sends nothing itself, so never say the team will contact the customer\./);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['hand_off_to_staff', 'resolve_date']);
+    const given = model.doStreamCalls[0].tools?.find((entry) => entry.name === 'hand_off_to_staff');
+    expect(given?.type === 'function' ? given.description : undefined).toBe(description);
+
+    // A Strapi without the tool (a plugin from before it) leaves the model without one: the app makes no stand-in.
+    const without = fakeMcp();
+    const other = replyModel();
+    await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient: without.createMcpClient, model: other }))).text();
+    expect(other.doStreamCalls[0].tools?.map((entry) => entry.name)).toEqual(['resolve_date']);
   });
 
   /**
@@ -260,6 +266,12 @@ describe('handleConcierge', () => {
     const tools = {
       request_appointment: maisonTool('request_appointment', { boutique: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } }),
       my_appointments: maisonTool('my_appointments', {}),
+      hand_off_to_staff: maisonTool('hand_off_to_staff', {
+        question: { type: 'string' },
+        reason: { type: 'string', enum: ['no_answer', 'asked_for_person'] },
+        productSlug: { type: 'string' },
+        locale: { type: 'string', enum: ['ja', 'en'] },
+      }),
     };
     return { received, createMcpClient: vi.fn(async () => ({ tools: async () => tools, close: vi.fn(async () => {}) })) };
   };
@@ -338,13 +350,14 @@ describe('handleConcierge', () => {
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('exactly one of weekday, date or relative');
   });
 
-  it('answers hand_off_to_staff with handedOff, whatever blanks or extra keys the model sends', async () => {
-    for (const input of [{}, { question: null, locale: 'en' }]) {
-      const { createMcpClient } = fakeMcp();
-      const model = callsThenReplies('hand_off_to_staff', input);
-      const response = await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient, model }));
-      const result = eventsOf(await response.text()).find((event) => event.type === 'tool-output-available');
-      expect(result?.output, JSON.stringify(input)).toEqual({ handedOff: true });
+  it("sends a hand-off to Strapi's tool, with the conversation's locale when the model leaves it out: that is the question's language", async () => {
+    for (const input of [{ question: 'Can I pay in bitcoin?', reason: 'no_answer' }, { question: 'Can I pay in bitcoin?', reason: 'no_answer', locale: null }, { question: 'Can I pay in bitcoin?', reason: 'no_answer', locale: '' }]) {
+      for (const locale of ['en', 'ja'] as const) {
+        const { received, createMcpClient } = maisonTools();
+        const model = callsThenReplies('hand_off_to_staff', input);
+        await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale }), deps({ createMcpClient, model }))).text();
+        expect(received, `${JSON.stringify(input)} in ${locale}`).toEqual([{ name: 'hand_off_to_staff', input: { question: 'Can I pay in bitcoin?', reason: 'no_answer', locale } }]);
+      }
     }
   });
 
@@ -698,21 +711,19 @@ describe('conciergeInstructions', () => {
     }
   });
 
-  it('sends questions about policies to search_knowledge, and the ones it has no answer to, to hand_off_to_staff, in both reply languages', () => {
+  // Rules 9 and 10, word for word: the policy question and what follows when no entry answers it, and the request for a person.
+  const RULE_9 = `9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded in this reply, and never promise a time yourself.`;
+  const RULE_10 = `10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.`;
+
+  it('sends questions about policies to search_knowledge, and the ones it has no answer to, or a request for a person, to hand_off_to_staff, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
-      expect(text, locale).toMatch(/delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words/);
-      expect(text, locale).toMatch(/Answer only from the entries it returns, and never invent a policy, a price or a time\./);
-      // The call comes before any words, and the words are one short sentence that leaves where the team answers to the
-      // note. A reply that says it too repeats the note, right under it.
-      expect(text, locale).toMatch(
-        /If no entry answers the question, call hand_off_to_staff next, before you write anything, and then say in one short sentence that you don't have that information: the app shows the customer where Maison's team answers\./
-      );
-      expect(text, locale).toMatch(/Don't mention the LINE chat yourself, and never say the team will contact them\./);
-      // So the reply doesn't say where the team answers, and never points at a button: the note and the button render above
-      // the model's words, and not at all without a LINE Official Account.
+      expect(text, locale).toContain(`\n${RULE_9}\n${RULE_10}`);
+      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is.
       expect(text, locale).not.toMatch(/answers questions like this in the LINE chat/);
       expect(text, locale).not.toMatch(/button below/);
+      expect(text, locale).not.toMatch(/Don't mention the LINE chat yourself/);
+      expect(text, locale).not.toMatch(/you don't have that information/);
     }
   });
 

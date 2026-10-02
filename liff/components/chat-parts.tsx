@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 
 import { parseChatText, type Line } from '@/lib/chat-text';
+import { config } from '@/lib/config';
 import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
-import { handOffAt, toolPartOf, toolView } from '@/lib/tool-view';
+import { lineMessageUrl } from '@/lib/line-chat';
+import { handOffAt, toolPartOf, toolView, type RecordedHandOff } from '@/lib/tool-view';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
 import { LineChat } from './line-chat';
 import { ProductImage } from './product-grid';
@@ -103,17 +105,48 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
 }
 
 /**
+ * The hand-off note, which handOffAt places once a message. After a hand-off Strapi recorded (`recorded`): who has the
+ * question, by its reference, and where and when they reply, with "Send it in the LINE chat", a secondary button that
+ * opens the chat with Maison with the question already typed in, for the customer to send (lineMessageUrl). Without
+ * NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the model skipped the call after a search that found
+ * nothing): where the team answers, and "Chat with Maison on LINE". Only a recorded hand-off says the question is with
+ * the advisors.
+ */
+export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | null; locale: Locale }) {
+  const copy = COPY[locale].handOff;
+  if (!recorded) {
+    return (
+      <div data-testid="hand-off" className="flex flex-col gap-2.5">
+        <p className="text-body text-graphite">{copy.fallback}</p>
+        <LineChat />
+      </div>
+    );
+  }
+  const url = lineMessageUrl(config.lineOaId, copy.typed(recorded.reference, recorded.question));
+  return (
+    <div data-testid="hand-off" className="flex flex-col gap-2.5">
+      <p className="text-body text-graphite">{copy.note(recorded.reference)}</p>
+      {url && (
+        <a href={url} data-testid="hand-off-line" className="btn-secondary w-full">
+          {copy.send}
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
- * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note
- * with the same button, once, under the line handOffAt names (a hand_off_to_staff call, or when the model skipped it, the
- * last search that found nothing), and the pieces a search found under the message's words.
+ * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note,
+ * once, under the line handOffAt names (a hand_off_to_staff call that went through, or when it didn't, the last search
+ * that found nothing), and the pieces a search found under the message's words.
  */
 export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
   const blocks: ReactNode[] = [];
   const found: ReactNode[] = [];
   let lines: ReactNode[] = [];
   let cards: ReactNode[] = [];
-  const noteAt = handOffAt(parts);
+  const note = handOffAt(parts);
   const endRun = () => {
     if (lines.length > 0) {
       blocks.push(
@@ -145,13 +178,8 @@ export function AssistantParts({ parts, locale }: { parts: Array<{ type: string;
         </div>
       );
     }
-    if (index === noteAt) {
-      cards.push(
-        <div key={`hand-off-${index}`} data-testid="hand-off" className="flex flex-col gap-2.5">
-          <p className="text-body text-graphite">{COPY[locale].handOff}</p>
-          <LineChat />
-        </div>
-      );
+    if (note && index === note.index) {
+      cards.push(<HandOffNote key={`hand-off-${index}`} recorded={note.recorded} locale={locale} />);
     }
     if (view.products) found.push(<ProductSuggestions key={`found-${index}`} products={view.products} locale={locale} />);
   });

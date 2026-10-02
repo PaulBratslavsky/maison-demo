@@ -65,12 +65,19 @@ export const COPY = {
     // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
     lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
-    // Under the concierge's hand_off_to_staff line or, when the model skipped the call, under the last knowledge search
-    // that found nothing (handOffAt in lib/tool-view.ts), above "Chat with Maison on LINE" (components/chat-parts.tsx).
-    // Nothing reaches staff from the app yet: the customer asks in Maison's LINE chat.
-    handOff: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
+    // The concierge's hand-off (components/chat-parts.tsx), under the line handOffAt names (lib/tool-view.ts). Under a
+    // hand_off_to_staff that Strapi recorded: `note` says who has the question, by its reference, and where and when they
+    // reply, and `send` is the button that opens Maison's LINE chat with `typed` already in it (lineMessageUrl in
+    // lib/line-chat.ts). `fallback` is for a question nothing recorded, when the model skipped the call (or it failed)
+    // after a knowledge search that found nothing: it says only where the team answers, above "Chat with Maison on LINE".
+    handOff: {
+      fallback: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
+      note: (reference: string) => `ご質問（${reference}）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。`,
+      send: 'LINEトークで送る',
+      typed: (reference: string, question: string) => `アドバイザーへの質問（${reference}）：${question}`,
+    },
     // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
-    // Account: on My visits under `line`, on a visit's page, after a booking, and under a hand-off in the concierge.
+    // Account: on My visits under `line`, on a visit's page, after a booking, and in the concierge under `handOff.fallback`.
     // For a customer who hasn't added Maison yet (liff.getFriendship() in LINE mode), the add-friend words take their
     // place (lineChatWords in lib/line-chat.ts).
     lineChat: {
@@ -167,7 +174,12 @@ export const COPY = {
     confirmationSent: 'Confirmed · LINE sent',
     lineSent: 'LINE sent',
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
-    handOff: "Our team answers questions like this in Maison's LINE chat.",
+    handOff: {
+      fallback: "Our team answers questions like this in Maison's LINE chat.",
+      note: (reference: string) => `Your question is with Maison's client advisors (${reference}). They reply in your LINE chat with Maison, 11:00–20:00 Japan time.`,
+      send: 'Send it in the LINE chat',
+      typed: (reference: string, question: string) => `Question for a Maison advisor (${reference}): ${question}`,
+    },
     lineChat: {
       button: 'Chat with Maison on LINE',
       line: 'Your confirmation arrives in the Maison chat.',

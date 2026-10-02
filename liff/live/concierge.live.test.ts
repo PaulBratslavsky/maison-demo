@@ -273,15 +273,17 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(answer, 'the answer uses the entry').toMatch(/cloth|sunlight|balm/i);
   });
 
-  it("sends a question Maison hasn't written about to the LINE chat", async () => {
+  it("shows the hand-off note for a question Maison hasn't written about, with Strapi's reference only when it recorded the question", async () => {
     const events = await turn('Can I pay in bitcoin?');
     const answer = textIn(events);
-    const called = callsIn(events).map((call) => call.name);
+    const calls = callsIn(events);
+    const called = calls.map((call) => call.name);
     expect(called, answer).toContain('search_knowledge');
-    // The chat shows the note and the LINE chat button when the model calls hand_off_to_staff, and when it skips the call after a search that found nothing.
-    const noteAt = handOffAt((await assistantMessageOf(events)).parts);
-    expect(noteAt, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
-    // Nothing reaches staff in steps 1–2, so the reply promises no contact.
-    expect(answer, 'it promises no contact').not.toMatch(/will (contact|reach out|get back|reply)/i);
+    // The chat shows a note when the model calls hand_off_to_staff, and when it skips the call or the call fails, after a search that found nothing.
+    const note = handOffAt((await assistantMessageOf(events)).parts);
+    expect(note, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
+    // The note says the question is with the advisors, under its reference, only when the call went through: Strapi's own reference, or none.
+    const recorded = calls.find((call) => call.name === 'hand_off_to_staff' && call.output?.structuredContent?.question?.reference);
+    expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(recorded?.output?.structuredContent.question.reference);
   });
 });

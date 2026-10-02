@@ -16,7 +16,7 @@ import { getMaison } from '@/lib/maison';
 import { errorOf, errorText } from '@/lib/status';
 import { tunnelHeaders } from '@/lib/tunnel';
 
-const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments'];
+const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments', 'hand_off_to_staff'];
 
 /**
  * The concierge, as in the mockup: a title bar with the "N MCP tools" button (Screen's `title`); the customer's messages

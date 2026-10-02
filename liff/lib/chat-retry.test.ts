@@ -27,9 +27,11 @@ const askedToBook = [
   user('Yes, please.'),
 ];
 
-/** A hand_off_to_staff call as the page holds it: the concierge's own tool, so a `tool-<name>` part. */
-const handOff = (state: string, output?: unknown): Part => ({ type: 'tool-hand_off_to_staff', state, ...(output === undefined ? {} : { output }) });
-const handedOff = handOff('output-available', { handedOff: true });
+/** A hand_off_to_staff call as the page holds it: a Maison tool, so a dynamic-tool part. */
+const handOff = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'hand_off_to_staff', state, ...(output === undefined ? {} : { output }) });
+/** What Strapi answers to a hand-off it recorded: the question's reference. */
+const recorded = { content: [{ type: 'text', text: '{}' }], structuredContent: { question: { reference: 'Q-4821', status: 'open', product: null } } };
+const handedOff = handOff('output-available', recorded);
 /** A search_knowledge call, an MCP tool: a dynamic-tool part. Its result lists the entries it found. */
 const knowledge = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'search_knowledge', state, ...(output === undefined ? {} : { output }) });
 const entries = (...titles: string[]) => ({ content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
@@ -107,7 +109,7 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedToBook, assistant(booked, text('Requested.')), user('Anything else for him?'), assistant(searchProducts)], false)).toBe(true);
   });
 
-  // Under the hand-off's line are the note and the LINE chat button: they are the answer, with words after them or none.
+  // Under the hand-off's line are the note and its LINE button: they are the answer, with words after them or none.
   it('is false after a hand-off went through, even with no words after it', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, handedOff)], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, foundNothing, { type: 'step-start' }, handedOff, { type: 'step-start' })], false)).toBe(false);
@@ -119,6 +121,7 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant({ ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-available'))], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', refusal))], false)).toBe(true); // a result that is an error
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', { content: [] }))], false)).toBe(true); // a result with no reference: nothing says it was recorded
     expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
   });
 

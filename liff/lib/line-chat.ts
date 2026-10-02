@@ -15,6 +15,19 @@ export const lineChatUrl = (basicId: string | undefined): string | null => {
   return LINE_ID.test(id) ? `https://line.me/R/ti/p/${encodeURIComponent(id)}` : null;
 };
 
+/** The longest question a typed-in LINE message carries, so the link stays well within what LINE opens. */
+const MAX_TYPED = 500;
+
+/**
+ * LINE's link that opens the chat with Maison with `text` already typed in, for the customer to send: "Send it in the
+ * LINE chat" under a hand-off. Once they send it, staff see the chat in LINE Official Account Manager, which on an
+ * unverified account lists only customers who have written. Null when the setting is unset or isn't an @ ID.
+ */
+export const lineMessageUrl = (basicId: string | undefined, text: string): string | null => {
+  const id = basicId?.trim() ?? '';
+  return LINE_ID.test(id) ? `https://line.me/R/oaMessage/${encodeURIComponent(id)}/?${encodeURIComponent(Array.from(text).slice(0, MAX_TYPED).join(''))}` : null;
+};
+
 /**
  * The button's words, and the line above it on My visits (COPY[locale].lineChat), from liff.getFriendship()'s friendFlag
  * (Maison's friendFlag()): a customer who hasn't added Maison yet (false) is asked to add it, which their confirmation
