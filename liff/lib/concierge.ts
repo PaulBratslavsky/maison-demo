@@ -115,8 +115,9 @@ const resolveDateTool = (locale: 'ja' | 'en', now: Date) =>
  * The concierge's second own tool. When nothing Maison has written answers a question, it calls this, and the chat
  * shows where Maison's team answers, with the LINE chat button (components/chat-parts.tsx). It sends nothing and logs
  * nothing yet, so the customer asks the team there. Any input is accepted and ignored: the local model sends nulls and a
- * locale. Rule 9 and the description both ask for the call before any words: with its words first, the local model once
- * told the customer to use "the button below", never made the call, and no note or button showed.
+ * locale. Rule 9 and the description both ask for the call before any words, but the local model often skips it, once
+ * telling the customer to use "the button below" with no call and no button. So the chat doesn't wait for the call: it
+ * shows the same note under a knowledge search that found nothing (handOffAt in lib/tool-view.ts).
  */
 const handOffTool = () =>
   tool({

@@ -65,8 +65,9 @@ export const COPY = {
     // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
     lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
-    // Under the concierge's hand_off_to_staff line, above "Chat with Maison on LINE" (components/chat-parts.tsx). Nothing
-    // reaches staff from the app yet: the customer asks in Maison's LINE chat.
+    // Under the concierge's hand_off_to_staff line or, when the model skipped the call, under the last knowledge search
+    // that found nothing (handOffAt in lib/tool-view.ts), above "Chat with Maison on LINE" (components/chat-parts.tsx).
+    // Nothing reaches staff from the app yet: the customer asks in Maison's LINE chat.
     handOff: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
     // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
     // Account: on My visits under `line`, on a visit's page, after a booking, and under a hand-off in the concierge.

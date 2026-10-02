@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toolPartOf, toolView } from './tool-view';
+import { handOffAt, toolPartOf, toolView } from './tool-view';
 
 describe('toolView', () => {
   it('shows a hand-off as a local line, with the hand-off note under it', () => {
@@ -77,5 +77,88 @@ describe('toolPartOf', () => {
   it("reads a local tool's name from its part type, and skips text", () => {
     expect(toolPartOf({ type: 'tool-hand_off_to_staff' })?.toolName).toBe('hand_off_to_staff');
     expect(toolPartOf({ type: 'text' })).toBeNull();
+  });
+});
+
+// Where the hand-off note goes in a message: the index of the part it goes under, or null. The model may skip the
+// hand_off_to_staff call (the local model does), so a search that found nothing shows the note too.
+describe('handOffAt', () => {
+  type Part = { type: string; [key: string]: unknown };
+  /** A hand_off_to_staff call as the page holds it: the concierge's own tool, so a `tool-<name>` part. */
+  const handOff = (state: string, output?: unknown): Part => ({ type: 'tool-hand_off_to_staff', state, ...(output === undefined ? {} : { output }) });
+  const handedOff = handOff('output-available', { handedOff: true });
+  /** A search_knowledge call, an MCP tool: a dynamic-tool part, whose output is the MCP result. */
+  const search = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'search_knowledge', state, ...(output === undefined ? {} : { output }) });
+  const found = (...titles: string[]) => search('output-available', { content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
+  const foundNothing = found();
+  const foundAnAnswer = found('How do I care for the leather?');
+  /** A result Maison refused (isError), as the MCP client passes it on. */
+  const refusal = { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'invalid_input', message: 'Check the query.', hint: 'Use 1 to 300 characters.' } }) }] };
+  const words: Part = { type: 'text', text: "Maison's team answers questions like this in the LINE chat." };
+  const step: Part = { type: 'step-start' };
+
+  it('puts the note under a hand-off that went through, and under the first of several', () => {
+    expect(handOffAt([foundNothing, handedOff])).toBe(1);
+    expect(handOffAt([step, handedOff, words])).toBe(1);
+    expect(handOffAt([handedOff, foundNothing, handedOff])).toBe(0);
+    expect(handOffAt([handOff('output-error'), handedOff])).toBe(1); // a first one that failed doesn't count
+  });
+
+  it('puts it under a hand-off whatever the searches found: the model made the call', () => {
+    expect(handOffAt([foundAnAnswer, handedOff])).toBe(1);
+    expect(handOffAt([search('input-available'), handedOff])).toBe(1);
+    expect(handOffAt([search('output-error'), handedOff])).toBe(1);
+  });
+
+  it('puts none under a hand-off that is running, failed or was refused, when no search found nothing', () => {
+    expect(handOffAt([handOff('input-streaming')])).toBeNull();
+    expect(handOffAt([handOff('input-available')])).toBeNull();
+    expect(handOffAt([handOff('output-error')])).toBeNull();
+    expect(handOffAt([handOff('output-available', refusal)])).toBeNull();
+    expect(handOffAt([foundAnAnswer, handOff('output-error')])).toBeNull();
+  });
+
+  it('falls back to the last search that found nothing, when the model made no hand-off', () => {
+    expect(handOffAt([foundNothing])).toBe(0);
+    expect(handOffAt([step, foundNothing, step, words])).toBe(1); // under the search, above the model's words
+    expect(handOffAt([foundNothing, step, foundNothing])).toBe(2); // two searches, both empty: under the last
+    expect(handOffAt([foundNothing, handOff('output-error')])).toBe(0); // a hand-off that failed doesn't take the note away
+    expect(handOffAt([foundNothing, handOff('input-available')])).toBe(0);
+  });
+
+  it('shows no fallback note when any search found entries', () => {
+    expect(handOffAt([foundAnAnswer])).toBeNull();
+    expect(handOffAt([foundNothing, foundAnAnswer])).toBeNull();
+    expect(handOffAt([foundAnAnswer, foundNothing])).toBeNull();
+    expect(handOffAt([foundAnAnswer, words])).toBeNull();
+  });
+
+  it('shows no fallback note while a search is running, or after one failed or was refused', () => {
+    expect(handOffAt([search('input-streaming')])).toBeNull();
+    expect(handOffAt([search('input-available')])).toBeNull();
+    // Held back while a second search is under way, so the note doesn't show and then vanish when that one finds an answer.
+    expect(handOffAt([foundNothing, search('input-available')])).toBeNull();
+    expect(handOffAt([search('output-error')])).toBeNull();
+    expect(handOffAt([foundNothing, search('output-error')])).toBeNull();
+    expect(handOffAt([search('output-available', refusal)])).toBeNull();
+    expect(handOffAt([foundNothing, search('output-available', refusal)])).toBeNull();
+  });
+
+  it("shows no fallback note when it can't tell that the search found nothing, or nothing was searched", () => {
+    expect(handOffAt([search('output-available', { content: [] })])).toBeNull(); // no structuredContent
+    expect(handOffAt([search('output-available', { content: [], structuredContent: { locale: 'en' } })])).toBeNull(); // no entries list
+    expect(handOffAt([search('output-available', null)])).toBeNull();
+    expect(handOffAt([])).toBeNull();
+    expect(handOffAt([words, step])).toBeNull();
+    // Another tool's empty list isn't knowledge.
+    const products: Part = { type: 'dynamic-tool', toolName: 'search_products', state: 'output-available', output: { content: [], structuredContent: { products: [] } } };
+    expect(handOffAt([products])).toBeNull();
+    expect(handOffAt([{ type: 'dynamic-tool' }])).toBeNull(); // a dynamic part with no name
+  });
+
+  it('reads a search from a static part too, and counts every part toward the index', () => {
+    const typed: Part = { type: 'tool-search_knowledge', state: 'output-available', output: { content: [], structuredContent: { entries: [] } } };
+    expect(handOffAt([step, words, typed])).toBe(2);
+    expect(handOffAt([step, words, { ...typed, output: { content: [], structuredContent: { entries: [{ title: 'A' }] } } }])).toBeNull();
   });
 });

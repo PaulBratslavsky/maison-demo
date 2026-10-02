@@ -30,10 +30,14 @@ const askedToBook = [
 /** A hand_off_to_staff call as the page holds it: the concierge's own tool, so a `tool-<name>` part. */
 const handOff = (state: string, output?: unknown): Part => ({ type: 'tool-hand_off_to_staff', state, ...(output === undefined ? {} : { output }) });
 const handedOff = handOff('output-available', { handedOff: true });
-/** What search_knowledge answers when no entry fits: a result with an empty list. */
-const searchKnowledge: Part = { type: 'dynamic-tool', toolName: 'search_knowledge', state: 'output-available', output: { content: [], structuredContent: { locale: 'en', entries: [] } } };
-/** A question Maison has written nothing about: search_knowledge finds nothing, and the reply hands off. */
+/** A search_knowledge call, an MCP tool: a dynamic-tool part. Its result lists the entries it found. */
+const knowledge = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'search_knowledge', state, ...(output === undefined ? {} : { output }) });
+const entries = (...titles: string[]) => ({ content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
+const foundNothing = knowledge('output-available', entries());
+const foundAnAnswer = knowledge('output-available', entries('How do I care for the leather?'));
+/** A question Maison has written nothing about, and one it has. */
 const askedAboutBitcoin = [user('Can I pay in bitcoin?')];
+const askedAboutCare = [user('How do I care for the leather?')];
 
 describe('needsRetry', () => {
   it('is false for a reply that ends in something to read', () => {
@@ -105,15 +109,33 @@ describe('needsRetry', () => {
 
   // Under the hand-off's line are the note and the LINE chat button: they are the answer, with words after them or none.
   it('is false after a hand-off went through, even with no words after it', () => {
-    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handedOff)], false)).toBe(false);
-    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, searchKnowledge, { type: 'step-start' }, handedOff, { type: 'step-start' })], false)).toBe(false);
-    expect(needsRetry([...askedAboutBitcoin, assistant(handedOff, searchKnowledge)], false)).toBe(false); // another tool call after it
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, handedOff)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, foundNothing, { type: 'step-start' }, handedOff, { type: 'step-start' })], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOff, foundNothing)], false)).toBe(false); // another tool call after it
+    expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, handedOff)], false)).toBe(false); // the call was made, whatever the search found
   });
 
-  it('still allows it when the hand-off failed or has no result: no note shows, so nothing answered', () => {
-    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
-    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handOff('input-available'))], false)).toBe(true);
-    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handOff('output-available', refusal))], false)).toBe(true); // a result that is an error
-    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge)], false)).toBe(true); // it searched, and stopped
+  it('still allows it when the hand-off failed or has no result, and no search found nothing: no note shows', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant({ ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-available'))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', refusal))], false)).toBe(true); // a result that is an error
+    expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
+  });
+
+  // The local model often skips the hand-off. The chat then shows the note under the search that found nothing (handOffAt).
+  it('is false after a search that found nothing, though the model never handed off and wrote nothing', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, foundNothing, { type: 'step-start' })], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, foundNothing)], false)).toBe(false); // two searches, both empty
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(false); // a failed hand-off doesn't take the note away
+  });
+
+  it('still allows it after a search that found entries, failed or has not finished, with no words after it', () => {
+    expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer)], false)).toBe(true);
+    expect(needsRetry([...askedAboutCare, assistant(foundNothing, foundAnAnswer)], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ ...knowledge('output-error'), errorText: 'fetch failed' })], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('output-available', refusal))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('input-available'))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, knowledge('input-available'))], false)).toBe(true); // a second search is under way
   });
 });

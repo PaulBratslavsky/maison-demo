@@ -202,14 +202,14 @@ console.log("Added maison-ops to", file);
 | Time | Beat | Do |
 |---|---|---|
 | 0:00–0:30 | UX | The app opens signed in with LINE. Browse Voyage, then the Weekender 50. Flip **Agent view**: every screen is an MCP tool call, the same tools an agent uses. |
-| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line under the reply names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
+| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line above the answer names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
 | 1:10–1:30 | Booking | Tap **Yes, please.** The request is sent and awaits the boutique. |
 | 1:30–1:50 | The request arrives | On the board, the request appears, created via `concierge`, with the customer masked. |
 | 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
 | 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
 
-**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi.
+**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi. Ask "Can I pay in bitcoin?" instead: the search finds nothing, and the hand-off note and **Chat with Maison on LINE** appear under its line, even if the model doesn't call `hand_off_to_staff`.
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
 

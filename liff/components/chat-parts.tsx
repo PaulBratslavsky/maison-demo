@@ -6,7 +6,7 @@ import { Fragment, type ReactNode } from 'react';
 import { parseChatText, type Line } from '@/lib/chat-text';
 import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
-import { toolPartOf, toolView } from '@/lib/tool-view';
+import { handOffAt, toolPartOf, toolView } from '@/lib/tool-view';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
 import { LineChat } from './line-chat';
 import { ProductImage } from './product-grid';
@@ -105,13 +105,15 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
 /**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
  * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note
- * with the same button under a hand_off_to_staff line, and the pieces a search found under the message's words.
+ * with the same button, once, under the line handOffAt names (a hand_off_to_staff call, or when the model skipped it, the
+ * last search that found nothing), and the pieces a search found under the message's words.
  */
 export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
   const blocks: ReactNode[] = [];
   const found: ReactNode[] = [];
   let lines: ReactNode[] = [];
   let cards: ReactNode[] = [];
+  const noteAt = handOffAt(parts);
   const endRun = () => {
     if (lines.length > 0) {
       blocks.push(
@@ -143,7 +145,7 @@ export function AssistantParts({ parts, locale }: { parts: Array<{ type: string;
         </div>
       );
     }
-    if (view.handOff) {
+    if (index === noteAt) {
       cards.push(
         <div key={`hand-off-${index}`} data-testid="hand-off" className="flex flex-col gap-2.5">
           <p className="text-body text-graphite">{COPY[locale].handOff}</p>

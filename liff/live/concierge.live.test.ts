@@ -15,6 +15,7 @@ import { POST } from '@/app/api/concierge/route';
 import { COPY } from '@/lib/copy';
 import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
+import { handOffAt } from '@/lib/tool-view';
 import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, sseEvents, strapiUp, weekdaysIn } from './support';
 
 delete process.env.ANTHROPIC_API_KEY;
@@ -268,7 +269,9 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     const answer = textIn(events);
     const called = callsIn(events).map((call) => call.name);
     expect(called, answer).toContain('search_knowledge');
-    expect(called, answer).toContain('hand_off_to_staff');
+    // The chat shows the note and the LINE chat button when the model calls hand_off_to_staff, and when it skips the call after a search that found nothing.
+    const noteAt = handOffAt((await assistantMessageOf(events)).parts);
+    expect(noteAt, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
     expect(answer, 'it promises no contact').not.toMatch(/will (contact|reach out|get back|reply)/i);
   });
 });

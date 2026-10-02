@@ -1,3 +1,5 @@
+import { handOffAt } from './tool-view';
+
 /** What the chat needs from a message part: its text, or the tool call it records. */
 interface ChatPart {
   type: string;
@@ -33,13 +35,6 @@ const refused = (part: ChatPart): boolean => part.state === 'output-available' &
 const mayHaveBooked = (part: ChatPart): boolean => toolNameOf(part) === 'request_appointment' && !refused(part);
 
 /**
- * Whether a part is a hand_off_to_staff call that went through: it has its result, and the result isn't an error. That
- * is when the chat shows the note and the LINE chat button (toolView's `handOff`). A call that failed, or has no result,
- * shows neither.
- */
-const handedOff = (part: ChatPart): boolean => toolNameOf(part) === 'hand_off_to_staff' && part.state === 'output-available' && !refused(part);
-
-/**
  * Whether the last reply ended with nothing to read: no text, or tool calls and no words after them. The local model
  * sometimes makes its tool calls and then returns nothing, which would leave the customer looking at chips. It isn't
  * so while a reply is still coming in, nor when the customer spoke last. A reply that ends in words, even "Let me look
@@ -50,16 +45,17 @@ const handedOff = (part: ChatPart): boolean => toolNameOf(part) === 'hand_off_to
  * check, only a cap of 3 open requests. The call's chip (and the visit's card) shows what happened, and the customer can
  * still write.
  *
- * Nor when the reply holds a hand-off that went through: the note and the LINE chat button under its line are the answer,
- * so a reply that ends on the hand-off, with no words after it, isn't empty. A hand-off that failed shows neither, and
- * counts as no answer.
+ * Nor when the chat shows the reply's hand-off note (handOffAt in lib/tool-view.ts), under a hand-off that went through
+ * or, when the model skipped the call, under a search that found nothing: the note and the LINE chat button are the
+ * answer, so a reply that ends there, with no words after it, isn't empty. With no note (a hand-off that failed, a search
+ * that found entries, failed or didn't finish) nothing has answered.
  */
 export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boolean => {
   if (busy) return false;
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return false;
   if (last.parts.some(mayHaveBooked)) return false;
-  if (last.parts.some(handedOff)) return false;
+  if (handOffAt(last.parts) !== null) return false;
   const end = last.parts.filter(shown).at(-1);
   return end?.type !== 'text';
 };
