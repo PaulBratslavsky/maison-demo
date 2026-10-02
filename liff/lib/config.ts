@@ -6,6 +6,8 @@ export const config = {
   clientId: process.env.NEXT_PUBLIC_MAISON_CLIENT_ID ?? '',
   liffMock: process.env.NEXT_PUBLIC_LIFF_MOCK !== 'false',
   liffId: process.env.NEXT_PUBLIC_LIFF_ID ?? '',
+  // Maison's LINE Official Account, by its basic ID with the @: "Chat with Maison on LINE" (lib/line-chat.ts).
+  lineOaId: process.env.NEXT_PUBLIC_LINE_OA_ID ?? '',
   demoLineUserId:
     process.env.NEXT_PUBLIC_DEMO_LINE_USER_ID ||
     'U4af4980629c1a7b3f1e2d3c4b5a69788',
