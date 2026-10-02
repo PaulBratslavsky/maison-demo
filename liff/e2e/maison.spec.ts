@@ -235,8 +235,10 @@ const LINE_OA_ID = (process.env.NEXT_PUBLIC_LINE_OA_ID ?? '').trim();
 const expectLineChat = async (page: Page) => {
   const button = page.getByTestId('line-chat');
   await expect(button).toHaveCount(1);
-  // The plain words: these tests run on the LIFF mock, which is never asked whether the customer has added Maison.
-  await expect(button).toHaveText(/^(Chat with Maison on LINE|LINEでMaisonにメッセージ)$/);
+  // The plain words: these tests run on the LIFF mock, which is never asked whether the customer has added Maison. Read
+  // and compared here, as the href is: toHaveText's call log would print the element, its href and the basic ID with it.
+  const text = (await button.textContent()) ?? '';
+  expect(/^(Chat with Maison on LINE|LINEでMaisonにメッセージ)$/.test(text), 'the button has the plain words, "Chat with Maison on LINE"').toBe(true);
   const href = `https://line.me/R/ti/p/%40${LINE_OA_ID.slice(1)}`;
   expect((await button.getAttribute('href')) === href, 'the button links to https://line.me/R/ti/p/ and the encoded basic ID').toBe(true);
 };
