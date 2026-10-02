@@ -101,7 +101,7 @@
     "productSlug": { "type": "string" },
     "via": { "type": "enumeration", "enum": ["concierge", "line-chat"], "default": "concierge" },
     "kind": { "type": "enumeration", "enum": ["question", "complaint", "praise", "other"] },
-    "sentimentScore": { "type": "decimal" },
+    "sentimentScore": { "type": "float" },
     "sentimentLabel": { "type": "enumeration", "enum": ["positive", "neutral", "negative"] },
     "answered": { "type": "boolean" },
     "reason": { "type": "string", "maxLength": 400 },
