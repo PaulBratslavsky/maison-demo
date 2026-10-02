@@ -60,6 +60,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         // Unset: nothing is sent, and the board shows "not sent". In local mode it goes to the mock's customer: you, with
         // option A's NEXT_PUBLIC_DEMO_LINE_USER_ID in liff/.env, and otherwise a made-up user ID that no one receives.
         lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', '') || null,
+        // Where Strapi reaches LINE's Messaging API. Unset everywhere but local checks, which point it at a stand-in on
+        // this machine (http://127.0.0.1:<port>) so nothing reaches a real phone.
+        lineApiBaseUrl: env('MAISON_LINE_API_BASE_URL', '') || null,
       },
     },
     'strapi-oauth-mcp-manager': {
