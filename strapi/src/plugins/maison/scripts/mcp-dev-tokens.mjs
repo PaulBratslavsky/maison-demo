@@ -23,7 +23,9 @@ const post = async (path, body, jwt) => {
 
 const { token: jwt } = await post('/admin/login', { email, password });
 const seeded = await post('/maison/demo/seed', {}, jwt);
-console.log(seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.');
+// `created` is only the catalog. The product knowledge loads on its own: `knowledge` is how many entries this call added, 0 when English ones exist.
+const knowledge = typeof seeded.knowledge === 'number' ? ` Added ${seeded.knowledge} product knowledge entries.` : '';
+console.log(`${seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.'}${knowledge}`);
 
 const stamp = Date.now();
 const mint = async (name, actions) => {

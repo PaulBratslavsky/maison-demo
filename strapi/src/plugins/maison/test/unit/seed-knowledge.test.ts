@@ -30,3 +30,33 @@ describe('the product knowledge seed', () => {
     }
   });
 });
+
+// content.json is the source of truth: what an entry says about a piece has to hold for the piece the catalog has.
+describe('the product knowledge seed and the demo catalog', () => {
+  it('tags the canvas care and storage entries with every piece the catalog files under trunk, the trunks and hard cases', () => {
+    const trunks = content.products.filter((product) => product.category === 'trunk').map((product) => product.slug).sort();
+    for (const title of ['How do I clean the canvas?', 'How should I store a trunk or hard case?']) {
+      const entry = knowledge.entries.find((candidate) => candidate.title === title);
+      expect([...(entry?.productSlugs ?? [])].sort(), title).toEqual(trunks);
+    }
+  });
+
+  it("gives a piece's measurements as the catalog does, width × height × depth", () => {
+    const given = knowledge.entries.flatMap((entry) =>
+      [...entry.answer.matchAll(/measures (\d+) × (\d+)(?: × (\d+))? cm/g)].map((match) => ({ entry, numbers: match.slice(1).filter(Boolean).map(Number) }))
+    );
+    expect(given.length).toBeGreaterThan(0);
+    for (const { entry, numbers } of given) {
+      const ofItsPieces = entry.productSlugs.some((slug) => {
+        const dimensions = content.products.find((product) => product.slug === slug)?.dimensionsCm ?? [];
+        return numbers.every((value, index) => dimensions[index] === value);
+      });
+      expect(ofItsPieces, `${entry.title}: ${numbers.join(' × ')}`).toBe(true);
+    }
+  });
+
+  it('gives no personalization time of its own: the catalog keeps a lead time for each piece, and the piece\'s page shows it', () => {
+    const entry = knowledge.entries.find((candidate) => candidate.category === 'personalization');
+    expect(entry?.answer).not.toMatch(/\d+ days?/);
+  });
+});

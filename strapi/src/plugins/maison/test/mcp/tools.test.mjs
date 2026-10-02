@@ -74,6 +74,15 @@ describe('Maison over /mcp', () => {
     ]);
   });
 
+  it("answers a question about a piece from the product knowledge, with that piece's own entry first", async () => {
+    const result = await customer.callTool({
+      name: 'search_knowledge',
+      arguments: { query: 'Will it fit in the overhead bin?', productSlugs: ['cabin-case-55'], locale: 'en' },
+    });
+    assert.ok(!result.isError, JSON.stringify(result.content));
+    assert.equal(result.structuredContent.entries[0].title, 'Will the Cabin Case 55 fit in an airline overhead bin?');
+  });
+
   it('returns not_found with a hint for an unknown product', async () => {
     const result = await customer.callTool({ name: 'view_product', arguments: { slug: 'no-such-piece' } });
     assert.equal(result.isError, true);

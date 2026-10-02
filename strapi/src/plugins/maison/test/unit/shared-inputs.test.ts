@@ -7,6 +7,7 @@ import {
   localeInput,
   myAppointmentsInput,
   requestAppointmentInput,
+  searchKnowledgeInput,
   searchProductsInput,
   staffAppointmentOutput,
   viewProductInput,
@@ -15,6 +16,7 @@ import { browseCollectionsTool } from '../../server/src/mcp/tools/browse-collect
 import { findBoutiquesTool } from '../../server/src/mcp/tools/find-boutiques';
 import { myAppointmentsTool } from '../../server/src/mcp/tools/my-appointments';
 import { requestAppointmentTool } from '../../server/src/mcp/tools/request-appointment';
+import { searchKnowledgeTool } from '../../server/src/mcp/tools/search-knowledge';
 import { searchProductsTool } from '../../server/src/mcp/tools/search-products';
 import { viewProductTool } from '../../server/src/mcp/tools/view-product';
 
@@ -26,6 +28,7 @@ describe('one source of validation for the MCP tools and the REST routes', () =>
     ['search_products', searchProductsTool, searchProductsInput],
     ['view_product', viewProductTool, viewProductInput],
     ['find_boutiques', findBoutiquesTool, findBoutiquesInput],
+    ['search_knowledge', searchKnowledgeTool, searchKnowledgeInput],
     ['request_appointment', requestAppointmentTool, requestAppointmentInput],
     ['my_appointments', myAppointmentsTool, myAppointmentsInput],
   ])('%s validates with the shared schema object', (_name, tool: any, shared) => {
@@ -34,7 +37,9 @@ describe('one source of validation for the MCP tools and the REST routes', () =>
   });
 
   it('gives every customer tool the same locale input: ja or en, with the default locale when left out', () => {
-    for (const shared of [browseCollectionsInput, searchProductsInput, viewProductInput, findBoutiquesInput, requestAppointmentInput, myAppointmentsInput]) {
+    for (const shared of [
+      browseCollectionsInput, searchProductsInput, viewProductInput, findBoutiquesInput, searchKnowledgeInput, requestAppointmentInput, myAppointmentsInput,
+    ]) {
       expect(shared.shape.locale).toBe(localeInput);
     }
   });

@@ -58,7 +58,8 @@ export const findBoutiquesInput = z.object({
 });
 
 export const searchKnowledgeInput = z.object({
-  query: z.string().min(1).max(300).describe('The customer\'s question in their own words, e.g. "How do I care for the leather?"'),
+  // Trimmed before min(1), so a question of only spaces is refused like an empty one, and the search gets it trimmed.
+  query: z.string().trim().min(1).max(300).describe('The customer\'s question in their own words, e.g. "How do I care for the leather?"'),
   productSlugs: z.array(slugInput).max(5).optional().describe('Products the question is about, from search_products: only entries about them, and general ones.'),
   locale: localeInput,
 });

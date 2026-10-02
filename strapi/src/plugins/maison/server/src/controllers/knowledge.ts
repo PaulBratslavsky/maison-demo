@@ -16,7 +16,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const input = parseOrReply(ctx, searchKnowledgeInput, fromQuery(ctx.query, { lists: ['productSlugs'] }));
     if (!input) return;
     const locale = input.locale ?? getConfig(strapi).defaultLocale;
-    const result = await strapi.plugin('maison').service('catalog').searchKnowledge(locale, input);
+    const result = await strapi.plugin('maison').service('catalog').searchKnowledge(locale, { query: input.query, productSlugs: input.productSlugs });
     if (!result.ok) return replyFailure(ctx, result);
     replyValue(ctx, { locale, ...result.value });
   },

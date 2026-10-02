@@ -92,7 +92,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
 | `record_confirmation` | MCP: send appointment confirmations | Records whether a LINE confirmation was delivered |
 
-**Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. **Load demo catalog** adds 16 entries in English, also to a catalog loaded before.
+**Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. **Load demo catalog** adds 16 entries in English, also to a catalog loaded before. It adds them only when no English entry exists, so if it stops partway through them, delete the English product knowledge entries and press **Load demo catalog** again.
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
@@ -204,10 +204,10 @@ The two doors share what's underneath, not each other. A route doesn't call a to
 ## The admin chat
 
 strapi-plugin-tanstack-ai 1.6 finds Maison's `ai-tools` service and offers six of its tools as `maison__<name>`:
-- the four catalog tools
+- `browse_collections`, `search_products`, `view_product` and `find_boutiques`
 - `appointment_requests` and `confirm_appointment`
 
-Each tool is offered only to admins whose role holds its permission. The customer tools are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
+Each tool is offered only to admins whose role holds its permission. `search_knowledge`, the fifth catalog tool, isn't offered in the admin chat. The customer tools are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
 
 ## The admin page
 

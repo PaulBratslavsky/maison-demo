@@ -10,6 +10,12 @@ describe('describeSeed', () => {
     );
   });
 
+  it('keeps the "and" before the last count when the product knowledge was there already', () => {
+    expect(describeSeed({ created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 0 })).toBe(
+      'Loaded 12 products, 3 collections, 3 boutiques and 36 stock levels.'
+    );
+  });
+
   it('says when only the product knowledge was added', () => {
     expect(describeSeed({ ...nothing, knowledge: 16 })).toBe('The demo catalog is already loaded. Added 16 product knowledge entries.');
   });

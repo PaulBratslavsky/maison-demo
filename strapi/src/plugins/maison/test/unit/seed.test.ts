@@ -62,20 +62,29 @@ describe('loadDemoCatalog', () => {
 });
 
 describe('loadDemoCatalog and the product knowledge', () => {
-  /** A Strapi whose catalog is or isn't there, with `knowledgeCount` English knowledge entries, recording what's created and published. */
+  const KNOWLEDGE = 'plugin::maison.knowledge';
+
+  /**
+   * A Strapi whose catalog is or isn't there, with `knowledgeCount` English knowledge entries. It records every call to
+   * count, create and publish with its arguments, and each create answers a documentId of its own.
+   */
   const strapiWith = ({ catalogThere, knowledgeCount }: { catalogThere: boolean; knowledgeCount: number }) => {
-    const created: Array<{ uid: string; locale: string }> = [];
-    const published: Array<{ uid: string; locale: string }> = [];
+    const counted: Array<{ uid: string; params: unknown }> = [];
+    const created: Array<{ uid: string; locale: string; data: unknown }> = [];
+    const published: Array<{ uid: string; documentId: string; locale: string }> = [];
     const documents = (uid: string) => ({
       findFirst: async () => (catalogThere ? { documentId: 'existing' } : null),
-      count: async () => (uid === 'plugin::maison.knowledge' ? knowledgeCount : 0),
-      create: async ({ locale }: { locale: string }) => {
-        created.push({ uid, locale });
+      count: async (params: unknown) => {
+        counted.push({ uid, params });
+        return uid === KNOWLEDGE ? knowledgeCount : 0;
+      },
+      create: async ({ locale, data }: { locale: string; data: unknown }) => {
+        created.push({ uid, locale, data });
         return { documentId: `doc-${created.length}` };
       },
       update: async () => ({}),
-      publish: async ({ locale }: { locale: string }) => {
-        published.push({ uid, locale });
+      publish: async ({ documentId, locale }: { documentId: string; locale: string }) => {
+        published.push({ uid, documentId, locale });
         return {};
       },
     });
@@ -85,22 +94,25 @@ describe('loadDemoCatalog and the product knowledge', () => {
       }),
       documents,
     } as any;
-    return { strapi, created, published };
+    return { strapi, counted, created, published };
   };
 
   it('adds the product knowledge in English to a catalog loaded before, and publishes it', async () => {
-    const { strapi, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 0 });
+    const { strapi, counted, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 0 });
     expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({
       created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: knowledge.entries.length,
     });
-    const entry = { uid: 'plugin::maison.knowledge', locale: 'en' };
-    expect(created).toEqual(knowledge.entries.map(() => entry));
-    expect(published).toEqual(knowledge.entries.map(() => entry));
+    // It looks for English entries, creates each entry in English with its own data, and publishes what it created.
+    expect(counted).toEqual([{ uid: KNOWLEDGE, params: { locale: 'en' } }]);
+    expect(created).toEqual(knowledge.entries.map((data) => ({ uid: KNOWLEDGE, locale: 'en', data })));
+    expect(published).toEqual(knowledge.entries.map((_entry, index) => ({ uid: KNOWLEDGE, documentId: `doc-${index + 1}`, locale: 'en' })));
   });
 
   it('adds nothing when there are English entries already', async () => {
-    const { strapi, created } = strapiWith({ catalogThere: true, knowledgeCount: 3 });
+    const { strapi, counted, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 3 });
     expect((await seedService({ strapi }).loadDemoCatalog()).knowledge).toBe(0);
+    expect(counted).toEqual([{ uid: KNOWLEDGE, params: { locale: 'en' } }]);
     expect(created).toEqual([]);
+    expect(published).toEqual([]);
   });
 });

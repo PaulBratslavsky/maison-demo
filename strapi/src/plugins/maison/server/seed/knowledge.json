@@ -9,7 +9,7 @@
     },
     {
       "category": "care",
-      "productSlugs": ["voyage-trunk-110"],
+      "productSlugs": ["voyage-trunk-110", "cabin-case-55"],
       "title": "How do I clean the canvas?",
       "answer": "Dust the canvas with a soft brush or a dry cloth. For a mark, use a cloth barely dampened with water, then let it dry in the open air. Avoid solvents and household cleaners, which dull the coated finish.",
       "keywords": "canvas, coated canvas, fabric, dust, dirt, mark, stain, clean, cleaning, wipe, water, care, look after"
@@ -39,7 +39,7 @@
       "category": "sizing",
       "productSlugs": ["tote-soleil"],
       "title": "Does the Tote Soleil fit a laptop?",
-      "answer": "The Tote Soleil measures 38 × 30 × 16 cm. It holds A4 documents and most 13-inch laptops, with an inner zip pocket for small things. A 15-inch laptop is usually too wide.",
+      "answer": "The Tote Soleil measures 38 × 30 × 16 cm. It holds A4 documents and most 13-inch laptops, with an inner zip pocket for small things. A 15-inch laptop is a tight fit.",
       "keywords": "tote, laptop, computer, macbook, a4, documents, work, office, size, dimensions, fit, fits, how big"
     },
     {
@@ -67,7 +67,7 @@
       "category": "personalization",
       "productSlugs": [],
       "title": "Can I personalize a piece, and how long does it take?",
-      "answer": "Every piece can be personalized. Hot-stamped initials take about 3 days, a monogram in your choice of colour about 14 days, and hand-painted stripes on a trunk about 90 days. Each product page shows the options and the time for that piece. Personalized pieces can't be returned or exchanged.",
+      "answer": "Every piece can be personalized, but what you can choose and how long it takes depend on the piece. The options are hot-stamped initials, a monogram in your choice of color and hand-painted stripes. A piece's page shows the options it offers and how long its personalization takes. Personalized pieces can't be returned or exchanged.",
       "keywords": "personalize, personalise, personalization, personalisation, custom, initials, monogram, engrave, engraving, emboss, embossing, stamp, hot stamp, letters, name, stripes, paint, painted, colour, color, how long, lead time, days"
     },
     {

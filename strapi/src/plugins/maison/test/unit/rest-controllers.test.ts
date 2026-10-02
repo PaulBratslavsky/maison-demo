@@ -324,10 +324,19 @@ describe('GET /knowledge (knowledge.find)', () => {
     const searchKnowledge = vi.fn(async () => ({ ok: true, value: { entries: [entry] } }));
     const ctx = fakeCtx({ query: { query: 'leather care', productSlugs: 'weekender-50', locale: 'en' } });
     await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
-    expect(searchKnowledge).toHaveBeenCalledWith('en', expect.objectContaining({ query: 'leather care', productSlugs: ['weekender-50'] }));
+    // Exactly what the service reads, as the tool passes it: the locale is its own argument, not part of the input.
+    expect(searchKnowledge).toHaveBeenCalledWith('en', { query: 'leather care', productSlugs: ['weekender-50'] });
     expect(ctx.status).toBe(200);
     expect(ctx.body).toEqual({ locale: 'en', entries: [entry] });
     expect(searchKnowledgeTool.resolveOutputSchema(context).parse(ctx.body)).toEqual(ctx.body);
+  });
+
+  it('passes the question on trimmed', async () => {
+    const searchKnowledge = vi.fn(async () => ({ ok: true, value: { entries: [] } }));
+    const ctx = fakeCtx({ query: { query: '  leather care \n' } });
+    await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
+    expect(searchKnowledge).toHaveBeenCalledWith('ja', { query: 'leather care', productSlugs: undefined });
+    expect(ctx.status).toBe(200);
   });
 
   it('answers a missing question with 400 invalid_input, before calling the service', async () => {
@@ -336,6 +345,21 @@ describe('GET /knowledge (knowledge.find)', () => {
     await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
     expect(ctx.status).toBe(400);
     expect(ctx.body.error.code).toBe('invalid_input');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['six products', { query: 'Will it fit?', productSlugs: ['a', 'b', 'c', 'd', 'e', 'f'] }, 'productSlugs'],
+    ['a comma list, which is not the documented form', { query: 'Will it fit?', productSlugs: 'weekender-50,passport-cover' }, 'productSlugs'],
+    ['a question of 301 characters', { query: 'x'.repeat(301) }, 'query'],
+    ['a question of only spaces', { query: '   ' }, 'query'],
+  ])('rejects %s with 400 invalid_input, before calling the service', async (_label, query, field) => {
+    const searchKnowledge = vi.fn();
+    const ctx = fakeCtx({ query });
+    await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
+    expect(ctx.status).toBe(400);
+    expect(ctx.body.error.code).toBe('invalid_input');
+    expect(ctx.body.error.message).toMatch(new RegExp(`^${field}`)); // it names the field that was wrong, not another
     expect(searchKnowledge).not.toHaveBeenCalled();
   });
 
