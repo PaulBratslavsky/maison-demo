@@ -895,6 +895,104 @@ export interface PluginMaisonCollection extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface PluginMaisonKnowledge extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_knowledge_entries';
+  info: {
+    description: 'What Maison has written down for customers: care, materials, sizing, delivery, repairs and more. The concierge answers only from published entries.';
+    displayName: 'Maison product knowledge';
+    pluralName: 'knowledge-entries';
+    singularName: 'knowledge';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: true;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    answer: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    category: Schema.Attribute.Enumeration<
+      [
+        'care',
+        'materials',
+        'sizing',
+        'personalization',
+        'delivery',
+        'returns',
+        'repairs',
+        'warranty',
+        'gifting',
+        'store',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    keywords: Schema.Attribute.Text &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.knowledge'
+    >;
+    productSlugs: Schema.Attribute.JSON &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    strapi_assignee: Schema.Attribute.Relation<'oneToOne', 'admin::user'>;
+    strapi_stage: Schema.Attribute.Relation<
+      'oneToOne',
+      'plugin::review-workflows.workflow-stage'
+    >;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface PluginMaisonNotification extends Struct.CollectionTypeSchema {
   collectionName: 'maison_notifications';
   info: {
@@ -1705,6 +1803,7 @@ declare module '@strapi/strapi' {
       'plugin::maison.appointment': PluginMaisonAppointment;
       'plugin::maison.boutique': PluginMaisonBoutique;
       'plugin::maison.collection': PluginMaisonCollection;
+      'plugin::maison.knowledge': PluginMaisonKnowledge;
       'plugin::maison.notification': PluginMaisonNotification;
       'plugin::maison.product': PluginMaisonProduct;
       'plugin::maison.stock-level': PluginMaisonStockLevel;
