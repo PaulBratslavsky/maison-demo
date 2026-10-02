@@ -43,7 +43,11 @@ const mint = async (name, actions) => {
 };
 
 const tokens = {
-  customer: await mint('maison-customer', ['plugin::maison.catalog.read', 'plugin::maison.appointments.request']),
+  customer: await mint('maison-customer', [
+    'plugin::maison.catalog.read',
+    'plugin::maison.appointments.request',
+    'plugin::maison.questions.ask',
+  ]),
   staff: await mint('maison-staff', [
     'plugin::maison.catalog.read',
     'plugin::maison.appointments.review',

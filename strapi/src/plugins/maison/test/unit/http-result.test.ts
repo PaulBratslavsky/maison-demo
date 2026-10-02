@@ -7,10 +7,11 @@ describe('httpStatus', () => {
     ['invalid_input', 400],
     ['not_signed_in', 401],
     ['not_found', 404],
-    // 409: the same request can succeed later, once the boutique's hours, the customer's open requests or a
-    // confirmation change. 422: it can't succeed as sent, because time only moves forward.
+    // 409: the same request can succeed later, once the boutique's hours, the customer's open requests or questions,
+    // or a confirmation change. 422: it can't succeed as sent, because time only moves forward.
     ['boutique_closed', 409],
     ['too_many_open_requests', 409],
+    ['too_many_open_questions', 409],
     ['not_published', 409],
     ['in_the_past', 422],
     ['not_configured', 503],

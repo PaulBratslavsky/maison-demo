@@ -10,6 +10,9 @@ const ACTIONS = [
   { uid: 'appointments.review', displayName: 'MCP: review appointment requests', subCategory: 'mcp' },
   { uid: 'appointments.confirm', displayName: 'MCP: confirm appointment requests', subCategory: 'mcp' },
   { uid: 'confirmations.send', displayName: 'MCP: send appointment confirmations', subCategory: 'mcp' },
+  { uid: 'questions.ask', displayName: 'MCP: hand questions to staff', subCategory: 'mcp' },
+  { uid: 'questions.read', displayName: 'Read customer questions', subCategory: 'questions' },
+  { uid: 'questions.answer', displayName: 'Answer customer questions on LINE', subCategory: 'questions' },
   { uid: 'demo.manage', displayName: 'Load and reset demo data', subCategory: 'demo' },
 ];
 

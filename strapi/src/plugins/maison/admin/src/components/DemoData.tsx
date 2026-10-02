@@ -4,14 +4,11 @@ import { Box, Button, Dialog, Flex, Typography } from '@strapi/design-system';
 import { WarningCircle } from '@strapi/icons';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
-import { describeSeed, type SeedResult } from '../seed-result';
+import { describeReset, describeSeed, type ResetResult, type SeedResult } from '../seed-result';
 
-type ResetResult = { appointments: number; notifications: number };
 type Action = 'seed' | 'reset';
 
-const describeReset = (result: ResetResult) => `Deleted ${result.appointments} appointments and ${result.notifications} notifications.`;
-
-/** Load the catalog, or clear appointments between rehearsals. `onChange` lets the board refresh at once. */
+/** Load the catalog, or clear appointments and questions between rehearsals. `onChange` lets the board refresh at once. */
 export const DemoData = ({ onChange }: { onChange: () => void }) => {
   const { post } = useFetchClient();
   const { toggleNotification } = useNotification();
@@ -39,7 +36,8 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
         <Typography variant="omega" textColor="neutral600">
           Load demo catalog creates 3 collections, 12 products and 3 boutiques in Japanese and English, publishes them and sets
           stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Reset deletes every
-          appointment and delivery record and keeps the catalog.
+          appointment, delivery record and customer question, and the product knowledge their answers added. It keeps the catalog
+          and the seeded product knowledge.
         </Typography>
         <Flex gap={2}>
           <Button loading={running === 'seed'} disabled={running !== null} onClick={() => run<SeedResult>('seed', describeSeed)}>
@@ -49,13 +47,14 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
           <Dialog.Root>
             <Dialog.Trigger>
               <Button variant="danger-light" loading={running === 'reset'} disabled={running !== null}>
-                Reset demo appointments
+                Reset demo appointments and questions
               </Button>
             </Dialog.Trigger>
             <Dialog.Content>
-              <Dialog.Header>Reset demo appointments?</Dialog.Header>
+              <Dialog.Header>Reset demo appointments and questions?</Dialog.Header>
               <Dialog.Body icon={<WarningCircle fill="danger600" />}>
-                Deletes every appointment and LINE confirmation record. The catalog stays.
+                Deletes every appointment, LINE confirmation record and customer question, and the product knowledge their answers
+                added. The catalog and the seeded product knowledge stay.
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.Cancel>

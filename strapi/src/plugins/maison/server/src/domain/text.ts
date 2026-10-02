@@ -26,3 +26,19 @@ export function teaser(text: string, max = 160): string {
   const chars = Array.from(text.replace(/\s+/g, ' ').trim());
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }
+
+/**
+ * Collapses whitespace and cuts to at most `max` UTF-16 units, which is what Strapi's string `maxLength` counts: an
+ * emoji is two, so a field of 100 takes 50 of them. Keeps whole characters (code points), never half an emoji, and
+ * ends with "…", one unit, when it cut.
+ */
+export function fitUnits(text: string, max: number): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= max) return collapsed;
+  let kept = '';
+  for (const char of collapsed) {
+    if (kept.length + char.length > max - 1) break;
+    kept += char;
+  }
+  return `${kept}…`;
+}

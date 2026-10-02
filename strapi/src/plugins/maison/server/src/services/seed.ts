@@ -140,13 +140,31 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       return { ...catalog, knowledge: await loadKnowledge() };
     },
 
-    /** Deletes every appointment and notification. The catalog is untouched. */
+    /**
+     * Clears what a rehearsal leaves behind: first the product knowledge entries that answers to customers' questions
+     * added, in every language, then every question, notification and appointment. The entries go first because a
+     * question is where their ids are kept, so a reset that stops partway can run again and find them. Only entries a
+     * question names are deleted: the seeded product knowledge and the catalog stay.
+     */
     async resetDemoAppointments() {
+      const questions = (await strapi.documents(UID.question).findMany({
+        fields: ['documentId', 'knowledgeDocumentId'],
+        limit: 5000,
+      })) as Array<{ documentId: string; knowledgeDocumentId?: string | null }>;
+      const knowledgeIds = [...new Set(questions.map((q) => q.knowledgeDocumentId).filter((id): id is string => Boolean(id)))];
+      for (const documentId of knowledgeIds) await strapi.documents(UID.knowledge).delete({ documentId, locale: '*' });
+      for (const q of questions) await strapi.documents(UID.question).delete({ documentId: q.documentId });
+
       const notifications = await strapi.documents(UID.notification).findMany({ fields: ['documentId'], limit: 5000 });
       for (const n of notifications) await strapi.documents(UID.notification).delete({ documentId: n.documentId });
       const appointments = await strapi.documents(UID.appointment).findMany({ fields: ['documentId'], limit: 5000 });
       for (const a of appointments) await strapi.documents(UID.appointment).delete({ documentId: a.documentId });
-      return { appointments: appointments.length, notifications: notifications.length };
+      return {
+        appointments: appointments.length,
+        notifications: notifications.length,
+        questions: questions.length,
+        knowledge: knowledgeIds.length,
+      };
     },
   };
 };

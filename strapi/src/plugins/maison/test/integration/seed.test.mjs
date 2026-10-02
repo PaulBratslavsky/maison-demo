@@ -45,7 +45,7 @@ describe('seed service', () => {
     await strapi.documents('plugin::maison.appointment').create({
       data: { reference: 'APT-9001', customer: SUBJECT_A, requestedFor: '2026-10-10T05:00:00.000Z', boutique: { documentId: boutique.documentId, locale: 'ja' } },
     });
-    assert.deepEqual(await seed.resetDemoAppointments(), { appointments: 1, notifications: 0 });
+    assert.deepEqual(await seed.resetDemoAppointments(), { appointments: 1, notifications: 0, questions: 0, knowledge: 0 });
     assert.equal(await strapi.documents('plugin::maison.product').count({ locale: 'ja', status: 'published' }), 12);
   });
 });

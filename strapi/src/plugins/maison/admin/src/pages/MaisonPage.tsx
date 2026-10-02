@@ -4,6 +4,7 @@ import { Flex } from '@strapi/design-system';
 import { Layouts, Page, useRBAC } from '@strapi/strapi/admin';
 
 import { DemoData } from '../components/DemoData';
+import { QuestionsList } from '../components/QuestionsList';
 import { RequestCounts } from '../components/RequestCounts';
 import { RequestsBoard } from '../components/RequestsBoard';
 import { PERMISSIONS } from '../permissions';
@@ -27,7 +28,7 @@ const MaisonPage = () => {
   return (
     <Page.Main>
       <Page.Title>Maison</Page.Title>
-      <Layouts.Header title="Maison" subtitle="Boutique appointment requests from the app, the concierge and the web, as they arrive." />
+      <Layouts.Header title="Maison" subtitle="Boutique appointment requests and customer questions, as they arrive." />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={8}>
           {allowedActions.canReview && (
@@ -37,6 +38,7 @@ const MaisonPage = () => {
               <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onChange={refresh} />
             </>
           )}
+          {allowedActions.canRead && <QuestionsList canAnswer={allowedActions.canAnswer} refreshKey={refreshKey} />}
           {allowedActions.canManage && <DemoData onChange={refresh} />}
         </Flex>
       </Layouts.Content>

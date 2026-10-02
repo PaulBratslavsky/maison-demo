@@ -2,10 +2,11 @@
 
 A Strapi 5 plugin that shows one content model serving people and AI agents. It adds a fictional luxury house, "Maison": collections, products, boutiques and stock. Signed-in customers can request boutique visits, and staff review and confirm them.
 
-- **Eleven MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
+- **Twelve MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
 - **REST routes at `/api/maison`** for websites: the catalog under Strapi's role permissions, and bookings for the signed-in LINE customer, on the same services, input checks and sign-in as the tools
 - **Six of the tools in the admin's AI chat**, through [strapi-plugin-tanstack-ai](https://github.com/PaulBratslavsky/strapi-plugin-tanstack-ai) 1.6
 - **A human gate:** agents can request appointments, but only staff confirm them
+- **Customer questions for staff:** when the concierge can't answer, Strapi records the question, staff let the customer know or answer on LINE in their own name, and an answer can become product knowledge ([Customer questions](#customer-questions))
 - **Customer identity comes from sign-in, never from the model**, through [strapi-oauth-mcp-manager](https://github.com/PaulBratslavsky/strapi-oauth-mcp-manager) 1.1 and LINE
 - **A live requests board and demo data** in the admin panel, with content in Japanese and English
 
@@ -73,7 +74,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `maxOpenRequestsPerCustomer` | `3` | Unconfirmed future requests a customer may have |
 | `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation, in the visit's language |
 | `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
-| `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
+| `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations and staff's answers to customer questions with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
 | `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
 
 ## Tools
@@ -87,6 +88,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `search_knowledge` | MCP: browse the catalog | What Maison has written down for customers, such as care, sizing, delivery, repairs, warranty and gift wrapping: the best four published entries for a question, or none |
 | `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale`, which the visit keeps for its LINE confirmation |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
+| `hand_off_to_staff` | MCP: hand questions to staff | Hands the signed-in customer's question to Maison's client advisors, with the piece it is about when it is about one, and answers a reference like `Q-4821`. Strapi sends the customer nothing: staff reply in the LINE chat ([Customer questions](#customer-questions)). Five questions can wait for one customer at a time |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
 | `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
@@ -96,7 +98,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
-**Errors don't throw.** They come back as `isError` results whose text is `{"error":{"code","message","hint"}}`. The codes are `not_signed_in`, `not_found`, `invalid_input`, `boutique_closed`, `in_the_past`, `too_many_open_requests`, `not_published` and `not_configured`. The hint says what to do next.
+**Errors don't throw.** They come back as `isError` results whose text is `{"error":{"code","message","hint"}}`. The codes are `not_signed_in`, `not_found`, `invalid_input`, `boutique_closed`, `in_the_past`, `too_many_open_requests`, `too_many_open_questions`, `not_published` and `not_configured`. The hint says what to do next.
 
 One exception on MCP: arguments that fail the MCP SDK's schema check, such as a date that isn't on the calendar, come back as plain text (`Input validation error: …`), not in the JSON error shape. Errors from the tools themselves are always JSON.
 
@@ -107,7 +109,7 @@ Maison's services sit behind three HTTP doors. Each door checks who is calling i
 | Door | Path | For | Who may call |
 |---|---|---|---|
 | REST routes | `/api/maison/…` | Websites and other apps | The catalog: a role or API token. Bookings: a LINE customer session |
-| Admin routes | `/maison/…` | The requests board and the Homepage widget | Admins whose role holds the action |
+| Admin routes | `/maison/…` | The Maison page and the Homepage widget | Admins whose role holds the action |
 | MCP tools | `/mcp` | Agents | Admin tokens with Maison permissions |
 
 ### The REST routes
@@ -153,7 +155,7 @@ curl -H "Authorization: Bearer $SESSION" "$STRAPI/api/maison/my-appointments?loc
 | 400 | `invalid_input` | The shared schema rejects a value (no hint; MCP answers these as `Input validation error: …`), or a minimum price is above the maximum |
 | 401 | `not_signed_in` | A customer route has no LINE customer session. Sent with `WWW-Authenticate: Bearer` |
 | 404 | `not_found` | An unknown product, collection or boutique |
-| 409 | `boutique_closed`, `too_many_open_requests` | The same request can succeed once something changes: the boutique's hours, or one of the customer's open requests |
+| 409 | `boutique_closed`, `too_many_open_requests`, `too_many_open_questions` | The same request can succeed once something changes: the boutique's hours, or one of the customer's open requests or questions |
 | 422 | `in_the_past` | The visit starts less than 30 minutes from now |
 | 503 | `not_configured` | Customer sign-in isn't configured: oauth-mcp-manager 1.1 isn't installed |
 | 503 | `temporarily_unavailable` | Checking a customer's session failed on the server, such as a database error. It isn't a sign-out: try again. Only the REST door has this code |
@@ -207,13 +209,14 @@ strapi-plugin-tanstack-ai 1.6 finds Maison's `ai-tools` service and offers six o
 - `browse_collections`, `search_products`, `view_product` and `find_boutiques`
 - `appointment_requests` and `confirm_appointment`
 
-Each tool is offered only to admins whose role holds its permission. `search_knowledge`, the fifth catalog tool, isn't offered in the admin chat. The customer tools are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
+Each tool is offered only to admins whose role holds its permission. `search_knowledge`, the fifth catalog tool, isn't offered in the admin chat. The customer tools (`request_appointment`, `my_appointments` and `hand_off_to_staff`) are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests" or "Load and reset demo data":
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions" or "Load and reset demo data":
 - **Appointment requests:** the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
-- **Demo data:** **Load demo catalog** and **Reset demo appointments**.
+- **Customer questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
+- **Demo data:** **Load demo catalog** and **Reset demo appointments and questions**, which also deletes the questions and the product knowledge their answers added.
 
 ## The Homepage widget
 
@@ -233,11 +236,11 @@ Its numbers and rows come from `GET /maison/appointments/summary`, which calls `
 ## Tokens
 
 Strapi's `/mcp` only accepts **admin** API tokens. Create them under **Settings → Administration Panel → Admin Tokens** and grant only the Maison permissions a caller needs:
-- **Customer token:** "MCP: browse the catalog" and "MCP: request and view own appointments". Map it to the LINE client in oauth-mcp-manager. Every customer session runs with this token's permissions, so keep it narrow.
+- **Customer token:** "MCP: browse the catalog", "MCP: request and view own appointments" and "MCP: hand questions to staff". Map it to the LINE client in oauth-mcp-manager. Every customer session runs with this token's permissions, so keep it narrow.
 - **Staff token:** "MCP: browse the catalog", "MCP: review appointment requests" and "MCP: confirm appointment requests", for an agent that works for staff.
 - **Ops token:** only "MCP: send appointment confirmations".
 
-The same permissions on an **admin role** decide what staff see in the chat and on the Maison page. "Load and reset demo data" is an ordinary admin role permission.
+The same permissions on an **admin role** decide what staff see in the chat and on the Maison page. "Load and reset demo data", "Read customer questions" and "Answer customer questions on LINE" are ordinary admin role permissions.
 
 ## Customer identity
 
@@ -295,6 +298,66 @@ On the board, a confirmed request whose LINE column says "not sent" has a **Send
 | 503 (`not_configured`) | There's no `lineChannelAccessToken` or no `liffUrl` |
 
 Every error says why in its message, which is what the board shows.
+
+## Customer questions
+
+When the concierge has no answer in product knowledge, or the customer asks for a person, it calls `hand_off_to_staff`. Strapi records the question for the signed-in customer under a reference like `Q-4821`, with the piece it's about and the customer's LINE name when LINE gives one, and sends the customer nothing. Staff follow up on the Maison page, under **Customer questions**.
+
+**The section** refreshes every 5 seconds and filters to **Open** (open and taken questions, the default), **Answered** or **All**, newest first. Each row shows when the question came in (Tokyo time), the customer's LINE name with the masked ID under it, the piece, the question, why it was handed off ("No answer in product knowledge" or "Asked for a person"), and its status: Open, Taken by Jane, or Answered by Jane, with "Added to product knowledge" when it was. When the last LINE message for a question failed, the row says so, in LINE's words.
+
+Two permissions, which an admin role holds like any other:
+
+| Permission | What it gives |
+|---|---|
+| Read customer questions (`plugin::maison.questions.read`) | The section, and a way into the Maison page |
+| Answer customer questions on LINE (`plugin::maison.questions.answer`) | The two buttons below |
+
+- **Let them know**, on an open question, sends the customer one LINE message in the admin's first name: a person has the question and will reply in the chat. The question becomes taken.
+- **Answer**, on an open or taken question, opens a dialog with the question, a box for the answer (never pre-filled) and **Add to product knowledge**, ticked. **Send on LINE** sends the answer in the admin's name and marks the question answered. With the box ticked, it also publishes the answer as a product knowledge entry that every customer's concierge can use, so the answer should suit any customer. The entry's title is the customer's question (cut to 200 characters), in the question's language, about the question's piece, under the category the admin picked.
+
+Both buttons are disabled while a request runs. Nothing guards two admins pressing them for the same question at the same moment: both messages could go out.
+
+**The routes** are admin routes, so each takes an admin session that holds its permission:
+
+| Route | Permission | Body |
+|---|---|---|
+| `GET /maison/questions?status=open\|answered\|all` | Read customer questions | None. Answers `{ questions }` |
+| `POST /maison/questions/:reference/notify` | Answer customer questions on LINE | None |
+| `POST /maison/questions/:reference/answer` | Answer customer questions on LINE | `{ text, addToKnowledge, category }` |
+
+`text` is 1 to 2,000 characters. `addToKnowledge` defaults to `true`, and while it's true, `category` is one of `care`, `materials`, `sizing`, `personalization`, `delivery`, `returns`, `repairs`, `warranty`, `gifting` and `store`. With `addToKnowledge: false`, leave `category` out. The message is signed with the first name of the signed-in admin's account, never with anything the request says. An admin without a first name writes for the team.
+
+The two POSTs answer:
+
+| Status | When |
+|---|---|
+| 200 | LINE took the message. The answer is `{ reference, status: "sent", message }`, with `knowledgeDocumentId` when the answer became a knowledge entry |
+| 400 (`invalid_input`) | The reference isn't like `Q-4821`, `text` is empty or longer than 2,000 characters, or there's no `category` while `addToKnowledge` is true |
+| 404 (`not_found`) | No question has that reference |
+| 409 (`already_taken`) | Let them know, for a question someone has taken already |
+| 409 (`already_answered`) | Either POST, for an answered question |
+| 502 (`failed`) | LINE refused the message or couldn't be reached. The question stays as it was, apart from recording why, which its row shows, and nothing is saved as knowledge |
+| 503 (`not_configured`) | There's no `lineChannelAccessToken`. Nothing is sent |
+
+Every error says why in its message, which is what the page shows. A 200's `message` can carry a warning, which the page shows as it is: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The customer has the message in both cases.
+
+**What the customer gets** is a LINE text message from Maison's channel, in the question's language, written in the admin's first name and quoting the question cut to 80 characters. Let them know, in English:
+
+> Hello, this is Jane, a client advisor at Maison. Thank you for your question about the Jewelry Coffret: "Can it hold a watch?" I'm looking into it and will reply here in this chat as soon as I can.
+> Jane, Maison
+
+And an answer:
+
+> Hello, this is Jane, a client advisor at Maison. Thank you for your question about the Jewelry Coffret: "Can it hold a watch?"
+>
+> Yes, a watch up to 42 mm fits.
+>
+> If anything else comes to mind, just reply here.
+> Jane, Maison
+
+A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
+
+**Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, knowledge }`, what it deleted, and the page says so.
 
 ## Run the ops agent
 

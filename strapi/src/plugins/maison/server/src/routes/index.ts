@@ -38,6 +38,20 @@ export default {
         handler: 'appointments.notify',
         config: { policies: allow(ACTION.appointmentsConfirm) },
       },
+      { method: 'GET', path: '/questions', handler: 'questions.list', config: { policies: allow(ACTION.questionsRead) } },
+      // Let them know and Answer: whoever may answer a customer may let them know first.
+      {
+        method: 'POST',
+        path: '/questions/:reference/notify',
+        handler: 'questions.notify',
+        config: { policies: allow(ACTION.questionsAnswer) },
+      },
+      {
+        method: 'POST',
+        path: '/questions/:reference/answer',
+        handler: 'questions.answer',
+        config: { policies: allow(ACTION.questionsAnswer) },
+      },
       { method: 'POST', path: '/demo/seed', handler: 'demo.seed', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/reset', handler: 'demo.reset', config: { policies: allow(ACTION.demoManage) } },
     ],

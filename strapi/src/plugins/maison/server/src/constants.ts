@@ -8,6 +8,7 @@ export const UID = {
   appointment: 'plugin::maison.appointment',
   notification: 'plugin::maison.notification',
   knowledge: 'plugin::maison.knowledge',
+  question: 'plugin::maison.question',
 } as const;
 
 /** Full action UIDs, as stored on admin tokens and checked by tool auth policies. */
@@ -17,6 +18,9 @@ export const ACTION = {
   appointmentsReview: 'plugin::maison.appointments.review',
   appointmentsConfirm: 'plugin::maison.appointments.confirm',
   confirmationsSend: 'plugin::maison.confirmations.send',
+  questionsAsk: 'plugin::maison.questions.ask',
+  questionsRead: 'plugin::maison.questions.read',
+  questionsAnswer: 'plugin::maison.questions.answer',
   demoManage: 'plugin::maison.demo.manage',
 } as const;
 
@@ -28,6 +32,7 @@ export const TOOL_NAMES = [
   'search_knowledge',
   'request_appointment',
   'my_appointments',
+  'hand_off_to_staff',
   'appointment_requests',
   'confirm_appointment',
   'pending_confirmations',
@@ -44,6 +49,18 @@ export const PERSONALIZATION_KINDS = ['initials-hot-stamp', 'hand-painted-stripe
 
 /** What a product knowledge entry is about. The knowledge content type's category enum must match (test/unit/knowledge-schema.test.ts). */
 export const KNOWLEDGE_CATEGORIES = ['care', 'materials', 'sizing', 'personalization', 'delivery', 'returns', 'repairs', 'warranty', 'gifting', 'store'] as const;
+export type KnowledgeCategory = (typeof KNOWLEDGE_CATEGORIES)[number];
+
+/** Why the concierge handed a question to staff. The question content type's reason enum must match (test/unit/question-schema.test.ts). */
+export const QUESTION_REASONS = ['no_answer', 'asked_for_person'] as const;
+export type QuestionReason = (typeof QUESTION_REASONS)[number];
+
+/** A question is open until staff take it (Let them know) or answer it. The content type's status enum must match. */
+export const QUESTION_STATUSES = ['open', 'taken', 'answered'] as const;
+export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
+
+/** How many questions one customer can have with staff, open or taken, at a time. */
+export const MAX_OPEN_QUESTIONS = 5;
 
 /** Where a visit was requested: the AI concierge, the app's own screens, or a website through the REST routes. */
 export const CREATED_VIA = ['concierge', 'app', 'web'] as const;

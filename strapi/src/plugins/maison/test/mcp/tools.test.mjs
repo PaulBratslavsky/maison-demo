@@ -41,7 +41,8 @@ describe('Maison over /mcp', () => {
 
   it('shows each token only the tools its permissions allow', async () => {
     assert.deepEqual(await toolNames(customer), [
-      'browse_collections', 'find_boutiques', 'my_appointments', 'request_appointment', 'search_knowledge', 'search_products', 'view_product',
+      'browse_collections', 'find_boutiques', 'hand_off_to_staff', 'my_appointments', 'request_appointment', 'search_knowledge',
+      'search_products', 'view_product',
     ]);
     assert.deepEqual(await toolNames(staff), [
       'appointment_requests', 'browse_collections', 'confirm_appointment', 'find_boutiques', 'search_knowledge', 'search_products', 'view_product',
@@ -98,6 +99,8 @@ describe('Maison over /mcp', () => {
     assert.equal(errorOf(booking).code, 'not_signed_in');
     const mine = await customer.callTool({ name: 'my_appointments', arguments: {} });
     assert.equal(errorOf(mine).code, 'not_signed_in');
+    const handedOff = await customer.callTool({ name: 'hand_off_to_staff', arguments: { question: 'Can the coffret hold a watch?' } });
+    assert.equal(errorOf(handedOff).code, 'not_signed_in');
   });
 
   it('lets the staff token review requests with customers masked, and refuses unknown references', async () => {

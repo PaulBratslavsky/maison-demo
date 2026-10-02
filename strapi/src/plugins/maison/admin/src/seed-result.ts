@@ -15,3 +15,18 @@ export const describeSeed = (result: SeedResult): string => {
     ? `The demo catalog is already loaded. Added ${result.knowledge} product knowledge entries.`
     : 'The demo catalog and its product knowledge are already loaded.';
 };
+
+/** What POST /maison/demo/reset answers (the seed service's resetDemoAppointments): what it deleted. */
+export type ResetResult = { appointments: number; notifications: number; questions: number; knowledge: number };
+
+/** "1 question", "0 questions": the singular for exactly one. */
+const counted = (count: number, singular: string, plural: string): string => `${count} ${count === 1 ? singular : plural}`;
+
+/** The notice after Reset demo appointments and questions. */
+export const describeReset = (result: ResetResult): string =>
+  `Deleted ${andList([
+    counted(result.appointments, 'appointment', 'appointments'),
+    counted(result.notifications, 'notification', 'notifications'),
+    counted(result.questions, 'question', 'questions'),
+    counted(result.knowledge, 'product knowledge entry', 'product knowledge entries'),
+  ])}.`;

@@ -4,6 +4,7 @@ import collection from './collection';
 import knowledge from './knowledge';
 import notification from './notification';
 import product from './product';
+import question from './question';
 import stockLevel from './stock-level';
 
 export default {
@@ -14,4 +15,5 @@ export default {
   appointment,
   notification,
   knowledge,
+  question,
 };

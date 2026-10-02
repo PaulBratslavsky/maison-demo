@@ -116,3 +116,100 @@ describe('loadDemoCatalog and the product knowledge', () => {
     expect(published).toEqual([]);
   });
 });
+
+describe('resetDemoAppointments', () => {
+  const KNOWLEDGE = 'plugin::maison.knowledge';
+  const QUESTION = 'plugin::maison.question';
+  const NOTIFICATION = 'plugin::maison.notification';
+  const APPOINTMENT = 'plugin::maison.appointment';
+
+  type Call = { uid: string; method: 'findMany' | 'delete'; params: any };
+
+  /**
+   * A Strapi holding these rows, by content type. It records every findMany and delete with its arguments, in order. A
+   * delete of a document in `failing` throws, as one Strapi couldn't finish would.
+   */
+  const strapiHolding = (rows: Record<string, Array<Record<string, unknown>>>, { failing = [] }: { failing?: string[] } = {}) => {
+    const calls: Call[] = [];
+    const documents = (uid: string) => ({
+      findMany: async (params: unknown) => {
+        calls.push({ uid, method: 'findMany', params });
+        return rows[uid] ?? [];
+      },
+      delete: async (params: { documentId: string }) => {
+        calls.push({ uid, method: 'delete', params });
+        if (failing.includes(params.documentId)) throw new Error(`could not delete ${params.documentId}`);
+        return { documentId: params.documentId, entries: [] };
+      },
+    });
+    return { strapi: { documents } as any, calls };
+  };
+
+  /** Three appointments and two notifications. Of three questions, two have answers that became knowledge entries. */
+  const REHEARSAL = {
+    [APPOINTMENT]: [{ documentId: 'a1' }, { documentId: 'a2' }, { documentId: 'a3' }],
+    [NOTIFICATION]: [{ documentId: 'n1' }, { documentId: 'n2' }],
+    [QUESTION]: [
+      { documentId: 'q1', knowledgeDocumentId: 'k1' },
+      { documentId: 'q2', knowledgeDocumentId: 'k2' },
+      // Still open, or answered with Add to product knowledge unticked.
+      { documentId: 'q3', knowledgeDocumentId: null },
+    ],
+  };
+
+  const deletions = (calls: Call[]) => calls.filter(({ method }) => method === 'delete').map(({ uid, params }) => [uid, params]);
+
+  it('answers what it deleted: appointments, notifications, questions, and the knowledge entries their answers added', async () => {
+    const { strapi } = strapiHolding(REHEARSAL);
+    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({ appointments: 3, notifications: 2, questions: 3, knowledge: 2 });
+  });
+
+  it('deletes the knowledge entries in every language first, then the questions, then the notifications and appointments', async () => {
+    const { strapi, calls } = strapiHolding(REHEARSAL);
+    await seedService({ strapi }).resetDemoAppointments();
+    expect(deletions(calls)).toEqual([
+      [KNOWLEDGE, { documentId: 'k1', locale: '*' }],
+      [KNOWLEDGE, { documentId: 'k2', locale: '*' }],
+      [QUESTION, { documentId: 'q1' }],
+      [QUESTION, { documentId: 'q2' }],
+      [QUESTION, { documentId: 'q3' }],
+      [NOTIFICATION, { documentId: 'n1' }],
+      [NOTIFICATION, { documentId: 'n2' }],
+      [APPOINTMENT, { documentId: 'a1' }],
+      [APPOINTMENT, { documentId: 'a2' }],
+      [APPOINTMENT, { documentId: 'a3' }],
+    ]);
+  });
+
+  it("asks Strapi for each question's knowledgeDocumentId, which it leaves out of a row unless the fields name it", async () => {
+    const { strapi, calls } = strapiHolding(REHEARSAL);
+    await seedService({ strapi }).resetDemoAppointments();
+    const read = calls.find(({ uid, method }) => uid === QUESTION && method === 'findMany');
+    expect(read?.params.fields).toEqual(expect.arrayContaining(['documentId', 'knowledgeDocumentId']));
+  });
+
+  it("leaves the seeded knowledge alone: it never lists knowledge, and deletes only the entries a question's answer added", async () => {
+    const { strapi, calls } = strapiHolding(REHEARSAL);
+    await seedService({ strapi }).resetDemoAppointments();
+    expect(calls.filter(({ uid }) => uid === KNOWLEDGE).map(({ method, params }) => [method, params.documentId])).toEqual([
+      ['delete', 'k1'],
+      ['delete', 'k2'],
+    ]);
+  });
+
+  it('deletes no knowledge when no question has an entry, or when there are no questions', async () => {
+    const { strapi, calls } = strapiHolding({ ...REHEARSAL, [QUESTION]: [{ documentId: 'q1' }, { documentId: 'q2', knowledgeDocumentId: '' }] });
+    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({ appointments: 3, notifications: 2, questions: 2, knowledge: 0 });
+    expect(calls.filter(({ uid }) => uid === KNOWLEDGE)).toEqual([]);
+
+    const empty = strapiHolding({});
+    expect(await seedService({ strapi: empty.strapi }).resetDemoAppointments()).toEqual({ appointments: 0, notifications: 0, questions: 0, knowledge: 0 });
+    expect(deletions(empty.calls)).toEqual([]);
+  });
+
+  it('stops before it deletes any question when an entry will not delete, so running the reset again finds the same entries', async () => {
+    const { strapi, calls } = strapiHolding(REHEARSAL, { failing: ['k2'] });
+    await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('could not delete k2');
+    expect(deletions(calls).map(([uid]) => uid)).toEqual([KNOWLEDGE, KNOWLEDGE]);
+  });
+});

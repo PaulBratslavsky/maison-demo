@@ -1,6 +1,6 @@
 import { z } from '@strapi/utils';
 
-import { CATEGORIES, CREATED_VIA, LOCALES, OCCASIONS } from '../constants';
+import { CATEGORIES, CREATED_VIA, KNOWLEDGE_CATEGORIES, LOCALES, OCCASIONS, QUESTION_REASONS } from '../constants';
 import { ISO_DATE, isRealIsoDate } from '../domain/hours';
 import { failure, type ServiceFailure } from '../domain/service-result';
 
@@ -103,6 +103,23 @@ export const appointmentOutput = z.object({
   confirmationSent: z.boolean().describe('Whether the LINE confirmation has been delivered.'),
 });
 
+/** No customer field: the customer always comes from the caller's LINE sign-in. */
+export const handOffToStaffInput = z.object({
+  question: z.string().trim().min(1).max(1000).describe("The customer's question, in their own words."),
+  reason: z
+    .enum(QUESTION_REASONS)
+    .optional()
+    .describe('"no_answer" (the default) when search_knowledge has no entry that answers it; "asked_for_person" when the customer asked for a person.'),
+  productSlug: slugInput.optional().describe('The piece the question is about, when it is about one piece.'),
+  locale: localeInput,
+});
+
+export const questionOutput = z.object({
+  reference: z.string(),
+  status: z.literal('open'),
+  product: z.object({ slug: z.string(), name: z.string() }).nullable(),
+});
+
 /** An appointment reference such as APT-4821 (see domain/reference.ts). */
 export const referenceInput = z.string().regex(/^APT-\d{4}$/, 'Use a reference like APT-4821.');
 
@@ -133,6 +150,27 @@ export const staffAppointmentOutput = z.object({
   confirmationSent: z.boolean().describe('Whether the LINE confirmation has been delivered.'),
   createdAt: z.string().describe('When the request was made, ISO 8601 with offset.'),
 });
+
+/** A question reference such as Q-4821 (see domain/reference.ts). */
+export const questionReferenceInput = z.string().regex(/^Q-\d{4}$/, 'Use a reference like Q-4821.');
+
+/** Staff filters for customer questions, as the admin's Customer questions section sends them. */
+export const questionsListInput = z.object({
+  status: z.enum(['open', 'answered', 'all']).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+/** What staff send with Answer: the text for the customer, and whether it also becomes product knowledge, under a category. */
+export const answerInput = z
+  .object({
+    text: z.string().trim().min(1).max(2000),
+    addToKnowledge: z.boolean().optional().default(true),
+    category: z.enum(KNOWLEDGE_CATEGORIES).optional(),
+  })
+  .refine((reply) => !reply.addToKnowledge || reply.category !== undefined, {
+    message: 'Pick a category to add the answer to product knowledge.',
+    path: ['category'],
+  });
 
 /** Zod issues on one line, e.g. `reference: Use a reference like APT-4821.` */
 export const describeIssues = (error: z.ZodError): string =>
