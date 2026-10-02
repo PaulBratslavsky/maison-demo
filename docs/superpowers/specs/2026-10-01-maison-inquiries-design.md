@@ -144,7 +144,7 @@ A second page under **Maison**, next to **Appointment requests**. Shown to admin
   - A **Use the suggested text** button inserts a template for the queue and the customer's language: an apology and the next step for a complaint, thanks and a request for a review or a referral for praise.
   - Staff edit it, then send.
 - **The route:** `POST /maison/inquiries/:id/reply { text }`. It pushes one LINE text message through the push code that confirmations use, in the inquiry's language:
-  > About your question: "{first 80 characters of the message}"
+  > About your message: "{first 80 characters of the message}"
   >
   > {staff text}
   >

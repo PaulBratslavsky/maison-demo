@@ -63,8 +63,12 @@ export interface InquiriesSummary {
   notLabelled: number;
 }
 
-/** What GET /maison/inquiries/quota answers. Both are null without a channel access token, and when LINE gave no answer. */
+/**
+ * What GET /maison/inquiries/quota answers. `configured` is false without a channel access token: replies can't be sent
+ * then, and `used` and `limit` are null, as they are when LINE gave no answer.
+ */
 export interface Quota {
+  configured: boolean;
   used: number | null;
   /** Null when the channel has no limit. */
   limit: number | null;
@@ -75,6 +79,14 @@ export interface ActionAnswer {
   message: string;
   warning?: boolean;
 }
+
+/**
+ * The intro under the tab's title: what the queues are, that a model labels each inquiry, and, only for an admin who can
+ * change labels, that they can. Change label is behind the same permission as Reply on LINE (`canReply` on the page), so
+ * an admin with the view permission alone has no button for it and isn't told they can.
+ */
+export const introText = (canChangeLabels: boolean): string =>
+  `What customers ask the concierge, in queues. A model labels each inquiry${canChangeLabels ? ', and you can change its label' : ''}.`;
 
 /** The filters, in the order of the pills. They are the values GET /maison/inquiries takes as `filter`. */
 export const FILTERS: readonly InquiryFilter[] = ['needs-answer', 'complaint', 'praise', 'not-labelled', 'all'];
@@ -261,8 +273,28 @@ export const labelBody = (form: LabelForm, current: Labels): LabelBody => {
   };
 };
 
-/** Save label: it changes something, which is what the server takes (a kind, a sentiment, or both). */
-export const canSaveLabels = (form: LabelForm, current: Labels): boolean => Object.keys(labelBody(form, current)).length > 0;
+/**
+ * Save label: it changes something, which is what the server takes (a kind, a sentiment, or both), and an inquiry with no
+ * kind gets one. The server refuses a sentiment alone for such an inquiry ("Pick a kind too."): with no kind it is in no
+ * queue, and a person's label takes it out of Not labelled.
+ */
+export const canSaveLabels = (form: LabelForm, current: Labels): boolean => {
+  const body = labelBody(form, current);
+  return Object.keys(body).length > 0 && (body.kind !== undefined || current.kind !== null);
+};
+
+/** What the server answers, with `invalid_input`, when Change label gets a sentiment alone for an inquiry with no kind. A test holds this equal to it. */
+const PICK_A_KIND = 'Pick a kind too.';
+
+/**
+ * What the dialog of Change label says under Kind while Save label is disabled for want of a kind: staff changed the
+ * sentiment of an inquiry that has no kind, and picked none. The server's own words for that body, so the page explains the
+ * disabled button in the words the server would refuse it with. Nothing otherwise.
+ */
+export const kindNeededNotice = (form: LabelForm, current: Labels): string | null => {
+  const { kind, sentimentLabel } = labelBody(form, current);
+  return sentimentLabel !== undefined && kind === undefined && current.kind === null ? PICK_A_KIND : null;
+};
 
 /** A count LINE reports. */
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -276,3 +308,13 @@ export const quotaText = (quota: Quota): string => {
   const count = (value: number) => value.toLocaleString('en-US');
   return `LINE messages this month: ${count(quota.used)}${isCount(quota.limit) ? ` of ${count(quota.limit)}` : ''}`;
 };
+
+/** What the server refuses a reply with, and says in the log, when it has no channel access token. A test holds this equal to `NO_TOKEN` in the server's line-outcome.ts. */
+const NO_TOKEN_TEXT = "LINE_CHANNEL_ACCESS_TOKEN isn't set: Strapi can't message customers on LINE.";
+
+/**
+ * Why Send on LINE can't send, when the quota says Strapi has no channel access token: the server's own message, which the
+ * reply form shows up front instead of after Send. Nothing before the quota has loaded, and when it failed to: the form stays
+ * usable then, and the server refuses a reply it can't send.
+ */
+export const noTokenNotice = (quota: Quota | null | undefined): string | null => (quota?.configured === false ? NO_TOKEN_TEXT : null);

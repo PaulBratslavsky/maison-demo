@@ -33,6 +33,8 @@ const STRAP = 'The strap on my bag broke after a week.';
 const DELIVERY = 'Do you deliver to Osaka by Friday?';
 const ZIP = 'The zip of my coffret broke. Can someone call me about a repair?';
 const CLASP = 'The clasp of my trunk broke on the first day.';
+/** A turn that arrives with AI off: the sweep skips it, and a person labels it by hand. */
+const SUNDAY = 'Are you open on Sunday?';
 /** What staff send the customer who wrote CLASP: the text the page suggests for a complaint in English. */
 const APOLOGY =
   "We're sorry about this, and thank you for telling us. A member of our team will look into it and reply in this chat with the next step.";
@@ -307,7 +309,7 @@ describe('inquiries, labelled by a model through the AI SDK and replied to on LI
     const [push] = line.pushes();
     assert.equal(push.authorization, `Bearer ${TOKEN}`);
     assert.equal(push.body.to, SUBJECT_A.slice('line:'.length), 'the customer on the row, without the line: prefix');
-    assert.deepEqual(push.body.messages, [{ type: 'text', text: `About your question: "${CLASP}"\n\n${APOLOGY}\n\nMaison` }]);
+    assert.deepEqual(push.body.messages, [{ type: 'text', text: `About your message: "${CLASP}"\n\n${APOLOGY}\n\nMaison` }]);
 
     const row = await stored(CLASP);
     assert.equal(row.status, 'replied');
@@ -343,8 +345,8 @@ describe('inquiries, labelled by a model through the AI SDK and replied to on LI
     assert.equal(row.replyText ?? null, null);
   });
 
-  it("answers the month's LINE total and limit from the stand-in, asked with the token", async () => {
-    assert.deepEqual(await inquiries.quota(), { used: 12, limit: 200 });
+  it("answers that LINE is set up, with the month's total and limit from the stand-in, asked with the token", async () => {
+    assert.deepEqual(await inquiries.quota(), { configured: true, used: 12, limit: 200 });
 
     const asked = line.requests.filter((request) => request.url.startsWith('/v2/bot/message/quota'));
     assert.deepEqual(asked.map((request) => `${request.method} ${request.url}`).sort(), [
@@ -352,5 +354,51 @@ describe('inquiries, labelled by a model through the AI SDK and replied to on LI
       'GET /v2/bot/message/quota/consumption',
     ]);
     for (const request of asked) assert.equal(request.authorization, `Bearer ${TOKEN}`);
+  });
+
+  it('answers that LINE is not set up, and asks it nothing, when Strapi has no channel access token', async () => {
+    const before = line.requests.length;
+    strapi.config.set('plugin::maison.lineChannelAccessToken', null);
+    try {
+      assert.deepEqual(await inquiries.quota(), { configured: false, used: null, limit: null });
+      assert.equal(line.requests.length, before, 'the stand-in got no request');
+    } finally {
+      strapi.config.set('plugin::maison.lineChannelAccessToken', TOKEN);
+    }
+  });
+
+  // The README's AI-off path: with no key, Change label is the only way to label, and Question is the likeliest pick.
+  it('with AI off, a skipped row a person labels Question lands in Needs an answer, where a sentiment alone could not have put it', async () => {
+    setBaseUrl(null);
+    await logTurn({ message: SUNDAY, reply: 'I am not sure.', knowledgeFound: false, handedOff: false });
+    // Two rows are pending: this turn, and the clasp a person labelled before any sweep saw it. `skipped` says only that AI was off.
+    assert.deepEqual(await labelling.sweep(), { labelled: 0, failed: 0, skipped: 2 });
+    const skipped = await stored(SUNDAY);
+    assert.equal(skipped.analysisStatus, 'skipped');
+    assert.equal(skipped.queue, 'none');
+    assert.deepEqual(await inquiries.summary(), { needsAnswer: 2, complaint: 0, praise: 1, notLabelled: 1 });
+
+    // A sentiment alone would leave a row with no kind in no queue and out of Not labelled: it is refused, and nothing changes.
+    const refused = await inquiries.changeLabel(skipped.documentId, { sentimentLabel: 'neutral' });
+    assert.equal(refused.ok, false, JSON.stringify(refused));
+    assert.equal(refused.code, 'invalid_input');
+    assert.equal(refused.message, 'Pick a kind too.');
+    assert.equal((await stored(SUNDAY)).humanCorrected, false);
+    assert.deepEqual(await inquiries.summary(), { needsAnswer: 2, complaint: 0, praise: 1, notLabelled: 1 });
+
+    const changed = await inquiries.changeLabel(skipped.documentId, { kind: 'question' });
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+    assert.equal(changed.value.kind, 'question');
+    assert.equal(changed.value.answered, null, 'a person gave no answered value');
+    assert.equal(changed.value.queue, 'needs-answer');
+    assert.equal(changed.value.analysisStatus, 'skipped', 'only the sweep says whether AI was on');
+
+    const row = await stored(SUNDAY);
+    assert.equal(row.queue, 'needs-answer');
+    assert.equal(row.humanCorrected, true);
+    assert.deepEqual(await inquiries.summary(), { needsAnswer: 3, complaint: 0, praise: 1, notLabelled: 0 });
+    assert.deepEqual((await listed('needs-answer')).map((view) => view.message).sort(), [DELIVERY, SUNDAY, ZIP].sort());
+    assert.deepEqual(await listed('not-labelled'), []);
+    assert.equal(model.requests.length, 3, 'the stand-in got nothing more: AI was off');
   });
 });

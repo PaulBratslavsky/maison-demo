@@ -49,7 +49,16 @@ const WRAPPED = { display: 'block', maxWidth: '20rem', style: { whiteSpace: 'nor
 /** What is on its way to the customer's LINE chat: Let them know, or an Answer, for one question. */
 type Sending = { reference: string; action: 'notify' | 'answer' };
 
-export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; refreshKey: number }) => {
+export const QuestionsList = ({
+  canAnswer,
+  refreshKey,
+  onChange,
+}: {
+  canAnswer: boolean;
+  refreshKey: number;
+  /** Called after Let them know or Answer went, or was refused, so what shows the number of open questions loads it again at once. */
+  onChange?: () => void;
+}) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
   const [filter, setFilter] = React.useState<Filter>('open');
@@ -101,6 +110,7 @@ export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; r
       // Why nothing went out, in the server's words: it's taken or answered already, LINE refused it, or the token is missing.
       toggleNotification({ type: 'danger', message: (error as Error).message });
     }
+    onChange?.();
     await load(); // load reports its own errors
     setSending(null);
   };

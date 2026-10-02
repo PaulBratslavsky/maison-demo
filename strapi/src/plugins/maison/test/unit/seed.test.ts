@@ -124,22 +124,37 @@ describe('resetDemoAppointments', () => {
   const NOTIFICATION = 'plugin::maison.notification';
   const APPOINTMENT = 'plugin::maison.appointment';
 
-  type Call = { uid: string; method: 'findMany' | 'delete'; params: any };
+  /** `returned` is how many rows a findMany answered. */
+  type Call = { uid: string; method: 'findMany' | 'delete'; params: any; returned?: number };
 
   /**
-   * A Strapi holding these rows, by content type. It records every findMany and delete with its arguments, in order. A
-   * delete of a document in `failing` throws, as one Strapi couldn't finish would.
+   * A Strapi holding these rows, by content type, as a database does: a read answers up to the `limit` it is given of the
+   * rows still there, and a delete takes its document out. It records every findMany and delete with its arguments, in
+   * order. A delete of a document in `failing` throws, as one Strapi couldn't finish would, and a delete of one in
+   * `stuck` answers as if it worked and leaves the document there. A content type read more than 100 times throws: a
+   * reset that never stops would otherwise run the test out of memory, which is a crash, not a failure that says why.
    */
-  const strapiHolding = (rows: Record<string, Array<Record<string, unknown>>>, { failing = [] }: { failing?: string[] } = {}) => {
+  const strapiHolding = (
+    rows: Record<string, Array<Record<string, unknown>>>,
+    { failing = [], stuck = [] }: { failing?: string[]; stuck?: string[] } = {}
+  ) => {
     const calls: Call[] = [];
+    const gone = new Set<string>();
+    const reads = new Map<string, number>();
     const documents = (uid: string) => ({
-      findMany: async (params: unknown) => {
-        calls.push({ uid, method: 'findMany', params });
-        return rows[uid] ?? [];
+      findMany: async (params: { limit?: number }) => {
+        const read = (reads.get(uid) ?? 0) + 1;
+        reads.set(uid, read);
+        if (read > 100) throw new Error(`${uid} was read ${read} times, and the reset is still going.`);
+        const left = (rows[uid] ?? []).filter((row) => !gone.has(`${uid}/${row.documentId}`));
+        const answered = left.slice(0, params?.limit ?? left.length);
+        calls.push({ uid, method: 'findMany', params, returned: answered.length });
+        return answered;
       },
       delete: async (params: { documentId: string }) => {
         calls.push({ uid, method: 'delete', params });
         if (failing.includes(params.documentId)) throw new Error(`could not delete ${params.documentId}`);
+        if (!stuck.includes(params.documentId)) gone.add(`${uid}/${params.documentId}`);
         return { documentId: params.documentId, entries: [] };
       },
     });
@@ -255,5 +270,75 @@ describe('resetDemoAppointments', () => {
     const { strapi, calls } = strapiHolding(REHEARSAL, { failing: ['k2'] });
     await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('could not delete k2');
     expect(deletions(calls).map(([uid]) => uid)).toEqual([KNOWLEDGE, KNOWLEDGE]);
+  });
+
+  describe('with more inquiries than one read holds', () => {
+    /** `count` inquiries: i1, i2 and so on. */
+    const inquiries = (count: number) => Array.from({ length: count }, (_, index) => ({ documentId: `i${index + 1}` }));
+    const inquiryReads = (calls: Call[]) => calls.filter(({ uid, method }) => uid === INQUIRY && method === 'findMany');
+    const inquiryDeletions = (calls: Call[]) => deletions(calls).flatMap(([uid, params]) => (uid === INQUIRY ? [(params as { documentId: string }).documentId] : []));
+
+    it('deletes every one of them, reading again until none are left, and counts them all', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [INQUIRY]: inquiries(12_001) });
+
+      const result = await seedService({ strapi }).resetDemoAppointments();
+
+      expect(result.inquiries).toBe(12_001);
+      const deleted = inquiryDeletions(calls);
+      expect(deleted).toHaveLength(12_001);
+      expect(new Set(deleted).size).toBe(12_001);
+      // Three reads of 5,000, 5,000 and 2,001, and a fourth that finds none.
+      expect(inquiryReads(calls).map(({ returned }) => returned)).toEqual([5000, 5000, 2001, 0]);
+      for (const { params } of inquiryReads(calls)) expect(params).toEqual({ fields: ['documentId'], limit: 5000 });
+    });
+
+    it.each([
+      [0, [0]],
+      [1, [1, 0]],
+      [4999, [4999, 0]],
+      [5000, [5000, 0]],
+      [5001, [5000, 1, 0]],
+      [10_000, [5000, 5000, 0]],
+    ])('with %s inquiries, reads %j and deletes all of them', async (count, reads) => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [INQUIRY]: inquiries(count) });
+
+      const result = await seedService({ strapi }).resetDemoAppointments();
+
+      expect(result.inquiries).toBe(count);
+      expect(inquiryDeletions(calls)).toHaveLength(count);
+      expect(inquiryReads(calls).map(({ returned }) => returned)).toEqual(reads);
+    });
+
+    it('goes on to the notifications and the appointments once the last inquiry is gone', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [INQUIRY]: inquiries(5001) });
+
+      await seedService({ strapi }).resetDemoAppointments();
+
+      expect(inquiryDeletions(calls)).toHaveLength(5001);
+      const order = deletions(calls).map(([uid]) => uid);
+      expect(order.lastIndexOf(INQUIRY)).toBeLessThan(order.indexOf(NOTIFICATION));
+      expect(order.filter((uid) => uid === NOTIFICATION)).toHaveLength(2);
+      expect(order.filter((uid) => uid === APPOINTMENT)).toHaveLength(3);
+    });
+
+    // A delete that leaves its document would make the loop read it again for ever, so the reset stops and says which one.
+    it('stops with the inquiry that is still there after it was deleted, instead of reading it again for ever', async () => {
+      const { strapi, calls } = strapiHolding(REHEARSAL, { stuck: ['i2'] });
+
+      await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('Inquiry i2 is still there after it was deleted');
+
+      expect(inquiryReads(calls)).toHaveLength(2);
+      expect(deletions(calls).map(([uid]) => uid)).not.toContain(NOTIFICATION);
+      expect(deletions(calls).map(([uid]) => uid)).not.toContain(APPOINTMENT);
+    });
+
+    it('stops at an inquiry that will not delete, and the next reset finds the rest', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [INQUIRY]: inquiries(3) }, { failing: ['i2'] });
+
+      await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('could not delete i2');
+
+      expect(inquiryDeletions(calls)).toEqual(['i1', 'i2']);
+      expect(deletions(calls).map(([uid]) => uid)).not.toContain(NOTIFICATION);
+    });
   });
 });

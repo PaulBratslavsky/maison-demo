@@ -1,5 +1,5 @@
 import type { Core } from '@strapi/strapi';
-import { generateObject } from 'ai';
+import { APICallError, RetryError, generateObject } from 'ai';
 
 import { aiEnabled, languageModelOf, modelVersionOf, type AiSettings } from '../ai/provider';
 import { getConfig } from '../config';
@@ -30,8 +30,8 @@ export interface SweepResult {
 /**
  * The rows worth a model call: waiting (pending), passed over while AI was off (skipped, so labelling catches up once a
  * key is set), or failed fewer than MAX_LABEL_ATTEMPTS times. A failed row that used its attempts is parked until staff
- * press Label again: otherwise a row that always fails, or a bad key, would take a place in every batch and starve the
- * rows behind it. A row a person labelled is never picked: their label wins.
+ * press Label again: otherwise a row that always fails would take a place in every batch and starve the rows behind it.
+ * A row a person labelled is never picked: their label wins.
  */
 const TO_LABEL: Doc = {
   humanCorrected: { $ne: true },
@@ -53,6 +53,41 @@ const withoutKey = (text: string, key: string | null): string => (key ? text.spl
 /** What went wrong, from whatever was thrown, without the key. */
 const reasonOf = (error: unknown, key: string | null): string => withoutKey(String((error as Error | undefined)?.message ?? error), key);
 
+/**
+ * Why a sweep stops on a failed call, when the failure says nothing against the inquiry: every row would meet it until it
+ * is fixed, so the row is left as it was and the next sweep tries again.
+ * - `refused`: the provider answered, and refused the key or the setup: 401 or 403 (a wrong key), or 404 (a model it doesn't
+ *   know, which is what a wrong AI_MODEL gives, or a wrong address).
+ * - `no-answer`: the provider didn't answer. The SDK retries a call that never connected, or that got a 408, 409, 429 or a
+ *   5xx, twice, and gives up with a `RetryError`. The 30-second timeout and an abort are errors named `TimeoutError` and
+ *   `AbortError`. A connection that never came up and wasn't retried into a `RetryError` is an `APICallError` with no status,
+ *   or the fetch failure itself, a `TypeError` saying "fetch failed".
+ * Anything else counts against the inquiry, and this answers null: a wrong answer (`NoObjectGeneratedError`), a status that
+ * comes with that inquiry's own text (a 400, a 413, a 422), an error nobody has a class for, Strapi failing to save. The
+ * inquiry fails, and the sweep goes on with the next one.
+ */
+type Stop = 'refused' | 'no-answer';
+
+/** What the SDK checks for, and Node's fetch and a browser's say, when a call never connected. */
+const FETCH_FAILED = ['fetch failed', 'failed to fetch'];
+
+const stopFor = (error: unknown): Stop | null => {
+  if (APICallError.isInstance(error)) {
+    if (error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 404) return 'refused';
+    return error.statusCode === undefined ? 'no-answer' : null;
+  }
+  if (RetryError.isInstance(error)) return 'no-answer';
+  const name = (error as { name?: unknown } | null | undefined)?.name;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'no-answer';
+  return error instanceof TypeError && FETCH_FAILED.includes(error.message.toLowerCase()) ? 'no-answer' : null;
+};
+
+/** What the warning says when a sweep stops. */
+const STOPPED: Record<Stop, string> = {
+  refused: 'The AI provider refused the key or the setup',
+  'no-answer': 'The AI provider gave no answer',
+};
+
 /** What the model factory is given: the AI settings, and none of the plugin's other config. */
 const aiSettingsOf = (strapi: Core.Strapi): AiSettings => {
   const { aiProvider, aiModel, aiApiKey, aiBaseUrl } = getConfig(strapi);
@@ -73,7 +108,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       schema: labelsSchema,
       system: labelSystemPrompt(),
       prompt: labelUserMessage({ ...input, reply: input.reply ?? '' }),
-      // A labelling that takes longer than this is a hung connection, not a slow model: the sweep retries with a capped attempt count.
+      // A labelling that takes longer than this is a hung connection, not a slow model: the sweep leaves the row as it was, stops, and tries again on the next one.
       abortSignal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
     });
     return object;
@@ -94,8 +129,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     return row && !row.humanCorrected && LABELLABLE.includes(row.analysisStatus) ? row : null;
   };
 
-  /** Labels one row: its outcome, or null when the row was left as it is because it is no longer the sweep's. */
-  const labelRow = async (row: Doc, settings: AiSettings): Promise<'labelled' | 'failed' | null> => {
+  /**
+   * Labels one row: its outcome, or null when the row was left as it is because it is no longer the sweep's. A failure that
+   * says nothing against the row (the provider refusing the key or the setup, or giving no answer) leaves it as it was,
+   * with no write and no attempt, logs one warning that says which kind it was, and answers `stopped`, for the batch to
+   * end. Any other failure counts an attempt: the row fails, and is parked after MAX_LABEL_ATTEMPTS.
+   */
+  const labelRow = async (row: Doc, settings: AiSettings): Promise<'labelled' | 'failed' | 'stopped' | null> => {
     try {
       const labels = await labelWith(settings, {
         message: row.message,
@@ -115,6 +155,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       });
       return 'labelled';
     } catch (error) {
+      const stop = stopFor(error);
+      if (stop) {
+        strapi.log.warn(`[maison] Labelling stopped until the next sweep. ${STOPPED[stop]}: ${reasonOf(error, settings.aiApiKey)}`);
+        return 'stopped';
+      }
       const current = await stillWaiting(row.documentId);
       if (!current) return null;
       const attempts = (current.analysisAttempts ?? 0) + 1;
@@ -140,9 +185,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     const rows = (await strapi.documents(UID.inquiry).findMany({ filters: TO_LABEL, sort: 'createdAt:asc', limit: LABEL_BATCH })) as Doc[];
     let labelled = 0;
     let failed = 0;
-    // One at a time, each in its own try: a row the model fails on never stops the rows after it.
+    // One at a time, each in its own try: a row the model fails on never stops the rows after it. Only a failure that says
+    // nothing against the inquiry (a refused key or setup, no answer) ends the batch: every row would meet it, and the next
+    // sweep tries again.
     for (const row of rows) {
       const outcome = await labelRow(row, settings);
+      if (outcome === 'stopped') break;
       if (outcome === 'labelled') labelled += 1;
       if (outcome === 'failed') failed += 1;
     }

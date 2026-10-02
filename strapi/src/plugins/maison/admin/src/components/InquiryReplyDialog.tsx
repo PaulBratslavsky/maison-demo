@@ -12,12 +12,12 @@ import {
   type ReplyBody,
   type StaffInquiry,
 } from '../inquiries';
+import { CLAMPED_TEXT_STYLE } from './clampedText';
 
-const HINT = "It's sent on LINE as Maison, with the customer's message quoted above it. Your name is saved on the inquiry, not sent.";
+const HINT =
+  "It's sent on LINE as Maison, with the customer's message quoted above it. Your name is saved on the inquiry, not sent. Only customers who have added Maison on LINE get it.";
 // Sending is refused over the limit, so the dialog says why instead of only disabling Send on LINE.
 const TOO_LONG = `A reply can have up to ${REPLY_LIMIT.toLocaleString('en-US')} characters.`;
-/** The customer's words keep their line breaks, and a long message scrolls in its box instead of stretching the dialog. */
-const QUOTE_STYLE = { whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: '12rem', overflowY: 'auto' } as const;
 
 /**
  * Reply on LINE: the customer's message, a box for the reply, and a button that puts in the suggested text when there is
@@ -27,12 +27,15 @@ const QUOTE_STYLE = { whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHei
 export const InquiryReplyDialog = ({
   inquiry,
   sending,
+  cannotSendBecause,
   onSend,
   onClose,
 }: {
   inquiry: StaffInquiry;
   /** True from the click on Send on LINE until the answer comes back. Nothing in the dialog can be pressed then, and it stays open. */
   sending: boolean;
+  /** Why no reply can be sent, whatever is written: shown above the box, with Send on LINE disabled. Null when one can. */
+  cannotSendBecause: string | null;
   onSend: (body: ReplyBody) => void;
   onClose: () => void;
 }) => {
@@ -62,10 +65,17 @@ export const InquiryReplyDialog = ({
         </Modal.Header>
         <Modal.Body>
           <Flex direction="column" alignItems="stretch" gap={6}>
+            {/* Strapi can't message customers: the form says so before anything is written, not after Send. */}
+            {cannotSendBecause !== null && (
+              <Box background="danger100" padding={4} hasRadius>
+                <Typography textColor="danger700">{cannotSendBecause}</Typography>
+              </Box>
+            )}
+
             {/* The customer's own words, as plain text. */}
             <Box background="neutral100" padding={4} hasRadius>
               <Flex direction="column" alignItems="stretch" gap={1}>
-                <Typography display="block" style={QUOTE_STYLE}>
+                <Typography display="block" style={CLAMPED_TEXT_STYLE}>
                   &ldquo;{inquiry.message}&rdquo;
                 </Typography>
                 {inquiry.product && (
@@ -110,7 +120,7 @@ export const InquiryReplyDialog = ({
           <Button variant="tertiary" disabled={sending} onClick={onClose}>
             Cancel
           </Button>
-          <Button loading={sending} disabled={sending || !canSendReply(text)} onClick={() => onSend(replyBody(text))}>
+          <Button loading={sending} disabled={sending || cannotSendBecause !== null || !canSendReply(text)} onClick={() => onSend(replyBody(text))}>
             Send on LINE
           </Button>
         </Modal.Footer>

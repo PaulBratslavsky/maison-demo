@@ -38,7 +38,19 @@ describe("Send again's notice", () => {
     expect(sendAgainNotice('APT-4821', 'sent_unrecorded')).toEqual({
       type: 'warning',
       message: 'Sent the LINE confirmation for APT-4821, but it couldn\'t be recorded, so its row still says "not sent". Don\'t send it again.',
+      blockTransition: true,
     });
+  });
+
+  // It says "Don't send it again", which has to be read: a notice that fades after a few seconds can be missed, as the
+  // reply notices that carry the same words stay until they are dismissed (replyNotice).
+  it("stays on screen until it is dismissed when it warns not to send it again", () => {
+    expect(sendAgainNotice('APT-4821', 'sent_unrecorded').blockTransition).toBe(true);
+  });
+
+  it('fades as any notice does when it only reports a success', () => {
+    expect(sendAgainNotice('APT-4821', 'sent')).not.toHaveProperty('blockTransition');
+    expect(sendAgainNotice('APT-4821', 'already_sent')).not.toHaveProperty('blockTransition');
   });
 });
 

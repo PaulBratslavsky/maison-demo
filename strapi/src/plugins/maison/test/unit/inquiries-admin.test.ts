@@ -16,12 +16,15 @@ import {
   canSendReply,
   handOffText,
   insertSuggested,
+  introText,
   isSummary,
   kindLabel,
+  kindNeededNotice,
   labelBody,
   labelForm,
   labelNote,
   lineFailure,
+  noTokenNotice,
   quotaText,
   replyBody,
   replyTooLong,
@@ -32,6 +35,7 @@ import {
 } from '../../admin/src/inquiries';
 import { CLOSE_REASONS, INQUIRY_FILTERS, INQUIRY_KINDS, INQUIRY_QUEUES, LOCALES, SENTIMENT_LABELS } from '../../server/src/constants';
 import { suggestedReply as serverSuggestedReply } from '../../server/src/domain/inquiry-replies';
+import { NO_TOKEN } from '../../server/src/domain/line-outcome';
 import { changeLabelInput, closeInquiryInput, inquiryListInput, replyInquiryInput } from '../../server/src/mcp/schemas';
 import { world, row, type Doc } from './fake-inquiries';
 import { LINE_API, TOKEN, lineAnswers } from './fake-line';
@@ -559,14 +563,27 @@ describe('the labels the dialog of Change label sends', () => {
     expect(canSaveLabels({ kind: 'praise', sentimentLabel: '' }, UNLABELLED)).toBe(true);
   });
 
-  it('is saved exactly when the server takes the body, for every pick of kind and sentiment', () => {
+  // The server refuses a sentiment alone for an inquiry with no kind ("Pick a kind too."): with no kind it is in no queue.
+  it('needs a kind for an inquiry that has none, so a sentiment alone can not be saved', () => {
+    expect(canSaveLabels({ kind: '', sentimentLabel: 'positive' }, UNLABELLED)).toBe(false);
+    expect(canSaveLabels({ kind: 'angry', sentimentLabel: 'positive' }, UNLABELLED)).toBe(false);
+    expect(canSaveLabels({ kind: 'praise', sentimentLabel: 'positive' }, UNLABELLED)).toBe(true);
+    // An inquiry that has a kind already takes a sentiment alone, as it always did.
+    expect(canSaveLabels({ kind: 'question', sentimentLabel: 'negative' }, MODEL)).toBe(true);
+  });
+
+  // The page's own rule and the server's are one: the route's input schema, then the service, for every pick of kind and sentiment.
+  it('is saved exactly when the server takes the body, for every pick of kind and sentiment', async () => {
     const picks = ['', ...INQUIRY_KINDS, 'angry'];
     const sentiments = ['', ...SENTIMENT_LABELS, '3'];
-    for (const row of [MODEL, UNLABELLED]) {
+    // A kind and no sentiment, a sentiment and no kind (rows a person labelled before the server asked for a kind), both, and neither.
+    const rows: Array<Pick<StaffInquiry, 'kind' | 'sentimentLabel'>> = [MODEL, UNLABELLED, { kind: null, sentimentLabel: 'positive' }, { kind: 'other', sentimentLabel: null }];
+    for (const row of rows) {
       for (const kind of picks) {
         for (const sentimentLabel of sentiments) {
           const form = { kind, sentimentLabel };
-          const taken = changeLabelInput.safeParse(labelBody(form, row)).success;
+          const body = labelBody(form, row);
+          const taken = changeLabelInput.safeParse(body).success && (await worldOf(row).service.changeLabel('inq-x', body)).ok;
           expect(canSaveLabels(form, row), JSON.stringify({ form, row })).toBe(taken);
         }
       }
@@ -582,32 +599,76 @@ describe('the labels the dialog of Change label sends', () => {
     if (result.ok === false) throw new Error(result.message);
     expect(result.value).toMatchObject({ kind: 'complaint', sentimentLabel: 'negative', humanCorrected: true, queue: 'complaint' });
   });
+
+  // Save label is disabled for want of a kind, and the dialog says so under Kind, in the words the server refuses it with.
+  describe('what the dialog says under Kind', () => {
+    it('is "Pick a kind too." when staff pick only a sentiment for an inquiry that has no kind', () => {
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, UNLABELLED)).toBe('Pick a kind too.');
+      expect(kindNeededNotice({ kind: 'angry', sentimentLabel: 'negative' }, UNLABELLED)).toBe('Pick a kind too.');
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'neutral' }, { kind: null, sentimentLabel: 'positive' })).toBe('Pick a kind too.');
+    });
+
+    it('is nothing once a kind is picked, for an inquiry that has one, and while nothing is changed', () => {
+      expect(kindNeededNotice({ kind: 'praise', sentimentLabel: 'positive' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice({ kind: 'praise', sentimentLabel: '' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'negative' }, MODEL)).toBeNull();
+      expect(kindNeededNotice({ kind: 'question', sentimentLabel: 'negative' }, MODEL)).toBeNull();
+      expect(kindNeededNotice({ kind: '', sentimentLabel: '' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice(labelForm(MODEL), MODEL)).toBeNull();
+      // A sentiment the inquiry has already is no change, so there is nothing to ask a kind for.
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, { kind: null, sentimentLabel: 'positive' })).toBeNull();
+    });
+
+    // Only the sentiment-alone rule disables Save label for a change: the notice shows exactly when it does.
+    it('shows exactly when Save label is disabled for want of a kind, for every pick of kind and sentiment', () => {
+      const picks = ['', ...INQUIRY_KINDS, 'angry'];
+      const sentiments = ['', ...SENTIMENT_LABELS, '3'];
+      const rows: Array<Pick<StaffInquiry, 'kind' | 'sentimentLabel'>> = [MODEL, UNLABELLED, { kind: null, sentimentLabel: 'positive' }, { kind: 'other', sentimentLabel: null }];
+      for (const row of rows) {
+        for (const kind of picks) {
+          for (const sentimentLabel of sentiments) {
+            const form = { kind, sentimentLabel };
+            const changesSomething = Object.keys(labelBody(form, row)).length > 0;
+            expect(kindNeededNotice(form, row) !== null, JSON.stringify({ form, row })).toBe(changesSomething && !canSaveLabels(form, row));
+          }
+        }
+      }
+    });
+
+    it("is the server's own words for that refusal", async () => {
+      const refused = await worldOf({ kind: null }).service.changeLabel('inq-x', { sentimentLabel: 'positive' });
+
+      expect(refused).toMatchObject({ ok: false, code: 'invalid_input' });
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, UNLABELLED)).toBe((refused as { message: string }).message);
+    });
+  });
 });
 
 describe('quotaText', () => {
   it('shows the messages sent this month, and the limit when there is one', () => {
-    expect(quotaText({ used: 12, limit: 200 })).toBe('LINE messages this month: 12 of 200');
-    expect(quotaText({ used: 0, limit: 200 })).toBe('LINE messages this month: 0 of 200');
+    expect(quotaText({ configured: true, used: 12, limit: 200 })).toBe('LINE messages this month: 12 of 200');
+    expect(quotaText({ configured: true, used: 0, limit: 200 })).toBe('LINE messages this month: 0 of 200');
   });
 
   it('shows only the messages sent when the channel has no limit', () => {
-    expect(quotaText({ used: 12, limit: null })).toBe('LINE messages this month: 12');
+    expect(quotaText({ configured: true, used: 12, limit: null })).toBe('LINE messages this month: 12');
   });
 
   it('shows nothing when LINE gave no count: with no token, or no answer', () => {
-    expect(quotaText({ used: null, limit: null })).toBe('');
-    expect(quotaText({ used: null, limit: 200 })).toBe('');
+    expect(quotaText({ configured: false, used: null, limit: null })).toBe('');
+    expect(quotaText({ configured: true, used: null, limit: null })).toBe('');
+    expect(quotaText({ configured: true, used: null, limit: 200 })).toBe('');
   });
 
   it('shows nothing for an answer that is not a count', () => {
     expect(quotaText(undefined as never)).toBe('');
     expect(quotaText({} as never)).toBe('');
-    expect(quotaText({ used: '12', limit: 200 } as never)).toBe('');
+    expect(quotaText({ configured: true, used: '12', limit: 200 } as never)).toBe('');
   });
 
   it('writes thousands with a comma', () => {
-    expect(quotaText({ used: 1234, limit: 5000 })).toBe('LINE messages this month: 1,234 of 5,000');
-    expect(quotaText({ used: 31200, limit: null })).toBe('LINE messages this month: 31,200');
+    expect(quotaText({ configured: true, used: 1234, limit: 5000 })).toBe('LINE messages this month: 1,234 of 5,000');
+    expect(quotaText({ configured: true, used: 31200, limit: null })).toBe('LINE messages this month: 31,200');
   });
 
   it("writes what the server's quota route answers, with and without a token", async () => {
@@ -624,5 +685,52 @@ describe('quotaText', () => {
     );
     const withToken = await world({ rows: [], config: WITH_TOKEN }).service.quota();
     expect(quotaText(withToken)).toBe('LINE messages this month: 12 of 200');
+  });
+});
+
+describe('noTokenNotice', () => {
+  it("is the server's own message about the missing token, when the quota route says there is none", () => {
+    expect(noTokenNotice({ configured: false, used: null, limit: null })).toBe(NO_TOKEN);
+  });
+
+  // The dialog stays usable until the page knows better: the server refuses a reply it can't send, with its own message.
+  it('is nothing when there is a token, whatever LINE answered about the quota', () => {
+    expect(noTokenNotice({ configured: true, used: 12, limit: 200 })).toBeNull();
+    expect(noTokenNotice({ configured: true, used: null, limit: null })).toBeNull();
+  });
+
+  it('is nothing before the quota has loaded, when it failed to load, and for an answer that is not a quota', () => {
+    expect(noTokenNotice(null)).toBeNull();
+    expect(noTokenNotice(undefined)).toBeNull();
+    expect(noTokenNotice({} as never)).toBeNull();
+    expect(noTokenNotice('<html></html>' as never)).toBeNull();
+    expect(noTokenNotice({ used: null, limit: null } as never)).toBeNull();
+  });
+
+  // The notice is what Send on LINE would be refused with, so it shows exactly when the server would refuse for the token.
+  it.each([
+    ['no token', {}],
+    ['an empty token', { lineChannelAccessToken: '', lineApiBaseUrl: LINE_API }],
+    ['a token', WITH_TOKEN],
+  ])('shows exactly when the server would refuse a reply for the token: %s', async (_label, config) => {
+    const { service } = world({ rows: [row('inq-x')], config });
+
+    const notice = noTokenNotice(await service.quota());
+    const outcome = await service.reply('inq-x', 'Thank you.', 'Jane');
+
+    expect(notice !== null).toBe(outcome.status === 'not_configured');
+    if (outcome.status === 'not_configured') expect(notice).toBe(outcome.message);
+  });
+});
+
+describe('introText', () => {
+  it('says that a model labels each inquiry, and offers an admin who may change labels to change them', () => {
+    expect(introText(true)).toBe('What customers ask the concierge, in queues. A model labels each inquiry, and you can change its label.');
+  });
+
+  // Change label is behind the same permission as Reply on LINE, so a view-only admin has no button for it.
+  it("leaves out changing the label for an admin who can't: they have no button for it", () => {
+    expect(introText(false)).toBe('What customers ask the concierge, in queues. A model labels each inquiry.');
+    expect(introText(false)).not.toMatch(/change/i);
   });
 });

@@ -27,14 +27,17 @@ const REFRESH_MS = 5000;
 
 /**
  * The Maison request summary, loaded now and then every 5 seconds. A refresh that fails keeps the last summary and sets
- * `loadError` until the next one works. A new `refreshKey` starts the loading over, so it loads at once.
+ * `loadError` until the next one works. A new `refreshKey` starts the loading over, so it loads at once. Nothing is asked
+ * until `enabled`: the route refuses an admin who can't review requests, and the Maison page calls this before it knows
+ * what they may do.
  */
-export const useRequestsSummary = (refreshKey = 0) => {
+export const useRequestsSummary = (refreshKey = 0, enabled = true) => {
   const { get } = useFetchClient();
   const [summary, setSummary] = React.useState<RequestsSummary | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (!enabled) return;
     let mounted = true;
     const load = async () => {
       try {
@@ -54,7 +57,7 @@ export const useRequestsSummary = (refreshKey = 0) => {
       mounted = false;
       stop();
     };
-  }, [get, refreshKey]);
+  }, [get, refreshKey, enabled]);
 
   return { summary, loadError };
 };

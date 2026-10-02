@@ -222,11 +222,11 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them:
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
 - **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
-- **Demo data:** **Load demo catalog** and **Reset demo appointments and questions**, which also deletes the questions, the inquiries, and the product knowledge the answers added.
+- **Demo data:** **Load demo catalog** and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
 
 ## The Homepage widgets
 
@@ -243,7 +243,7 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 Its numbers and rows come from `GET /maison/appointments/summary`, which calls `appointments.summarizeRequests()` and follows the board's own definitions. Each row is a row of the board's "All requests" view, without the products and `createdVia`: its `createdAt` is when the request came in, and its `note` is what the customer wrote. Strapi keeps each admin's Homepage layout once they've changed it, so an admin who has moved or removed widgets adds this one with **Add Widget**.
 
-**Maison inquiries**, a second widget, is shown to admins with "Review customer inquiries". It shows the four open counts of the Inquiries tab as cards, **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, which wrap when the widget is narrow. It refreshes every 5 seconds, and if a refresh fails it keeps the last result on screen with a note. **Open the inquiries** goes to the Maison page. It's a widget of its own because the requests widget's body is laid out for a fixed height. Its numbers come from `GET /maison/inquiries/summary`, the same route as the cards on the tab.
+**Maison inquiries**, a second widget, is shown to admins with "Review customer inquiries". It shows the four open counts of the Inquiries tab as cards, **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, which wrap when the widget is narrow. It refreshes every 5 seconds, and if a refresh fails it keeps the last result on screen with a note. **Open the inquiries** goes to the Inquiries tab of the Maison page. It's a widget of its own because the requests widget's body is laid out for a fixed height. Its numbers come from `GET /maison/inquiries/summary`, the same route as the cards on the tab.
 
 ## Tokens
 
@@ -266,7 +266,7 @@ Anything but `line:U` followed by 32 lowercase hex characters counts as not sign
 
 The REST customer routes run the same lookup through the `customer-session` policy, after running `/mcp`'s session check (see [The customer session](#the-customer-session)).
 
-The Content Manager doesn't show an appointment's `customer` field at all, in the list or the edit view. The Document Service still reads and writes it, and saving or publishing an appointment in the Content Manager leaves it as it was.
+The Content Manager doesn't show an appointment's `customer` field at all, in the list or the edit view. The schema also marks it `hidden` in its config and `searchable: false`, as the question and inquiry content types do, so no admin API answer carries it and the list search doesn't match it. The Document Service still reads and writes it, and saving or publishing an appointment in the Content Manager leaves it as it was.
 
 ## LINE confirmations
 
@@ -351,7 +351,7 @@ The two POSTs answer:
 | 502 (`failed`) | LINE refused the message or couldn't be reached. The question stays as it was, apart from recording why, which its row shows, and nothing is saved as knowledge |
 | 503 (`not_configured`) | There's no `lineChannelAccessToken`. Nothing is sent |
 
-Every error says why in its message, which is what the page shows. A 200 with `warning: true` has the customer's message out, and its `message` says what went wrong after: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The page shows that `message` as a warning, and any other 200's as a success.
+Every error says why in its message, which is what the page shows. A 200 with `warning: true` has the customer's message out, and its `message` says what went wrong after: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The page shows that `message` as a warning that stays until it is dismissed, and any other 200's as a success, which fades.
 
 **What the customer gets** is a LINE text message from Maison's channel, in the question's language, written in the admin's first name and quoting the question cut to 80 characters. Let them know, in English:
 
@@ -369,7 +369,7 @@ And an answer:
 
 A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, or with the house's own as the first name ("Maison", in any case, or either `houseName` in the config), the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
 
-**Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
+**Reset demo activity**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
 
 ## Customer inquiries
 
@@ -401,9 +401,10 @@ A cron job, `maison-label-inquiries`, runs every minute. The plugin adds it itse
 | `answered` | whether the concierge's reply answers what the customer asked |
 | `reason` and `topic` | why, in up to 400 characters, and a short phrase for what it's about, both in English |
 
-- The prompt tells the model that the customer's text is evidence to label, never instructions to follow, and a hand-off stays in Needs an answer whatever the labels say.
+- The prompt tells the model that the customer's text is evidence to label, never instructions to follow. The queue rule is code, not the model: it keeps a hand-off in Needs an answer whatever the labels say.
 - Each labelled inquiry records the `modelVersion` and `promptVersion` that labelled it.
-- **A model that answers in the wrong shape** (a missing field, a sentiment of 3, a kind of "angry") fails that inquiry: it becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**. One failing inquiry never stops the ones behind it.
+- **A failure that is about the inquiry counts against it.** A model that answers in the wrong shape (a missing field, a sentiment of 3, a kind of "angry") is one. So is any other failure that isn't one of the two below: the provider rejecting that inquiry's own text (a 400, a 413, a 422), an error nobody has a class for, or Strapi failing to save the labels. The inquiry becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**, and the sweep goes on with the next inquiry, so one that always fails never stops the ones behind it.
+- **A refused key or setup, or no answer from the model, isn't the inquiry's fault.** The provider answering 401 or 403 (a wrong key) or 404 (a model name it doesn't know, or a wrong address), a timeout after 30 seconds, a connection that never comes up, or a provider that is down or rate-limiting (after the AI SDK's two retries) changes nothing on the inquiry: no status change and no attempt. The sweep logs one warning that says which it was, never with the key, and ends, so the inquiries behind it aren't tried in the same sweep. The next sweep, a minute later, tries again, so a wrong `AI_API_KEY` or `AI_MODEL`, or a dropped hotspot, parks nothing.
 - A sweep that starts while another is still running does nothing.
 - **A person's label wins.** **Change label** marks the inquiry as corrected, and the sweep reads each inquiry again right before it writes, so a label changed during the model's call isn't overwritten.
 
@@ -417,7 +418,7 @@ The queue is decided by code, from the labels and the hand-off, never by the mod
 
 | Queue | An inquiry is in it when |
 |---|---|
-| **Needs an answer** | the turn handed the question to staff, whatever the labels say, or the model labelled it a question the concierge didn't answer |
+| **Needs an answer** | the turn handed the question to staff, whatever the labels say, or it's labelled a question that nobody has said was answered: the model said the concierge didn't answer it, or a person labelled it a question by hand |
 | **Complaints** | the model labelled it a complaint |
 | **Praise** | the model labelled it praise |
 | none | anything else, such as small talk or a question the concierge answered. **All** still shows it |
@@ -426,7 +427,7 @@ The queue is decided by code, from the labels and the hand-off, never by the mod
 
 ### The tab
 
-**Inquiries** opens on **Needs an answer**, and refreshes every 5 seconds, newest first, up to 50 rows. Four cards count the open inquiries in **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, and five buttons filter the list to those, or to **All**. Above the table, a line gives the month's LINE messages, like "LINE messages this month: 12 of 200": replies count toward the channel's quota, as confirmations do. Strapi asks LINE for it when the tab opens and after a reply, not on the refresh, because each ask makes two calls to LINE. The line is left out without a channel access token, and when LINE gives no answer.
+**Inquiries** opens on **Needs an answer**, and refreshes every 5 seconds, newest first, up to 50 rows. Four cards count the open inquiries in **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, and five buttons filter the list to those, or to **All**. Above the table, a line gives the month's LINE messages, like "LINE messages this month: 12 of 200": replies count toward the channel's quota, as confirmations do. Strapi asks LINE for it when the tab opens and after a reply, not on the refresh, because each ask makes two calls to LINE. The line is left out without a channel access token, and when LINE gives no answer. Without a token, the Reply on LINE dialog says so as soon as it opens, in the words Send would be refused with, and **Send on LINE** is disabled.
 
 Each row shows:
 - when the customer wrote (Tokyo time), and the customer, masked
@@ -439,15 +440,15 @@ Each row shows:
 
 Admins with "Reply to customer inquiries on LINE" get these buttons, which are disabled while a request runs:
 - **Reply on LINE**, on an open inquiry that isn't a hand-off, opens a dialog with the customer's message and a box for the reply, which is never pre-filled. **Use the suggested text** puts in the text for a complaint or for praise, in the chat's language, after anything already typed. Staff edit it, and **Send on LINE** is enabled for a reply of 1 to 2,000 characters. It pushes one LINE text message from Maison's channel, in the inquiry's language, and marks the inquiry replied, with the text, when, and by whom. The message quotes the customer's first 80 characters, and is signed by Maison. The admin's first name is saved on the inquiry, and never sent:
-  > About your question: "The clasp of my coffret broke after a week."
+  > About your message: "The clasp of my coffret broke after a week."
   >
   > We're sorry about this, and thank you for telling us. A member of our team will look into it and reply in this chat with the next step.
   >
   > Maison
 
-  A Japanese chat gets `「…」についてのお問い合わせへのご返信です。` in place of the first line. A message LINE refuses is recorded as failed, with LINE's answer, and the inquiry stays open. Nothing guards two admins replying to the same inquiry at the same moment: both messages could go out.
+  A Japanese chat gets `「…」についてのお問い合わせへのご返信です。` in place of the first line. A message LINE refuses is recorded as failed, with LINE's answer, and the inquiry stays open. Only customers who have added Maison on LINE get it. LINE answers 200 for one who hasn't, or who has blocked the account, and delivers nothing, so the inquiry is marked replied all the same. Nothing guards two admins replying to the same inquiry at the same moment: both messages could go out.
 - **Close**, on an open inquiry, with a reason: **Answered elsewhere**, **Not needed** or **Spam**. It isn't offered for a replied inquiry, which keeps its reply.
-- **Change label** sets the kind, the sentiment, or both, and sends only what the admin changed. The inquiry is then the person's: the sweep never labels it again, **Not labelled** no longer lists it, and its queue follows the new kind by the same rule as before. A new sentiment drops the model's score, and the model's reason and topic stay as the model wrote them.
+- **Change label** sets the kind, the sentiment, or both, and sends only what the admin changed. The inquiry is then the person's: the sweep never labels it again, **Not labelled** no longer lists it, and its queue follows the new kind by the same rule as before, so a question labelled by hand is in **Needs an answer**. A new sentiment drops the model's score, and the model's reason and topic stay as the model wrote them. An inquiry with no kind needs one: a sentiment alone would leave it in no queue and out of **Not labelled**, so **Save label** stays disabled until a kind is picked, with "Pick a kind too." under **Kind**, and the server refuses it with the same words.
 - **Label again**, on an inquiry the model failed on, puts it back for the next sweep with its attempts reset. It isn't offered for one a person has labelled.
 
 ### The suggested texts
@@ -470,17 +471,17 @@ The routes are admin routes, so each takes an admin session that holds its permi
 |---|---|---|---|
 | `GET /maison/inquiries?filter=…&limit=…` | Review customer inquiries | None. `filter` is `needs-answer` (the default), `complaint`, `praise`, `not-labelled` or `all`, and `limit` is 1 to 100 (50 by default) | `{ inquiries }`, newest first |
 | `GET /maison/inquiries/summary` | Review customer inquiries | None | `{ needsAnswer, complaint, praise, notLabelled }`, the open counts |
-| `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ used, limit }`, both null without a channel access token and when LINE gives no answer, and `limit` null for a channel with none |
+| `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ configured, used, limit }`: `configured` is false without a channel access token, and then `used` and `limit` are null, as they are when LINE gives no answer. `limit` is null for a channel with none |
 | `POST /maison/inquiries/:documentId/reply` | Reply to customer inquiries on LINE | `{ text }` | `{ documentId, status: "sent", message, warning? }` |
 | `POST /maison/inquiries/:documentId/close` | Reply to customer inquiries on LINE | `{ reason }`: `answered-elsewhere`, `not-needed` or `spam` | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label` | Reply to customer inquiries on LINE | `{ kind, sentimentLabel }`, one or both | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label-again` | Reply to customer inquiries on LINE | None | `{ inquiry, message }` |
 
-The staff name for a reply comes from the signed-in admin's account, never from the request. `message` is in words staff can read: "Sent the reply on LINE.", "Closed the inquiry.", "Changed the label." or "It will be labelled again within a minute." A 200 from Reply with `warning: true` means LINE took the message but recording it failed: its `message` says so, and the page shows it as a warning. The errors:
+The staff name for a reply comes from the signed-in admin's account, never from the request. `message` is in words staff can read: "Sent the reply on LINE.", "Closed the inquiry.", "Changed the label." or "It will be labelled again within a minute." A 200 from Reply with `warning: true` means LINE took the message but recording it failed: its `message` says so, and the page shows it as a warning that stays until it is dismissed. The errors:
 
 | Status | When |
 |---|---|
-| 400 (`invalid_input`) | The filter isn't one of the five, `limit` is out of range, the reply text is empty or over 2,000 characters, the reason isn't one of the three, or Change label has neither a kind nor a sentiment, or one that isn't a label |
+| 400 (`invalid_input`) | The filter isn't one of the five, `limit` is out of range, the reply text is empty or over 2,000 characters, the reason isn't one of the three, or Change label has neither a kind nor a sentiment, one that isn't a label, or only a sentiment for an inquiry with no kind |
 | 404 (`not_found`) | No inquiry has that `documentId` |
 | 409 (`already_closed`) | Reply or Close, for a closed inquiry |
 | 409 (`already_replied`) | Reply or Close, for a replied inquiry |
@@ -499,7 +500,7 @@ Every error says why in its message, which is what the page shows.
 | Review customer inquiries (`plugin::maison.inquiries.view`) | The Inquiries tab, the Maison inquiries widget, the three GET routes, and a way into the Maison page |
 | Reply to customer inquiries on LINE (`plugin::maison.inquiries.reply`) | The four buttons above. It needs Review customer inquiries too, because the buttons live in the tab |
 
-**Reset demo appointments and questions** also deletes every inquiry, whether it's open, replied to or closed.
+**Reset demo activity** also deletes every inquiry, however many there are, whether each is open, replied to or closed.
 
 ## Run the ops agent
 

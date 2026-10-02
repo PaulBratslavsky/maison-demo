@@ -8,7 +8,7 @@ import { describeReset, describeSeed, type ResetResult, type SeedResult } from '
 
 type Action = 'seed' | 'reset';
 
-/** Load the catalog, or clear appointments, questions and inquiries between rehearsals. `onChange` lets the board refresh at once. */
+/** Load the catalog, or clear the rehearsal's appointments, questions and inquiries. `onChange` lets the board refresh at once. */
 export const DemoData = ({ onChange }: { onChange: () => void }) => {
   const { post } = useFetchClient();
   const { toggleNotification } = useNotification();
@@ -36,8 +36,8 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
         <Typography variant="omega" textColor="neutral600">
           Load demo catalog creates 3 collections, 12 products and 3 boutiques in Japanese and English, publishes them and sets
           stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Reset deletes every
-          appointment, delivery record, customer question and inquiry, and the product knowledge that answers to questions
-          added. It keeps the catalog and the seeded product knowledge.
+          appointment, delivery record, customer question and inquiry, and the product knowledge entries that staff added by
+          answering questions. It keeps the catalog and the seeded product knowledge.
         </Typography>
         <Flex gap={2}>
           <Button loading={running === 'seed'} disabled={running !== null} onClick={() => run<SeedResult>('seed', describeSeed)}>
@@ -47,14 +47,14 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
           <Dialog.Root>
             <Dialog.Trigger>
               <Button variant="danger-light" loading={running === 'reset'} disabled={running !== null}>
-                Reset demo appointments and questions
+                Reset demo activity
               </Button>
             </Dialog.Trigger>
             <Dialog.Content>
-              <Dialog.Header>Reset demo appointments and questions?</Dialog.Header>
+              <Dialog.Header>Reset demo activity?</Dialog.Header>
               <Dialog.Body icon={<WarningCircle fill="danger600" />}>
                 Deletes every appointment, LINE confirmation record, customer question and inquiry, and the product knowledge
-                that answers to questions added. The catalog and the seeded product knowledge stay.
+                entries that staff added by answering questions. The catalog and the seeded product knowledge stay.
               </Dialog.Body>
               <Dialog.Footer>
                 <Dialog.Cancel>

@@ -35,13 +35,21 @@ export const confirmedNotice = (reference: string, confirmationSent: boolean | u
 /** What Send again's 200 answers say happened. */
 export type SendAgainStatus = 'sent' | 'already_sent' | 'sent_unrecorded';
 
-/** The notice Send again shows for a 200. Any other answer is an error, shown in the server's words. */
-export const sendAgainNotice = (reference: string, status: SendAgainStatus): { type: 'success' | 'warning'; message: string } => {
+/**
+ * The notice Send again shows for a 200. Any other answer is an error, shown in the server's words. The warning stays
+ * until it is dismissed (`blockTransition`), as the reply notices do (`replyNotice`): it says "Don't send it again", which
+ * has to be read, and a notice that fades after a few seconds can be missed.
+ */
+export const sendAgainNotice = (
+  reference: string,
+  status: SendAgainStatus
+): { type: 'success' | 'warning'; message: string; blockTransition?: true } => {
   if (status === 'already_sent') return { type: 'success', message: `The LINE confirmation for ${reference} had already been sent.` };
   if (status === 'sent_unrecorded') {
     return {
       type: 'warning',
       message: `Sent the LINE confirmation for ${reference}, but it couldn't be recorded, so its row still says "not sent". Don't send it again.`,
+      blockTransition: true,
     };
   }
   return { type: 'success', message: `Sent the LINE confirmation for ${reference}.` };

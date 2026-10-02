@@ -48,29 +48,31 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
       },
     },
     // Maison: the demo's catalog and appointments, as MCP tools. A local plugin with its own
-    // package.json, built by `npm install` (strapi/package.json's postinstall).
+    // package.json, built by `npm install` (strapi/package.json's postinstall). Each value is trimmed: a key pasted
+    // with a trailing newline or space (into Strapi Cloud's Variables, say) would otherwise stop Strapi from starting,
+    // because the plugin refuses a value with whitespace in it, for an optional feature.
     maison: {
       enabled: true,
       resolve: 'src/plugins/maison',
       config: {
         // The base of links in LINE confirmations. Unset: pending_confirmations answers not_configured.
-        liffUrl: env('MAISON_LIFF_URL', '') || null,
+        liffUrl: env('MAISON_LIFF_URL', '').trim() || null,
         // The Official Account's Messaging API channel access token. With it, confirming a visit (on the board, in the
         // admin chat, over MCP or with the Content Manager's Publish) sends the customer's LINE confirmation from Strapi.
         // Unset: nothing is sent, and the board shows "not sent". In local mode it goes to the mock's customer: you, with
         // option A's NEXT_PUBLIC_DEMO_LINE_USER_ID in liff/.env, and otherwise a made-up user ID that no one receives.
-        lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', '') || null,
+        lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', '').trim() || null,
         // Where Strapi reaches LINE's Messaging API. Unset everywhere but local checks, which point it at a stand-in on
         // this machine (http://127.0.0.1:<port>) so nothing reaches a real phone.
-        lineApiBaseUrl: env('MAISON_LINE_API_BASE_URL', '') || null,
+        lineApiBaseUrl: env('MAISON_LINE_API_BASE_URL', '').trim() || null,
         // The model that labels each customer inquiry, with Pulse's settings. AI_PROVIDER is anthropic (the default),
         // openai or openai-compatible; AI_MODEL defaults per provider (claude-haiku-4-5-20251001 for Anthropic);
         // AI_BASE_URL is for a local model, such as Ollama's http://127.0.0.1:11434/v1. Unset, labelling is off, and
         // new inquiries wait under Not labelled.
-        aiProvider: env('AI_PROVIDER', '') || null,
-        aiModel: env('AI_MODEL', '') || null,
-        aiApiKey: env('AI_API_KEY', '') || null,
-        aiBaseUrl: env('AI_BASE_URL', '') || null,
+        aiProvider: env('AI_PROVIDER', '').trim() || null,
+        aiModel: env('AI_MODEL', '').trim() || null,
+        aiApiKey: env('AI_API_KEY', '').trim() || null,
+        aiBaseUrl: env('AI_BASE_URL', '').trim() || null,
       },
     },
     'strapi-oauth-mcp-manager': {

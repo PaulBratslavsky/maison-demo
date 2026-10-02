@@ -40,8 +40,11 @@ export interface InquiryReplyInput {
  * The LINE message for a reply: the customer's words quoted (the first 80 characters, on one line), then the staff text,
  * then Maison's name. It is not signed with the staff member's name: the reply comes from Maison, and the name is only
  * recorded on the inquiry.
+ *
+ * The English line says "About your message", not "your question": a reply goes to any inquiry, and a praise or a
+ * complaint is no question. The Japanese line says お問い合わせ, an inquiry, and is as it was.
  */
 export const inquiryReplyText = ({ language, message, text }: InquiryReplyInput): string =>
   language === 'ja'
     ? `「${quoteOf(message)}」についてのお問い合わせへのご返信です。\n\n${text.trim()}\n\nMaison`
-    : `About your question: "${quoteOf(message)}"\n\n${text.trim()}\n\nMaison`;
+    : `About your message: "${quoteOf(message)}"\n\n${text.trim()}\n\nMaison`;

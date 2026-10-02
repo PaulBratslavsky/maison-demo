@@ -523,10 +523,25 @@ describe('inquiries.changeLabel', () => {
       expect(await service.changeLabel('inq-2', { kind })).toMatchObject({ ok: true, value: { kind, queue } });
     });
 
-    // Only an explicit "not answered" puts a question in Needs an answer, and an unlabelled row has no answer.
-    it('keeps a question out of the queues while nobody has said whether it was answered', async () => {
-      const { service } = world({ rows: [PENDING] });
-      expect(await service.changeLabel('inq-1', { kind: 'question' })).toMatchObject({ ok: true, value: { kind: 'question', queue: 'none' } });
+    // An unlabelled row has no `answered`: a person who labels it Question (with AI off, the only way to label) mustn't lose it.
+    it.each(['pending', 'skipped', 'failed'])('puts a %s row a person labels Question in Needs an answer, as nobody has said it was answered', async (analysisStatus) => {
+      const { service, update, stored } = world({ rows: [{ ...PENDING, analysisStatus }] });
+
+      const result = await service.changeLabel('inq-1', { kind: 'question' });
+
+      expect(update.mock.calls[0][0].data.queue).toBe('needs-answer');
+      expect(stored[0]).toMatchObject({ kind: 'question', humanCorrected: true, queue: 'needs-answer' });
+      expect(result).toMatchObject({ ok: true, value: { kind: 'question', queue: 'needs-answer', analysisStatus, humanCorrected: true } });
+    });
+
+    it('lists it under Needs an answer and counts it there, and no longer under Not labelled', async () => {
+      const { service } = world({ rows: [{ ...PENDING, analysisStatus: 'skipped' }] });
+
+      await service.changeLabel('inq-1', { kind: 'question' });
+
+      expect(idsOf(await service.list({ filter: 'needs-answer' }))).toEqual(['inq-1']);
+      expect(idsOf(await service.list({ filter: 'not-labelled' }))).toEqual([]);
+      expect(await service.summary()).toEqual({ needsAnswer: 1, complaint: 0, praise: 0, notLabelled: 0 });
     });
 
     it('recomputes the queue from the sentiment alone: it follows the kind the row already has', async () => {
@@ -569,6 +584,53 @@ describe('inquiries.changeLabel', () => {
     expect(result).toEqual({ ok: false, code: 'invalid_input', message: 'Give a kind, a sentiment, or both.', hint: expect.any(String) });
     expect(findOne).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+  });
+
+  // A row with no kind is in no queue, and a person's label takes it out of Not labelled: a sentiment alone would hide it.
+  describe('a sentiment alone, for a row that has no kind', () => {
+    it.each(SENTIMENT_LABELS)('refuses %s with invalid_input and "Pick a kind too.", and writes nothing', async (sentimentLabel) => {
+      const { service, update, stored } = world({ rows: [PENDING] });
+
+      const result = await service.changeLabel('inq-1', { sentimentLabel });
+
+      expect(result).toEqual({ ok: false, code: 'invalid_input', message: 'Pick a kind too.', hint: expect.any(String) });
+      expect(update).not.toHaveBeenCalled();
+      expect(stored[0]).toMatchObject({ sentimentLabel: null, humanCorrected: false, queue: 'none' });
+    });
+
+    it.each(['pending', 'skipped', 'failed'])('refuses it on a %s row, which stays under Not labelled where it was', async (analysisStatus) => {
+      const { service } = world({ rows: [{ ...PENDING, analysisStatus }] });
+
+      const result = await service.changeLabel('inq-1', { sentimentLabel: 'negative' });
+
+      expect(result).toMatchObject({ ok: false, code: 'invalid_input', message: 'Pick a kind too.' });
+      expect(idsOf(await service.list({ filter: 'not-labelled' }))).toEqual(['inq-1']);
+    });
+
+    it('refuses it when the kind is missing from the row altogether, as well as null', async () => {
+      const { service, update } = world({ rows: [{ ...PENDING, kind: undefined }] });
+
+      expect(await service.changeLabel('inq-1', { sentimentLabel: 'negative' })).toMatchObject({ ok: false, code: 'invalid_input', message: 'Pick a kind too.' });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('takes it together with a kind', async () => {
+      const { service } = world({ rows: [PENDING] });
+
+      expect(await service.changeLabel('inq-1', { kind: 'complaint', sentimentLabel: 'negative' })).toMatchObject({
+        ok: true,
+        value: { kind: 'complaint', sentimentLabel: 'negative', sentimentScore: null, humanCorrected: true, queue: 'complaint' },
+      });
+    });
+
+    it('takes it for a row a person gave a kind before: the row has one now', async () => {
+      const { service } = world({ rows: [{ ...PENDING, kind: 'other', humanCorrected: true }] });
+
+      expect(await service.changeLabel('inq-1', { sentimentLabel: 'positive' })).toMatchObject({
+        ok: true,
+        value: { kind: 'other', sentimentLabel: 'positive', queue: 'none' },
+      });
+    });
   });
 
   it('answers not_found for an ID no inquiry has, and writes nothing', async () => {

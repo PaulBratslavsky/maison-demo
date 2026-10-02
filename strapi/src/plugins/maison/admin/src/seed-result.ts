@@ -22,7 +22,7 @@ export type ResetResult = { appointments: number; notifications: number; questio
 /** "1 question", "0 questions": the singular for exactly one. */
 const counted = (count: number, singular: string, plural: string): string => `${count} ${count === 1 ? singular : plural}`;
 
-/** The notice after Reset demo appointments and questions, which also deletes the inquiries. */
+/** The notice after Reset demo activity. */
 export const describeReset = (result: ResetResult): string =>
   `Deleted ${andList([
     counted(result.appointments, 'appointment', 'appointments'),

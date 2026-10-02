@@ -43,7 +43,6 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `strapi/` | A Strapi 5.55.1 app (TypeScript, SQLite), made with `create-strapi` |
 | `strapi/src/plugins/maison/` | The Maison plugin: content types, twelve MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
-| `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
 | `strapi/scripts/maison-setup.mjs` | `npm run setup` |
 | `liff/` | The Maison app: Next.js 16, LIFF and the LIFF mock, the MCP SDK, and the concierge on AI SDK 7 |
@@ -69,11 +68,13 @@ Maison's services hold the rules: the catalog, opening hours, who may book what,
 | MCP | The Maison app, its concierge, and staff agents | `/mcp`, with a customer's session or an admin token |
 | REST | Websites | `/api/maison/…` |
 | The requests board | Staff | **Maison** in the Strapi admin |
-| The homepage widget | Staff | **Maison requests** on the admin's Homepage |
+| The homepage widgets | Staff | **Maison requests** and **Maison inquiries** on the admin's Homepage |
 
 - **The Maison app only uses MCP.** Its **Agent view** shows the tool call behind each screen, and the concierge calls the same tools.
-- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead, and its notice says whether the customer's LINE confirmation was sent. **Send again** appears on a confirmed visit still ahead whose LINE column says "not sent". Under **Demo data**: **Load demo catalog**, and **Reset demo appointments and questions**, which asks first.
-- **The widget** counts **Waiting for staff**, **Confirmed, upcoming** and **LINE sent** (among the upcoming confirmed visits), lists the five newest requests, and links to the board with **Open the board**. It refreshes every 5 seconds, and shows only to admins whose role can review appointments. A Homepage whose layout was changed before needs **Add Widget** once.
+- **The Maison page** has three tabs, each with the count of what waits on staff: **Requests** (the board), **Questions** (questions the concierge handed to staff) and **Inquiries** (every concierge turn, labelled). Under the tabs, **Demo data**: **Load demo catalog**, and **Reset demo activity**, which asks first and deletes appointments, delivery records, questions, inquiries, and the product knowledge that staff answers added.
+- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead, and its notice says whether the customer's LINE confirmation was sent. **Send again** appears on a confirmed visit still ahead whose LINE column says "not sent".
+- **The Inquiries tab** sorts every concierge turn into **Needs an answer**, **Complaints** and **Praise** (plus **Not labelled** and **All**), from the labels a model gives it within a minute. Staff **Reply on LINE** (with a suggested text for complaints and praise), **Close** with a reason, or **Change label**. A turn the concierge handed to staff is answered under **Questions**, and answering it marks the inquiry replied. The page shows the month's LINE messages against the plan's limit.
+- **The widget** counts **Waiting for staff**, **Confirmed, upcoming** and **LINE sent** (among the upcoming confirmed visits), lists the five newest requests, and links to the board with **Open the board**. It refreshes every 5 seconds, and shows only to admins whose role can review appointments. **Maison inquiries** counts the open inquiries per queue, for admins who can review inquiries. A Homepage whose layout was changed before needs **Add Widget** once.
 
 ### The REST door
 
@@ -134,7 +135,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 - **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice, and neither does a turn whose note is the answer, a recorded hand-off or a search that found nothing. After a hand-off that failed, with no words, it still offers **Try again** under the plain note, unless a search that found nothing came first: the note under that search counts as the answer.
 - **Each finished turn is logged** in Strapi as an inquiry, for the Inquiries tab.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
-- **Strapi runs no model.** The concierge's is the demo's only model.
+- **Strapi labels inquiries with a model of its own,** in the background, every minute: the kind (question, complaint, praise, other), the sentiment, whether the concierge answered, a reason and a topic. It uses the AI SDK as Pulse does, with Pulse's settings in `strapi/.env`: `AI_API_KEY` (an Anthropic key: Claude Haiku 4.5 by default), and optionally `AI_PROVIDER` (`anthropic`, `openai` or `openai-compatible`), `AI_MODEL`, and `AI_BASE_URL` for a local model, such as Ollama's `http://127.0.0.1:11434/v1`. Without them, labelling is off, and new inquiries wait under **Not labelled** until it's on. The queue comes from the labels in code: a turn handed to staff always needs an answer, whatever the model says.
 
 ## Running the talk demo
 
@@ -190,9 +191,9 @@ console.log("Added maison-ops to", file);
 - [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits, questions or tokens behind.
 - [ ] On the board, **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
-- [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and the LINE confirmation need the internet.
+- [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key), the LINE confirmation, labelling with a key and Reply on LINE need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
-- [ ] In the Strapi admin: **Maison** → **Reset demo appointments and questions** (it asks first). Set the board's filter to **All requests**.
+- [ ] In the Strapi admin: **Maison** → **Reset demo activity** (it asks first). Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
 - [ ] Warm up: walk the whole run once, so every screen is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
 - [ ] With option A: your phone at hand, with LINE's notifications on. The confirmation arrives there.
@@ -219,14 +220,14 @@ console.log("Added maison-ops to", file);
 - **The concierge stalls, or the network drops:** use **Book a visit** on the product page. It calls the same `request_appointment` tool.
 - **The concierge's turn ends with no words** (the local model, now and then): tap **Try again** under it, with a line ready while it answers again.
 - **The app says the limit of visit requests is reached:** the demo customer has 3 requests waiting. Confirm one on the board, or reset demo appointments.
-- **The note under a question has no `Q-` reference:** nothing was recorded. One reason is that the demo customer already has five questions open or taken, the most Strapi allows. **Reset demo appointments and questions**, or answer some under **Customer questions**.
+- **The note under a question has no `Q-` reference:** nothing was recorded. One reason is that the demo customer already has five questions open or taken, the most Strapi allows. **Reset demo activity**, or answer some under **Questions**.
 - **The concierge shows an error:** on stage, a small technical line under the customer's message names the cause and the fix. After `npm run setup` or a clean start, reload the app's page: a session the server has dropped answers 502 until then.
 - **The LINE message doesn't arrive:** show the confirmed row on the board, and the message on the slide. If the row says "not sent", **Send again** retries it.
 - **Any beat stalls for more than 10 seconds:** switch to the backup video.
 
 ### Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo appointments and questions** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each beat works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.
@@ -235,7 +236,7 @@ Expected:
 
 Check these once, in the admin:
 - **The board.** A request made in the app appears within 5 seconds. **All requests** keeps confirmed rows. **Confirm** appears only on waiting requests whose visit is still ahead. With option A, the LINE column says LINE sent once the confirmation has gone out.
-- **The reset.** **Reset demo appointments and questions** asks first, and **Cancel** changes nothing.
+- **The reset.** **Reset demo activity** asks first, and **Cancel** changes nothing.
 - **The customer stays hidden.** In the Content Manager, Maison's appointment list and edit view have no customer column or field, and searching the list for part of the demo customer's ID (`4af49806`) finds nothing. Saving and publishing there still work.
 
 ### Record the backup video
@@ -454,9 +455,10 @@ LINE's pages behind this:
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
 - **Chat with Maison on LINE needs two runs,** one per case, because the app is built with the setting: `npm run test:e2e` with `NEXT_PUBLIC_LINE_OA_ID` in `liff/.env`, then `NEXT_PUBLIC_LINE_OA_ID= npm run test:e2e`. Stop any app on :3003 before each, so Playwright starts one with the same setting. Each run tests its case and skips the other.
-- **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Its reset now also deletes every customer question, and the product knowledge their answers added. **Reset demo appointments and questions** before going on stage.
+- **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Its reset now also deletes every customer question and inquiry, and the product knowledge that staff answers added. **Reset demo activity** before going on stage.
 
 Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
+- **The live labelling test** sends five sample turns to the real model with your key from `strapi/.env`, and checks the labels (about a tenth of a cent): `node --env-file=../../.env node_modules/vitest/vitest.mjs run --config vitest.live.config.ts`. Without AI settings it's skipped.
 - **Integration tests** boot the demo's Strapi in-process, on their own `strapi/.tmp/maison-test-*.db` files, with a local stand-in for LINE's push API, so they never message anyone: `STRAPI_APP_DIR="$(cd ../../.. && pwd)" npm run test:integration`.
 - **MCP smoke tests** run against the running Strapi, with tokens the plugin's script mints as the demo admin:
 
@@ -482,14 +484,14 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `ce6917e` (branch `feat/maison-follow-up`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `27fb8a6` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. The demo doesn't change Maison: it only configures it, in `strapi/config/plugins.ts`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
 ```bash
-SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone, or its follow-up worktree
-SHA=$(git -C "$SRC" rev-parse --verify feat/maison-follow-up)
-FILES=(admin server test scripts package.json package-lock.json README.md CHANGELOG.md vitest.config.ts .gitignore .editorconfig .prettierrc .prettierignore)
+SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone, or its inquiries worktree
+SHA=$(git -C "$SRC" rev-parse --verify feat/maison-inquiries)
+FILES=(admin server test scripts package.json package-lock.json README.md CHANGELOG.md vitest.config.ts vitest.live.config.ts .gitignore .editorconfig .prettierrc .prettierignore)
 test -n "$SHA" && rm -rf strapi/src/plugins/maison && mkdir strapi/src/plugins/maison
 git -C "$SRC" archive "$SHA" -- "${FILES[@]}" | tar -x -C strapi/src/plugins/maison
 npm install --prefix strapi   # installs and builds it, and shares @strapi/utils
@@ -501,21 +503,22 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 - **The check compares what git tracks,** blob by blob, with the plugin's commit, not the folder. `strapi/.gitignore`'s patterns apply inside the copy too, so a file on disk may not be tracked.
 - **If `SRC` is wrong,** `SHA` stays empty: nothing is deleted, and the check says nothing. Without "The staged copy matches", the copy doesn't match.
-- **On this branch, copy `feat/maison-follow-up`,** the branch of the plugin's follow-up worktree (`strapi-store-demo-mcp-follow-up`), not `feat/maison-plugin`: the customer questions live only on the follow-up branch, so a copy of `feat/maison-plugin` loses them. The worktree and the clone are one repository, so either works as `SRC`.
+- **Copy `feat/maison-inquiries`,** the branch of the plugin's inquiries worktree (`strapi-store-demo-mcp-inquiries`). It holds product knowledge, customer questions and inquiries; `feat/maison-plugin` and `feat/maison-follow-up` are older, and a copy of either loses features. The worktree and the clone are one repository, so either works as `SRC`.
 - Commit with the SHA in the message, update the commit named above, and start Strapi.
 - To work on the plugin in place, run `npm run watch` in its folder, and restart Strapi to load each rebuild.
 - If you run `npm install` in the plugin's folder, stop Strapi and run `npm install --prefix strapi` afterwards. Until then, `npm run dev:strapi` refuses to start: the `predevelop` check finds Maison's own `@strapi/utils`.
 
 ## Production notes
 
-- **Customer questions** (the staff follow-up proof of concept): the "Maison customer" token needs "MCP: hand questions to staff" (`plugin::maison.questions.ask`). `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand (never run setup against Cloud). Staff need "Read customer questions" to see the section and "Answer customer questions on LINE" for its buttons. `MAISON_LINE_API_BASE_URL` points Strapi at a LINE stand-in for local checks, so nothing reaches a phone. Start the stand-in with `npm run line:stand-in` (on 127.0.0.1:4010, logging what Strapi pushes to `strapi/.tmp/line-stand-in.jsonl`), then Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010 LINE_CHANNEL_ACCESS_TOKEN=stand-in npm run dev:strapi`: Strapi sends and looks up nothing without a token, and the stand-in accepts any. Leave `MAISON_LINE_API_BASE_URL` unset everywhere else.
+- **Customer questions** (the staff follow-up proof of concept): the "Maison customer" token needs "MCP: hand questions to staff" (`plugin::maison.questions.ask`). `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand (never run setup against Cloud), and add it to the token owner's role when that is a narrow service admin (see **The customer token**). Staff need "Read customer questions" to see the section and "Answer customer questions on LINE" for its buttons. `MAISON_LINE_API_BASE_URL` points Strapi at a LINE stand-in for local checks, so nothing reaches a phone. Start the stand-in with `npm run line:stand-in` (on 127.0.0.1:4010, logging what Strapi pushes to `strapi/.tmp/line-stand-in.jsonl`), then Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010 LINE_CHANNEL_ACCESS_TOKEN=stand-in npm run dev:strapi`: Strapi sends and looks up nothing without a token, and the stand-in accepts any. Leave `MAISON_LINE_API_BASE_URL` unset everywhere else.
+- **Inquiries:** the "Maison customer" token needs "MCP: log customer inquiries" (`plugin::maison.inquiries.log`), or the app logs nothing. `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand, and add it to the token owner's role when that is a narrow service admin (see **The customer token**). Staff need "Review customer inquiries" to see the Inquiries tab and widget, and "Reply to customer inquiries on LINE" for its buttons. To label, set `AI_API_KEY` (an Anthropic key) under the project's **Variables** on Strapi Cloud and redeploy; leave `AI_BASE_URL` unset there. The AI SDK needs Node 22.12 or later: Strapi Cloud's Node version is set by hand under **Configuration** → **Basic information**. The LINE stand-in also answers the month's quota (200 messages, and the pushes it took since it started).
+- **Product knowledge over REST** (`/api/maison/knowledge`) needs the Public role's Maison `knowledge.find`. `npm run setup` grants it locally; on Strapi Cloud, a setup run from before product knowledge doesn't have it, so tick it under **Settings → Users & Permissions plugin → Roles → Public**. The concierge doesn't need it: it searches through MCP. On a new Cloud database, press **Load demo catalog** once to add the knowledge entries.
 - **Staff** get an admin role with the Maison actions they need (`catalog.read`, `appointments.review`, `appointments.confirm`) instead of Super Admin.
-- **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
+- **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake. That role needs "MCP: hand questions to staff" and "MCP: log customer inquiries" too: a token can't hold a permission its owner's role lacks, so add them to the role, then tick them on the token.
 - **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.
 - **Bind to 127.0.0.1** unless a proxy in front needs otherwise. The demo does it for Strapi, the app and the verify mock.
 - **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it six actions on every run: the five catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its five away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
 - **Staff agents read what customers wrote.** `appointment_requests` gives a staff agent customers' notes, up to 500 characters each, which could try to instruct the model. The tool descriptions tell it to treat notes as information, and to confirm only a reference the staff member asked for. Keep `appointments.confirm` off an agent's token, or add an approval step for tools that write.
 - **One Strapi sends each LINE confirmation once.** A visit's `sent` record stops a second send, and two sends at the same moment share one push, but only within one Strapi process. With more than one, add a claim row, LINE's `X-Line-Retry-Key` or an outbox (the plugin's README, "LINE confirmations").
-- **`strapi/src/extensions/maison/strapi-server.ts`** keeps customers' LINE user IDs out of admin API responses and the list search. Keep it until Maison's own schema does the same.
 - **Nothing here needs Strapi Enterprise.** If your license includes audit logs, they also record what admins do.
