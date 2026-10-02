@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Local only, on new branches.** Plugin: branch `feat/maison-inquiries` from `feat/maison-follow-up`, in a new worktree `~/work/plugin-dev/plugins/strapi-store-demo-mcp-inquiries`, with `node_modules` symlinked to the main checkout's. Demo: branch `feat/maison-inquiries` from `feat/maison-follow-up` in `~/work/maison-demo`. Never push, merge or deploy ("dont deploy the branch into main unitll we review together").
-- **Nothing reaches LINE or a paid model from tests or local checks.** Unit tests stub `fetch` and use the AI SDK's mock models. Integration suites point `lineApiBaseUrl` and `aiBaseUrl` at stand-ins on this machine. Live labelling checks run on Ollama, unless Paul runs them with his key.
+- **Nothing reaches LINE or a paid model from tests or local checks.** Unit tests stub `fetch` and use the AI SDK's mock models. Integration suites point `lineApiBaseUrl` and `aiBaseUrl` at stand-ins on this machine. Live labelling checks use Paul's Anthropic key from `strapi/.env` (he adds it himself; it is never printed), or Ollama without one.
 - **Never read, print or use a real key.** No Anthropic key is available here. Without AI settings (`AI_API_KEY`, or `AI_PROVIDER=openai-compatible` with `AI_BASE_URL`), labelling is off: the sweep marks new rows `skipped`, as Pulse does, and they show under **Not labelled**. Local checks use a real local model through Ollama (`openai-compatible`), so no key is needed.
 - **Model calls go through the AI SDK, as Pulse does** (`~/work/pulse/apps/cms/src/api/analysis/services/provider.ts` and `ai.ts`). Never call a model API with raw HTTP (Paul, 2 Oct 2026).
 - **The customer comes from the session, never from arguments.** Staff see it masked. The model never sees a LINE ID.
@@ -798,7 +798,11 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
 - [ ] **Step 5: No Anthropic stand-in.** Local checks use Ollama, so the controller's early stand-in (`scripts/anthropic-stand-in.mjs`, commit 99515b1) is removed. The LINE stand-in keeps its quota routes.
 - [ ] **Step 6: Run** the demo's `npm test` and the integration suites. Expected: PASS, including `inquiries.test.mjs`.
 - [ ] **Step 7: Commit** the copy and the demo's changes, with a pathspec.
-- [ ] **Step 8: Local check.** Start the LINE stand-in. Start Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010`, `AI_PROVIDER=openai-compatible`, `AI_BASE_URL=http://127.0.0.1:11434/v1` and an Ollama `AI_MODEL`. Run `npm run setup` locally, then the app. First run the live test against Ollama: from the plugin, `npm run test:live` with the same three settings.
+- [ ] **Step 8: Local check,** with Paul's key: he adds `AI_API_KEY` to `strapi/.env` himself, and nobody prints it.
+  - Run the live test first, from the copied plugin, loading that file: `node --env-file=../../.env node_modules/vitest/vitest.mjs run --config vitest.live.config.ts`.
+  - Start the LINE stand-in. Start Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010`; the AI settings come from `strapi/.env`.
+  - Run `npm run setup` locally, then the app.
+  - Ollama (`AI_PROVIDER=openai-compatible`) is the fallback without a key.
   1. Ask the concierge three things: a policy question that knowledge answers, one it doesn't, and "the strap broke on my bag".
   2. Within a minute, `GET /maison/inquiries?filter=all` (the staff-check script) shows three labelled rows in the right queues, and the hand-off links to its Q-ref.
   3. `POST /maison/inquiries/<complaint>/reply` pushes once to the LINE stand-in.
