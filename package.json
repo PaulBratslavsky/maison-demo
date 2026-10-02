@@ -2,7 +2,7 @@
   "name": "maison-demo",
   "version": "0.1.0",
   "private": true,
-  "description": "From UX to AX: one set of Strapi MCP tools serving a LINE app, a customer's agent and an ops agent.",
+  "description": "From UX to AX: one set of Strapi MCP tools serving a LINE app, the customer's concierge and staff, with LINE confirmations sent by Strapi.",
   "engines": {
     "node": ">=22.12.0"
   },

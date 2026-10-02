@@ -4,7 +4,7 @@ A fictional luxury house whose catalog and appointments are served to people and
 - **UX:** catalog screens in an app built for LINE (a LIFF app)
 - **AX for the customer:** a concierge that acts for the signed-in customer, through the same tools
 - **The human gate:** staff confirm requests on the Maison board in the Strapi admin
-- **AX for operations:** an ops agent in Claude Desktop that prepares, and can send, the customer's LINE confirmation
+- **The answer on LINE:** whichever way staff confirm a visit, Strapi sends the customer's LINE confirmation itself, through the Messaging API
 
 LINE sign-in is simulated with LINE's official LIFF mock and a local stand-in for LINE's ID token verify endpoint. Everything else is the production path. The same app also runs inside LINE on your own LIFF app, through one tunnel (option B). It follows LINE's MINI App design guidelines, so QBurst can run it as a LINE MINI App. The demo was built for "Building the AI-Powered Connected Experience" (QBurst and LY Corporation, Tokyo, 7 October 2026), where QBurst presents the LINE MINI App side (see "Handoff").
 
@@ -33,7 +33,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 
 `npm run setup` is safe to run again. Each run:
 - **replaces the "Maison app" OAuth client,** so `liff/.env` gets a new client ID. Restart the app, and reload its page: until then, the concierge answers 502 for a customer session the server has dropped.
-- **mints new "Maison customer" and "Maison ops" tokens,** and rewrites `strapi/.tmp/maison-ops-token`. Update Claude Desktop (see "Claude Desktop, the ops agent").
+- **mints new "Maison customer" and "Maison ops" tokens,** and rewrites `strapi/.tmp/maison-ops-token`. If you connected an agent to the ops tools, give it the new token (see "Ops tools for an agent").
 - **first prints the Strapi address it sets up.** Shell variables (`PORT`, `STRAPI_URL`, `DEMO_ADMIN_EMAIL`, `DEMO_ADMIN_PASSWORD`) win over `strapi/.env`, so unset them if that address looks wrong.
 
 ## What's in the repo
@@ -65,13 +65,13 @@ Maison's services hold the rules: the catalog, opening hours, who may book what,
 
 | Door | For | Where |
 |---|---|---|
-| MCP | The Maison app, its concierge, staff agents and the ops agent | `/mcp`, with a customer's session or an admin token |
+| MCP | The Maison app, its concierge, and staff agents | `/mcp`, with a customer's session or an admin token |
 | REST | Websites | `/api/maison/…` |
 | The requests board | Staff | **Maison** in the Strapi admin |
 | The homepage widget | Staff | **Maison requests** on the admin's Homepage |
 
 - **The Maison app only uses MCP.** Its **Agent view** shows the tool call behind each screen, and the concierge calls the same tools.
-- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead. Under **Demo data**: **Load demo catalog**, and **Reset demo appointments**, which asks first.
+- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead, and its notice says whether the customer's LINE confirmation was sent. **Send again** appears on a confirmed visit still ahead whose LINE column says "not sent". Under **Demo data**: **Load demo catalog**, and **Reset demo appointments**, which asks first.
 - **The widget** counts **Waiting for staff**, **Confirmed, upcoming** and **LINE sent** (among the upcoming confirmed visits), lists the five newest requests, and links to the board with **Open the board**. It refreshes every 5 seconds, and shows only to admins whose role can review appointments. A Homepage whose layout was changed before needs **Add Widget** once.
 
 ### The REST door
@@ -130,7 +130,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 - **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its tool line reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
 - **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
-- **Strapi runs no model.** The ops agent is Claude Desktop, on your own Claude account, and needs the internet.
+- **Strapi runs no model.** The concierge's is the demo's only model.
 
 ## Running the talk demo
 
@@ -138,11 +138,18 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 
 1. **The quick start** above: `npm install`, `npm run dev`, `npm run setup`, and restart.
 2. **The concierge's model:** `ANTHROPIC_API_KEY` in `liff/.env` for Claude, then restart the app. Without it, start Ollama.
-3. **The ops agent:** connect Claude Desktop (next section).
+3. **The LINE confirmation on your phone:** option A (below). Without it, the board shows each confirmed visit as "not sent".
 
-### Claude Desktop, the ops agent
+### Ops tools for an agent
 
-On macOS, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit Claude Desktop with ⌘Q and open it again. This command adds the server without printing the token:
+Strapi sends the LINE confirmations itself, so the demo needs no agent for them. Maison also keeps two ops tools, for an agent that retries the confirmations that weren't sent:
+- **`pending_confirmations`** lists each upcoming confirmed visit with its customer's LINE user ID and its ready-made message.
+- **`record_confirmation`** records a delivery.
+- **The prompt `send_pending_confirmations`,** titled "Send pending appointment confirmations", walks an agent through both, with LINE Bot MCP.
+
+`npm run setup` mints their token, "Maison ops". It holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.
+
+To try them as a developer in Claude Desktop on macOS, quit Claude Desktop first (⌘Q): it rewrites its config file while it runs. Then, from the repo root, add the `maison-ops` server to `~/Library/Application Support/Claude/claude_desktop_config.json`, and open Claude Desktop again. This command adds the server without printing the token, and keeps the rest of the file:
 
 ```bash
 node -e '
@@ -157,16 +164,10 @@ console.log("Added maison-ops to", file);
 '
 ```
 
-- Run it from the repo root. It keeps the rest of the file.
 - Start Strapi before you open Claude Desktop. `mcp-remote` connects to Strapi when Claude Desktop starts it, and exits for good if Strapi doesn't answer; if that happens, quit and reopen Claude Desktop.
-- Run it again after each `npm run setup`, which mints a new ops token, and restart Claude Desktop.
+- Run it again, with Claude Desktop quit, after each `npm run setup`, which mints a new ops token.
 - **`npx` by its absolute path.** Claude Desktop doesn't start servers with your shell's `PATH`, so when Node comes from nvm or another version manager, a bare `npx` isn't found. The command writes the path of the `npx` beside the `node` that runs it (the one `which npx` prints in that terminal), and a `PATH` in `env` that starts with its folder, because `npx` runs on `node` from the `PATH`. Run it again after you change Node versions.
-- **What the connector offers:** the tools `pending_confirmations` and `record_confirmation`, and the prompt `send_pending_confirmations`, which Claude Desktop may list by its title, "Send pending appointment confirmations". Strapi's own `log` tool also appears while Strapi runs in development. The token holds one permission, "MCP: send appointment confirmations", so nothing there confirms, publishes or edits content.
-
-Check it once:
-1. Book a visit in the app, and confirm it on the board.
-2. In Claude Desktop, choose the `send_pending_confirmations` prompt, add the line from "The default ops run" (below), and send.
-3. Expected: Claude calls `pending_confirmations`, then shows the visit's reference, its time and boutique in Japanese (`10月…(土) 14:00` and 銀座本店 for the stage's visit), and the flex message. It calls nothing else, and the board still shows "not sent".
+- **What the connector offers:** the two ops tools and the prompt. Strapi's own `log` tool also appears while Strapi runs in development.
 
 ### Start over with a clean database
 
@@ -178,20 +179,20 @@ Check it once:
    ```
 
    The catalog's images live in `strapi/public/uploads/`, and Maison's integration tests leave about 57 MB there per run. Delete uploads only together with the database: never by hand while the demo's data is loaded.
-2. Start Strapi, run `npm run setup`, restart the app and reload its page, and update Claude Desktop (see "Claude Desktop, the ops agent").
+2. Start Strapi, run `npm run setup`, and restart the app and reload its page.
 
 ### Before going on stage
 
 - [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits or tokens behind.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
-- [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and Claude Desktop need the internet.
+- [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and the LINE confirmation need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
 - [ ] In the Strapi admin: **Maison** → **Reset demo appointments** (it asks first). Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
 - [ ] Warm up: walk the whole run once, so every screen is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
-- [ ] In Claude Desktop, check that the maison-ops tools and prompt are there.
-- [ ] Windows: the app (phone frame) beside the Strapi admin on the Maison board, and Claude Desktop behind them.
-- [ ] Turn Do Not Disturb on.
+- [ ] With option A: your phone at hand, with LINE's notifications on. The confirmation arrives there.
+- [ ] Windows: the app (phone frame) beside the Strapi admin on the Maison board.
+- [ ] Turn Do Not Disturb on, on the laptop (with option A, not on the phone).
 
 ### The 3-minute run
 
@@ -201,20 +202,18 @@ Check it once:
 | 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line under the reply names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
 | 1:10–1:30 | Booking | Tap **Yes, please.** The request is sent and awaits the boutique. |
 | 1:30–1:50 | The request arrives | On the board, the request appears, created via `concierge`, with the customer masked. |
-| 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed. |
-| 2:20–2:45 | AX for operations | In Claude Desktop, run **send_pending_confirmations** (default: add the line below). It shows the visit and its ready-made LINE message, in Japanese. With option A, the phone buzzes and the board shows LINE sent. |
+| 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
+| 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in Japanese, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
-
-**The default ops run.** LINE Bot MCP isn't connected on the laptop, so choose the prompt and add this before sending: "LINE Bot MCP isn't connected on this laptop. Stop after pending_confirmations: show each message, and record nothing." The prompt is written for a connected LINE Bot MCP. Without that line, the agent could record a false "not reachable" for the customer.
 
 **Fallbacks:**
 - **The concierge stalls, or the network drops:** use **Book a visit** on the product page. It calls the same `request_appointment` tool.
 - **The concierge's turn ends with no words** (the local model, now and then): tap **Try again** under it, with a line ready while it answers again.
 - **The app says the limit of visit requests is reached:** the demo customer has 3 requests waiting. Confirm one on the board, or reset demo appointments.
 - **The concierge shows an error:** on stage, a small technical line under the customer's message names the cause and the fix. After `npm run setup` or a clean start, reload the app's page: a session the server has dropped answers 502 until then.
-- **Claude Desktop fails:** show the confirmed row on the board, and the message on the slide.
+- **The LINE message doesn't arrive:** show the confirmed row on the board, and the message on the slide. If the row says "not sent", **Send again** retries it.
 - **Any beat stalls for more than 10 seconds:** switch to the backup video.
 
 ### Rehearse
@@ -224,10 +223,10 @@ Follow "Before going on stage" and "The 3-minute run" three times in local mode,
 Expected:
 - **Each beat works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.
 - **The concierge never says a visit is confirmed.** It says the visit is requested, and that the boutique will confirm it on LINE.
-- **Book a visit works with the network off.** Strapi, the app, the mock and the local model all run on the laptop. Only Claude Desktop stops.
+- **Book a visit works with the network off.** Strapi, the app, the mock and the local model all run on the laptop. Only the LINE confirmation fails: its row says "not sent", and **Send again** sends it once the network is back.
 
 Check these once, in the admin:
-- **The board.** A request made in the app appears within 5 seconds. **All requests** keeps confirmed rows. **Confirm** appears only on waiting requests whose visit is still ahead. The LINE column changes after option A.
+- **The board.** A request made in the app appears within 5 seconds. **All requests** keeps confirmed rows. **Confirm** appears only on waiting requests whose visit is still ahead. With option A, the LINE column says LINE sent once the confirmation has gone out.
 - **The reset.** **Reset demo appointments** asks first, and **Cancel** changes nothing.
 - **The customer stays hidden.** In the Content Manager, Maison's appointment list and edit view have no customer column or field, and searching the list for part of the demo customer's ID (`4af49806`) finds nothing. Saving and publishing there still work.
 
@@ -250,7 +249,7 @@ Check these once, in the admin:
 3. Booking
 4. The request appearing on the board
 5. Staff confirming it on the board
-6. The ops agent preparing (or, with option A, sending) the LINE confirmation
+6. The LINE confirmation arriving on the phone (option A), beside the board's LINE column
 
 **Recording tips:**
 - Record each beat as its own clip, so a bad take can be redone.
@@ -266,36 +265,17 @@ Check these once, in the admin:
 1. In LINE Developers, create a provider and an Official Account with the Messaging API. Check first that your account can create one from your region. With option B, use your LINE Login channel's provider: LINE gives each user a different ID in each provider.
 2. Add the Official Account as a friend on your phone.
 3. Copy **Your user ID** from the Messaging API channel's Basic settings into `liff/.env` as `NEXT_PUBLIC_DEMO_LINE_USER_ID`. The mock sign-in then acts as you, as that provider sees you. Restart the app. With option B, skip this step: you sign in as yourself.
-4. Issue a channel access token, and add LINE Bot MCP to Claude Desktop, with `npx` by its absolute path and its folder in `PATH`, as for maison-ops. Run `which npx` in a terminal for the path:
-
-   ```json
-   "line-bot": {
-     "command": "<the path which npx prints>",
-     "args": ["-y", "@line/line-bot-mcp-server"],
-     "env": {
-       "PATH": "<that path without /npx>:/usr/bin:/bin",
-       "CHANNEL_ACCESS_TOKEN": "<channel access token>"
-     }
-   }
-   ```
-
-5. In the ops beat, run **send_pending_confirmations** without the extra line. The agent does three things:
-   - checks you're reachable (`get_profile`)
-   - pushes the message (`push_flex_message`)
-   - records it as sent (`record_confirmation`)
-
-   **My visits** then shows "Confirmed · LINE sent" (確定 · LINEで送信済み in Japanese), and the board shows LINE sent.
+4. Issue a channel access token, on the Messaging API channel's **Messaging API** tab. Put it in `strapi/.env` as `LINE_CHANNEL_ACCESS_TOKEN`, and restart Strapi. Keep it out of commits and chats: it sends messages as your Official Account.
+5. Book a visit and confirm it on the board. Strapi pushes the confirmation to you at once, with LINE's push API, and records it:
+   - the notice says the customer's LINE confirmation was sent
+   - the board shows LINE sent
+   - **My visits** shows "Confirmed · LINE sent" (確定 · LINEで送信済み in Japanese)
 
 The message's button opens the visit in the app, at `MAISON_LIFF_URL` followed by `/visits/<reference>`. In local mode `MAISON_LIFF_URL` is `http://localhost:3003`, which your phone can't open. With option B it's your LIFF URL, which opens the app inside LINE.
 
-**Check once, in rehearsal, what LINE does for a customer it can't reach.** LINE's push API answers 200 even when it can't deliver, which is why the prompt calls `get_profile` first.
-1. Block the Official Account on your phone.
-2. Book and confirm a visit, then run the prompt.
-3. Expected:
-   - `get_profile` fails
-   - the agent records "failed" with "not reachable: not a friend or blocked", and pushes nothing
-   - the board still shows "not sent"
-4. Unblock the account, reset demo appointments, and run the beat again. Expected: the push arrives, and the board shows LINE sent.
+- **Without option A, leave `LINE_CHANNEL_ACCESS_TOKEN` empty in local mode.** The mock's customer is then a made-up user ID, and nobody would receive what Strapi pushes to it.
+- **"LINE sent" means LINE took the message.** LINE's push API answers 200 even when it can't deliver, for example to a customer who has blocked the Official Account, so the board shows LINE sent then too.
+- **When LINE refuses it,** or can't be reached, the row stays "not sent", and Strapi's log says why. Fix the cause, then press **Send again**.
 
 ## Option B: the real app inside LINE
 
@@ -341,7 +321,7 @@ npm run tunnel        # checks it's safe, then runs ngrok on your domain
 npm run qr            # prints the app's LINE link, with a QR code to scan in LINE
 ```
 
-`npm run setup` mints a new ops token, so update Claude Desktop again afterwards (see "Claude Desktop, the ops agent").
+`npm run setup` also mints a new ops token: see "Ops tools for an agent", if you connected one.
 
 **Open the app inside LINE.** Run `npm run qr`, then scan the code with LINE's QR reader: the QR icon next to the search bar on LINE's Home tab. The iPhone Camera app may hand the link to Safari instead. The code opens `https://liff.line.me/<your LIFF ID>`, and `npm run qr -- /visits` opens a given screen. It also saves the code in `liff/line/qr/`, as a PNG and an SVG.
 - **If LINE opens links in Safari or Chrome:** in LINE, go to Settings → LINE Labs and turn off "Open links in your default browser". Outside LINE the app never signs in: it shows an "Open in LINE" page, with the QR code and, on a phone, a button.
@@ -354,8 +334,8 @@ Who can sign in:
 - **While your LINE Login channel is in Developing,** only its Admins and Testers can (LINE Developers Console → your channel → **Roles**).
 - **Publishing the channel opens it to anyone with LINE.** Every visit then reaches your laptop through the tunnel, the concierge answers on your model or API key, and each visitor becomes a customer in the demo database:
   - **Each sign-in** stores a session in oauth-mcp-manager: the visitor's full LINE user ID (`line:U…`), a hash of the session token (not the token), the app's client ID, and when the session expires (an hour on) and was last used. Its hourly cleanup deletes expired sessions.
-  - **Each visit request** stores a Maison appointment: the same full LINE user ID, the boutique, the products, the date and time, the visitor's note if they wrote one, a reference, and where it was made (`createdVia`: `app`, `concierge` or `web`). It stays until you reset the demo appointments. When the ops agent records a delivery, a confirmation log row keeps the reference, sent or failed, the time and the agent's note, with no LINE user ID. Reset deletes it too.
-  - **No other personal data:** no name, picture or email, and not the ID token. Strapi checks the ID token with LINE and keeps only the user ID. Staff see it masked (`line:U4af…88`), and the admin API never returns it. The ops agent gets the full ID from `pending_confirmations`, to send the LINE message (see "Handoff").
+  - **Each visit request** stores a Maison appointment: the same full LINE user ID, the boutique, the products, the date and time, the visitor's note if they wrote one, a reference, and where it was made (`createdVia`: `app`, `concierge` or `web`). It stays until you reset the demo appointments. Each LINE confirmation Strapi sends, or an agent records, adds a log row: the reference, sent or failed, the time and a note, with no LINE user ID. Reset deletes those too.
+  - **No other personal data:** no name, picture or email, and not the ID token. Strapi checks the ID token with LINE and keeps only the user ID. Staff see it masked (`line:U4af…88`), and the admin API never returns it. Strapi reads the full ID to send the LINE confirmation, and `pending_confirmations` returns it to the ops token (see "Ops tools for an agent").
 - **The QR image** holds your LIFF ID and stays out of git: `liff/line/qr/` is in `.gitignore`.
 
 `npm run tunnel` refuses unless all of these hold:
@@ -385,7 +365,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
 1. The MINI App calls `liff.getIDToken()`.
 2. oauth-mcp-manager exchanges it for a short-lived session, after LINE verifies it (RFC 8693).
 3. The MINI App, and any agent working for that customer, calls the Maison tools on Strapi `/mcp`.
-4. Staff confirm in Strapi, on the Maison board. The ops agent delivers the ready-made LINE message: through the Messaging API today, and as a MINI App service message once verified.
+4. Staff confirm in Strapi, on the Maison board or through a staff agent. Strapi sends the customer's LINE confirmation at once, through the Messaging API. A verified MINI App could send it as a service message instead.
 
 **What's ready:**
 
@@ -408,7 +388,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
   - Staff tools, for staff agents: `appointment_requests` and `confirm_appointment`
   - Errors come back as `isError` results whose text is `{ "error": { "code", "message", "hint" } }`. Arguments the SDK rejects, such as a date that isn't on the calendar, come back as plain text that starts `Input validation error:`.
 - **REST, for websites:** the catalog at `/api/maison/…` with no credentials, and the customer's own bookings with the same session (see "The REST door").
-- **Confirmation:** `pending_confirmations` returns each upcoming, staff-confirmed visit with its LINE user ID and a flex message in Japanese, ready for the Messaging API.
+- **Confirmation:** when a visit is confirmed, whichever way, Strapi pushes the customer a flex message in Japanese with the Messaging API channel's token (`LINE_CHANNEL_ACCESS_TOKEN`, see option A), and records it. `pending_confirmations` returns the same message for each upcoming confirmed visit, for an agent that retries.
 - **Channels:** the MINI App channel and the Messaging API channel must be in one provider.
 
 ### Run it as a LINE MINI App
@@ -421,7 +401,7 @@ In your provider, create both channels in the same provider. Otherwise user IDs 
    - **Channel name:** Maison, with no "LINE" in it, and a Japanese name under Localization.
    - **A description,** in English and Japanese, and your **privacy policy URL**.
    - **Web app settings:** endpoint URL `https://<your host>/`, scopes `openid` and `profile`. A MINI App's size is always Full.
-2. **A Messaging API channel** (an Official Account), for LINE Bot MCP (option A). A verified MINI App can send service messages instead.
+2. **A Messaging API channel** (an Official Account), whose channel access token Strapi sends the confirmations with (option A). A verified MINI App can send service messages instead.
 
 Then, in this repo:
 - **Two values change.** Put the MINI App's LIFF ID and channel ID in `liff/.env` as `LINE_MODE_LIFF_ID` and `LINE_MODE_CHANNEL_ID`, put your host in `LINE_MODE_DOMAIN`, and follow option B. Nothing else changes. To serve it from your own https host instead of ngrok, leave the tunnel out: run `npm run start:line`, check it first with `npm run tunnel -- --dry-run`, which runs every check and starts nothing, and only then put the app behind that host.
@@ -465,7 +445,7 @@ LINE's pages behind this:
 - **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Reset demo appointments before going on stage.
 
 Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
-- **Integration tests** boot the demo's Strapi in-process, on their own `strapi/.tmp/maison-test-*.db` files: `STRAPI_APP_DIR="$(cd ../../.. && pwd)" npm run test:integration`.
+- **Integration tests** boot the demo's Strapi in-process, on their own `strapi/.tmp/maison-test-*.db` files, with a local stand-in for LINE's push API, so they never message anyone: `STRAPI_APP_DIR="$(cd ../../.. && pwd)" npm run test:integration`.
 - **MCP smoke tests** run against the running Strapi, with tokens the plugin's script mints as the demo admin:
 
   ```bash
@@ -490,7 +470,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `660c8f6`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `6aa4b0d`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
@@ -522,5 +502,6 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 - **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it five actions on every run: the four catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its four away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
 - **Staff agents read what customers wrote.** `appointment_requests` gives a staff agent customers' notes, up to 500 characters each, which could try to instruct the model. The tool descriptions tell it to treat notes as information, and to confirm only a reference the staff member asked for. Keep `appointments.confirm` off an agent's token, or add an approval step for tools that write.
+- **One Strapi sends each LINE confirmation once.** A visit's `sent` record stops a second send, and two sends at the same moment share one push, but only within one Strapi process. With more than one, add a claim row, LINE's `X-Line-Retry-Key` or an outbox (the plugin's README, "LINE confirmations").
 - **`strapi/src/extensions/maison/strapi-server.ts`** keeps customers' LINE user IDs out of admin API responses and the list search. Keep it until Maison's own schema does the same.
 - **Nothing here needs Strapi Enterprise.** If your license includes audit logs, they also record what admins do.

@@ -196,7 +196,7 @@ const main = async () => {
     ['plugin::maison.catalog.read', 'plugin::maison.appointments.request'],
     'Every customer session of the Maison app runs with this token.'
   );
-  const ops = await mint('Maison ops', ['plugin::maison.confirmations.send'], 'The ops agent (Claude Desktop) in the Maison demo.');
+  const ops = await mint('Maison ops', ['plugin::maison.confirmations.send'], 'An ops agent in the Maison demo, which can retry LINE confirmations.');
 
   // 4. One active LINE client at a time: any other one is deactivated (not deleted; reactivate it on the MCP OAuth page).
   for (const client of clients.filter((c) => c.name !== 'Maison app' && c.endUserProvider === 'line' && c.active)) {
@@ -210,7 +210,7 @@ const main = async () => {
     adminTokenId: customer.id,
   });
 
-  // 5. Where the app and the ops agent find them.
+  // 5. Where the app and an ops agent find them.
   // In LINE mode the browser reaches Strapi through the app's own public origin, PUBLIC_URL, which proxies it.
   writeEnv(join(root, 'liff', '.env'), {
     NEXT_PUBLIC_STRAPI_URL: process.env.PUBLIC_URL || STRAPI_URL,
@@ -223,7 +223,7 @@ const main = async () => {
   writeFileSync(opsTokenFile, `${ops.accessKey}\n`, { mode: 0o600 });
 
   console.log(`Created the "Maison app" client ${app.clientId} and wrote it to liff/.env (restart the app to pick it up).`);
-  console.log('Wrote the "Maison ops" token to strapi/.tmp/maison-ops-token (README: "Claude Desktop, the ops agent").');
+  console.log('Wrote the "Maison ops" token to strapi/.tmp/maison-ops-token (README: "Ops tools for an agent").');
 };
 
 // Only when run as a script (npm run setup), not when imported.
