@@ -895,6 +895,111 @@ export interface PluginMaisonCollection extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface PluginMaisonInquiry extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_inquiries';
+  info: {
+    description: 'One concierge turn: what the customer asked, what the concierge answered, and the labels staff work from.';
+    displayName: 'Maison inquiry';
+    pluralName: 'inquiries';
+    singularName: 'inquiry';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    analysisAttempts: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    analysisStatus: Schema.Attribute.Enumeration<
+      ['pending', 'analyzed', 'failed', 'skipped']
+    > &
+      Schema.Attribute.DefaultTo<'pending'>;
+    answered: Schema.Attribute.Boolean;
+    closeReason: Schema.Attribute.Enumeration<
+      ['answered-elsewhere', 'not-needed', 'spam']
+    >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    handedOff: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    humanCorrected: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    kind: Schema.Attribute.Enumeration<
+      ['question', 'complaint', 'praise', 'other']
+    >;
+    knowledgeFound: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    language: Schema.Attribute.Enumeration<['ja', 'en']> &
+      Schema.Attribute.DefaultTo<'ja'>;
+    lineDetail: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.inquiry'
+    > &
+      Schema.Attribute.Private;
+    message: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1000;
+      }>;
+    modelVersion: Schema.Attribute.String;
+    productSlug: Schema.Attribute.String;
+    promptVersion: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    questionReference: Schema.Attribute.String;
+    queue: Schema.Attribute.Enumeration<
+      ['needs-answer', 'complaint', 'praise', 'none']
+    > &
+      Schema.Attribute.DefaultTo<'none'>;
+    reason: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 400;
+      }>;
+    repliedAt: Schema.Attribute.DateTime;
+    repliedBy: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    reply: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    replyText: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    sentimentLabel: Schema.Attribute.Enumeration<
+      ['positive', 'neutral', 'negative']
+    >;
+    sentimentScore: Schema.Attribute.Float;
+    status: Schema.Attribute.Enumeration<['open', 'replied', 'closed']> &
+      Schema.Attribute.DefaultTo<'open'>;
+    topic: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    via: Schema.Attribute.Enumeration<['concierge', 'line-chat']> &
+      Schema.Attribute.DefaultTo<'concierge'>;
+  };
+}
+
 export interface PluginMaisonKnowledge extends Struct.CollectionTypeSchema {
   collectionName: 'maison_knowledge_entries';
   info: {
@@ -1239,7 +1344,7 @@ export interface PluginMaisonQuestion extends Struct.CollectionTypeSchema {
     knowledgeDocumentId: Schema.Attribute.String;
     language: Schema.Attribute.Enumeration<['ja', 'en']> &
       Schema.Attribute.DefaultTo<'ja'>;
-    lineDetail: Schema.Attribute.String &
+    lineDetail: Schema.Attribute.Text &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 500;
       }>;
@@ -1875,6 +1980,7 @@ declare module '@strapi/strapi' {
       'plugin::maison.appointment': PluginMaisonAppointment;
       'plugin::maison.boutique': PluginMaisonBoutique;
       'plugin::maison.collection': PluginMaisonCollection;
+      'plugin::maison.inquiry': PluginMaisonInquiry;
       'plugin::maison.knowledge': PluginMaisonKnowledge;
       'plugin::maison.notification': PluginMaisonNotification;
       'plugin::maison.product': PluginMaisonProduct;
