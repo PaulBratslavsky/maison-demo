@@ -270,6 +270,9 @@ Check these once, in the admin:
    - the notice says the customer's LINE confirmation was sent
    - the board shows LINE sent
    - **My visits** shows "Confirmed · LINE sent" (確定 · LINEで送信済み in Japanese)
+6. Let customers add Maison themselves, since a confirmation only reaches a customer who has added the Official Account as a friend:
+   - **In the app:** put the Official Account's basic ID, with its `@`, in `liff/.env` as `NEXT_PUBLIC_LINE_OA_ID`, and rebuild the app. **Chat with Maison on LINE** then appears on **My visits**, on a visit's page and after a booking. It opens `https://line.me/R/ti/p/%40…`: a friend lands in the chat with Maison, anyone else on its add-friend screen. Without the setting there's no button. LINE's links work in LINE on phones, not in LINE for PC.
+   - **At sign-in (option B):** in LINE Developers, open the LINE Login channel's **Basic settings**, set **Linked LINE Official Account** to yours, and turn the LIFF app's **Add friend option** on. LINE then offers to add Maison when a customer first allows the app. With the account linked, the app also asks LINE whether the customer has added Maison, and if not, the button reads **Add Maison on LINE**.
 
 The message's button opens the visit in the app, at `MAISON_LIFF_URL` followed by `/visits/<reference>`. In local mode `MAISON_LIFF_URL` is `http://localhost:3003`, which your phone can't open. With option B it's your LIFF URL, which opens the app inside LINE.
 
@@ -298,7 +301,7 @@ How it fits together:
    - Size: Full
    - Endpoint URL: `https://<your ngrok domain>/`
    - Scopes: `openid` and `profile`
-   - Add friend option: Off
+   - Add friend option: On (Normal), once the Official Account is linked (option A, step 6)
 5. Get a free [ngrok](https://ngrok.com/download) account, install the agent, and add your authtoken (`ngrok config add-authtoken`). Your dev domain (`<name>.ngrok-free.dev`) is on ngrok's dashboard.
 6. Add three lines to `liff/.env`:
 
@@ -438,10 +441,11 @@ LINE's pages behind this:
 | Command | What it runs | Needs |
 |---|---|---|
 | `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
-| `npm run test:e2e` | Browser tests: booking and **My visits**, Home's headline from Strapi in English and Japanese, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, and LINE's safe area in portrait and landscape. API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
+| `npm run test:e2e` | Browser tests: booking and **My visits**, Home's headline from Strapi in English and Japanese, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, LINE's safe area in portrait and landscape, and **Chat with Maison on LINE** (with `NEXT_PUBLIC_LINE_OA_ID` set or empty: see below). API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
 | `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
+- **Chat with Maison on LINE needs two runs,** one per case, because the app is built with the setting: `npm run test:e2e` with `NEXT_PUBLIC_LINE_OA_ID` in `liff/.env`, then `NEXT_PUBLIC_LINE_OA_ID= npm run test:e2e`. Stop any app on :3003 before each, so Playwright starts one with the same setting. Each run tests its case and skips the other.
 - **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Reset demo appointments before going on stage.
 
 Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
