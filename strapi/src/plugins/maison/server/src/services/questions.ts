@@ -60,7 +60,7 @@ const STATUS_FILTERS: Record<NonNullable<QuestionFilters['status']>, Doc> = {
 
 /**
  * What became of a staff message:
- * - `sent`: LINE took it, and the question says so (or the message says recording it failed).
+ * - `sent`: LINE took it, and the question says so. With `warning`, something after that went wrong, and the message says what.
  * - `failed`: LINE refused it or didn't answer. The question records why, and nothing else changed.
  * - `not_found`, `already_taken`, `already_answered`: nothing was sent.
  * - `not_configured`: there's no channel access token. Nothing was sent or recorded.
@@ -74,12 +74,19 @@ export interface ReplyOutcome {
   message: string;
   /** The knowledge entry the answer became. */
   knowledgeDocumentId?: string;
+  /**
+   * The customer has the message, but something after it went wrong, and `message` says what: LINE took it and recording
+   * it failed, or the knowledge entry couldn't be made. Staff should read it, not just see a success.
+   */
+  warning?: true;
 }
 
 export interface Reply {
   text: string;
   addToKnowledge: boolean;
   category?: KnowledgeCategory;
+  /** The knowledge entry's title, only while `addToKnowledge`. Without one, the customer's question is the title. */
+  title?: string;
 }
 
 const NO_TOKEN = "LINE_CHANNEL_ACCESS_TOKEN isn't set: Strapi can't message customers on LINE.";
@@ -88,6 +95,9 @@ const DETAIL_LENGTH = 500;
 
 /** A date as an ISO string, or null when there is none. */
 const isoOrNull = (value: unknown): string | null => (value ? new Date(value as string | number | Date).toISOString() : null);
+
+/** A question as two of them are compared: trimmed, with every run of whitespace as one space, in lower case. */
+const sameWordsAs = (question: string): string => question.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** `text` with every copy of the token taken out: nothing Strapi records, logs or shows staff may carry it. */
 const withoutToken = (text: string, token: string): string => text.split(token).join('[token]');
@@ -193,19 +203,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   const sentUnrecorded = (reference: string, sent: string, error: unknown, token: string): ReplyOutcome => {
     const message = `${sent}, but recording it failed (${reasonOf(error, token)}). Don't send it again.`;
     strapi.log.error(`[maison] ${message}`);
-    return { reference, status: 'sent', message };
+    return { reference, status: 'sent', message, warning: true };
   };
 
   /** The name of the question's piece in its language, or null when the question isn't about one, or the piece isn't published. */
   const productNameOf = async (row: Doc): Promise<string | null> =>
     row.productSlug ? ((await productNamed(row.productSlug, row.language))?.name ?? null) : null;
 
+  /** The entry's title: the one staff gave, or the customer's question when they gave none (or only spaces). Cut to fit. */
+  const knowledgeTitle = (row: Doc, reply: Reply): string => (reply.title ? knowledgeTitleOf(reply.title) : '') || knowledgeTitleOf(row.question);
+
   /** The answer as a published product knowledge entry in the question's language. Returns its document ID. */
   const createKnowledge = async (row: Doc, reply: Reply): Promise<string> => {
     const { documentId } = await strapi.documents(UID.knowledge).create({
       locale: row.language,
       data: {
-        title: knowledgeTitleOf(row.question),
+        title: knowledgeTitle(row, reply),
         answer: reply.text,
         category: reply.category,
         productSlugs: row.productSlug ? [row.productSlug] : [],
@@ -217,14 +230,26 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   return {
-    /** Records a question for staff. Nothing here messages the customer. */
+    /**
+     * Records a question for staff. Nothing here messages the customer. A question the customer has with staff already
+     * (open or taken, in the same words: ignoring capitals and extra whitespace) isn't recorded again: the answer is the
+     * existing question's reference, and the piece it is about. That comes before the limit, so a repeat never counts
+     * against it.
+     */
     async ask(input: QuestionRequest): Promise<ServiceResult<QuestionView>> {
       const { defaultLocale, lineChannelAccessToken: token, lineApiBaseUrl } = getConfig(strapi);
       const language = input.locale ?? defaultLocale;
-      const waiting = await strapi.documents(UID.question).count({
+      // The questions this customer has with staff: open, or taken and not answered yet. Five is the limit, so never many.
+      const waiting = (await strapi.documents(UID.question).findMany({
         filters: { customer: { $eq: input.subject }, status: { $in: ['open', 'taken'] } },
-      });
-      if (waiting >= MAX_OPEN_QUESTIONS) {
+      })) as Doc[];
+      const asked = sameWordsAs(input.question);
+      const repeat = waiting.find((row) => sameWordsAs(row.question) === asked);
+      if (repeat) {
+        const product = repeat.productSlug ? await productNamed(repeat.productSlug, language) : null;
+        return { ok: true, value: { reference: repeat.reference, status: 'open', product } };
+      }
+      if (waiting.length >= MAX_OPEN_QUESTIONS) {
         return failure(
           'too_many_open_questions',
           `This customer already has ${MAX_OPEN_QUESTIONS} questions with Maison's client advisors.`,
@@ -255,7 +280,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     async list(filters: QuestionFilters = {}): Promise<ServiceResult<StaffQuestionView[]>> {
       const rows = (await strapi.documents(UID.question).findMany({
         filters: STATUS_FILTERS[filters.status ?? 'open'],
-        sort: { createdAt: 'desc' },
+        sort: 'createdAt:desc',
         limit: filters.limit ?? 50,
       })) as Doc[];
       // One lookup per piece and language, shared by every question about it.
@@ -307,8 +332,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     /**
      * Answer: sends the customer the answer on LINE in the staff member's name, and marks the question answered. An open
      * or a taken question can be answered, an answered one is `already_answered`. With `addToKnowledge`, the answer also
-     * becomes a published knowledge entry in the question's language, about its piece. The customer has the answer by
-     * then, so an entry that can't be made never undoes it: the question is still answered, and the message says so.
+     * becomes a published knowledge entry in the question's language, about its piece, titled as staff wrote it, or with
+     * the customer's question when they wrote no title. The customer has the answer by then, so an entry that can't be
+     * made never undoes it: the question is still answered, and the message says so, with `warning`.
      * `now` is only for tests. It defaults to the current time.
      */
     async answer(reference: string, reply: Reply, staffName: string | null, now: Date = new Date()): Promise<ReplyOutcome> {
@@ -353,7 +379,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       if (knowledgeProblem !== undefined) {
         const message = `${sent}. It couldn't be added to product knowledge: ${knowledgeProblem}`;
         strapi.log.warn(`[maison] ${message}`);
-        return { reference, status: 'sent', message };
+        return { reference, status: 'sent', message, warning: true };
       }
       const message = knowledgeDocumentId ? `${sent}. Added it to product knowledge.` : `${sent}.`;
       strapi.log.info(`[maison] ${message}`);

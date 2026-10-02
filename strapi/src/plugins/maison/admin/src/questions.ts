@@ -1,6 +1,7 @@
 /**
  * What the Customer questions section of the Maison page shows and sends, apart from React: the rows of
- * GET /maison/questions, and the answer POST /maison/questions/:reference/answer takes.
+ * GET /maison/questions, the answer POST /maison/questions/:reference/answer takes, and the notice a 200 from either
+ * POST shows.
  */
 
 export type QuestionStatus = 'open' | 'taken' | 'answered';
@@ -80,16 +81,52 @@ const TOKYO_TIME = new Intl.DateTimeFormat('sv-SE', {
  */
 export const askedAt = (iso: string): string => (Number.isNaN(Date.parse(iso)) ? iso : TOKYO_TIME.format(new Date(iso)));
 
-/** What the Answer dialog holds. `category` is '' until staff pick one. */
+/** The most an answer can have, in characters (UTF-16 units, as the server counts them) after trimming. The server's `answerInput` allows the same. */
+export const ANSWER_LIMIT = 2000;
+/** The most a title in product knowledge can have, counted the same way: what the knowledge content type's `title` holds. */
+export const TITLE_LIMIT = 200;
+
+/**
+ * The title Add to product knowledge starts with: the customer's question, with its whitespace collapsed, cut to the
+ * title's 200 UTF-16 units with "…" when it was longer. It never splits an emoji, which is two units. It's what the server
+ * makes the title of an answer sent without one (`knowledgeTitleOf`, which test/unit/questions-admin.test.ts holds this to).
+ */
+export const defaultTitle = (question: string): string => {
+  const collapsed = question.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= TITLE_LIMIT) return collapsed;
+  let kept = '';
+  for (const char of collapsed) {
+    if (kept.length + char.length > TITLE_LIMIT - 1) break;
+    kept += char;
+  }
+  return `${kept}…`;
+};
+
+/** What the Answer dialog holds. `category` is '' until staff pick one, and `title` starts as the question. */
 export interface AnswerForm {
   text: string;
   addToKnowledge: boolean;
   category: string;
+  /** The title of the product knowledge entry. Only used while `addToKnowledge` is ticked. */
+  title: string;
 }
 
-/** Send on LINE: there's an answer, and with Add to product knowledge ticked, a category to file it under. */
-export const canSendAnswer = ({ text, addToKnowledge, category }: AnswerForm): boolean =>
-  text.trim() !== '' && (!addToKnowledge || CATEGORY_OPTIONS.some(({ value }) => value === category));
+/** The answer has more characters than the server takes. It counts them after trimming, as the dialog does. */
+export const answerTooLong = (text: string): boolean => text.trim().length > ANSWER_LIMIT;
+
+/** The title has more characters than the server takes, counted after trimming. */
+export const titleTooLong = (title: string): boolean => title.trim().length > TITLE_LIMIT;
+
+/**
+ * Send on LINE: there's an answer of up to 2,000 characters, and with Add to product knowledge ticked, a category to
+ * file it under and a title of 1 to 200 characters. That is what the server takes, and nothing it refuses: the
+ * dialog never sends a body that fails (test/unit/questions-admin.test.ts tries every mix against `answerInput`).
+ */
+export const canSendAnswer = ({ text, addToKnowledge, category, title }: AnswerForm): boolean => {
+  if (text.trim() === '' || answerTooLong(text)) return false;
+  if (!addToKnowledge) return true;
+  return CATEGORY_OPTIONS.some(({ value }) => value === category) && title.trim() !== '' && !titleTooLong(title);
+};
 
 /** What POST /maison/questions/:reference/answer takes. */
 export interface AnswerBody {
@@ -97,11 +134,31 @@ export interface AnswerBody {
   addToKnowledge: boolean;
   /** Only with `addToKnowledge`. */
   category?: string;
+  /** Only with `addToKnowledge`: the title of the product knowledge entry. */
+  title?: string;
 }
 
 /**
- * The body Send on LINE posts. With Add to product knowledge unticked there is no `category` key at all: the server's
- * schema refuses null and '' as a category, and a category picked before the box was unticked mustn't go with it.
+ * The body Send on LINE posts. With Add to product knowledge unticked there is no `category` or `title` key at all: the
+ * server's schema refuses null and '' for either, and what was picked or typed before the box was unticked mustn't go with it.
  */
-export const answerBody = ({ text, addToKnowledge, category }: AnswerForm): AnswerBody =>
-  addToKnowledge ? { text, addToKnowledge, category } : { text, addToKnowledge };
+export const answerBody = ({ text, addToKnowledge, category, title }: AnswerForm): AnswerBody =>
+  addToKnowledge ? { text, addToKnowledge, category, title } : { text, addToKnowledge };
+
+/** What POST …/notify and POST …/answer answer with a 200 (a `sent` ReplyOutcome on the server). */
+export interface SentReply {
+  reference: string;
+  status: 'sent';
+  /** What happened, in the server's words. */
+  message: string;
+  /** True when the customer has the message but something after it went wrong, which `message` says. */
+  warning?: boolean;
+  /** The knowledge entry the answer became. */
+  knowledgeDocumentId?: string;
+}
+
+/** The notice a 200 shows: the server's own message, as a warning when it says the message went out but something after it went wrong. */
+export const replyNotice = ({ message, warning }: { message: string; warning?: boolean }): { type: 'success' | 'warning'; message: string } => ({
+  type: warning === true ? 'warning' : 'success',
+  message,
+});

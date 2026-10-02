@@ -64,8 +64,9 @@ export const pushMessages = async (
 
 /**
  * A customer's LINE display name, from LINE's Get profile API, or null when LINE gives none within PROFILE_TIMEOUT_MS:
- * someone who isn't a friend and hasn't written to the account, a refusal, or no answer. Trimmed, and cut to fit the
- * question's `customerName`, 100 UTF-16 units, ending with "…" when it was cut.
+ * someone who isn't a friend and hasn't written to the account, a refusal, or no answer. Trimmed, with every run of
+ * whitespace inside it collapsed to one space, and cut to fit the question's `customerName`, 100 UTF-16 units, ending
+ * with "…" when it was cut.
  */
 export const getDisplayName = async ({ apiBaseUrl, token }: LineApi, userId: string): Promise<string | null> => {
   try {

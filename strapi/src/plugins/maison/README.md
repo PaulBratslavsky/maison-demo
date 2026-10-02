@@ -88,7 +88,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `search_knowledge` | MCP: browse the catalog | What Maison has written down for customers, such as care, sizing, delivery, repairs, warranty and gift wrapping: the best four published entries for a question, or none |
 | `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale`, which the visit keeps for its LINE confirmation |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
-| `hand_off_to_staff` | MCP: hand questions to staff | Hands the signed-in customer's question to Maison's client advisors, with the piece it is about when it is about one, and answers a reference like `Q-4821`. Strapi sends the customer nothing: staff reply in the LINE chat ([Customer questions](#customer-questions)). Five questions can wait for one customer at a time |
+| `hand_off_to_staff` | MCP: hand questions to staff | Hands the signed-in customer's question to Maison's client advisors, with the piece it is about when it is about one, and answers a reference like `Q-4821`. Strapi sends the customer nothing: staff reply in the LINE chat ([Customer questions](#customer-questions)). Five questions can wait for one customer at a time, and asking one again that is still waiting answers its reference |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
 | `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
@@ -98,7 +98,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
-**Errors don't throw.** They come back as `isError` results whose text is `{"error":{"code","message","hint"}}`. The codes are `not_signed_in`, `not_found`, `invalid_input`, `boutique_closed`, `in_the_past`, `too_many_open_requests`, `too_many_open_questions`, `not_published` and `not_configured`. The hint says what to do next.
+**Errors don't throw.** They come back as `isError` results whose text is `{"error":{"code","message","hint"}}`. The codes are `not_signed_in`, `not_found`, `invalid_input`, `boutique_closed`, `in_the_past`, `too_many_open_requests`, `too_many_open_questions` (MCP only: no REST route hands off a question), `not_published` and `not_configured`. The hint says what to do next.
 
 One exception on MCP: arguments that fail the MCP SDK's schema check, such as a date that isn't on the calendar, come back as plain text (`Input validation error: …`), not in the JSON error shape. Errors from the tools themselves are always JSON.
 
@@ -155,7 +155,7 @@ curl -H "Authorization: Bearer $SESSION" "$STRAPI/api/maison/my-appointments?loc
 | 400 | `invalid_input` | The shared schema rejects a value (no hint; MCP answers these as `Input validation error: …`), or a minimum price is above the maximum |
 | 401 | `not_signed_in` | A customer route has no LINE customer session. Sent with `WWW-Authenticate: Bearer` |
 | 404 | `not_found` | An unknown product, collection or boutique |
-| 409 | `boutique_closed`, `too_many_open_requests`, `too_many_open_questions` | The same request can succeed once something changes: the boutique's hours, or one of the customer's open requests or questions |
+| 409 | `boutique_closed`, `too_many_open_requests` | The same request can succeed once something changes: the boutique's hours, or one of the customer's open requests |
 | 422 | `in_the_past` | The visit starts less than 30 minutes from now |
 | 503 | `not_configured` | Customer sign-in isn't configured: oauth-mcp-manager 1.1 isn't installed |
 | 503 | `temporarily_unavailable` | Checking a customer's session failed on the server, such as a database error. It isn't a sign-out: try again. Only the REST door has this code |
@@ -301,7 +301,7 @@ Every error says why in its message, which is what the board shows.
 
 ## Customer questions
 
-When the concierge has no answer in product knowledge, or the customer asks for a person, it calls `hand_off_to_staff`. Strapi records the question for the signed-in customer under a reference like `Q-4821`, with the piece it's about and the customer's LINE name when LINE gives one, and sends the customer nothing. Staff follow up on the Maison page, under **Customer questions**.
+When the concierge has no answer in product knowledge, or the customer asks for a person, it calls `hand_off_to_staff`. Strapi records the question for the signed-in customer under a reference like `Q-4821`, with the piece it's about and the customer's LINE name when LINE gives one, and sends the customer nothing. A question the customer already has with staff (open or taken), in the same words apart from capitals and extra spaces, isn't recorded twice: the tool answers the existing reference, before it counts the five. Staff follow up on the Maison page, under **Customer questions**.
 
 **The section** refreshes every 5 seconds and filters to **Open** (open and taken questions, the default), **Answered** or **All**, newest first. Each row shows when the question came in (Tokyo time), the customer's LINE name with the masked ID under it, the piece, the question, why it was handed off ("No answer in product knowledge" or "Asked for a person"), and its status: Open, Taken by Jane, or Answered by Jane, with "Added to product knowledge" when it was. When the last LINE message for a question failed, the row says so, in LINE's words.
 
@@ -310,10 +310,10 @@ Two permissions, which an admin role holds like any other:
 | Permission | What it gives |
 |---|---|
 | Read customer questions (`plugin::maison.questions.read`) | The section, and a way into the Maison page |
-| Answer customer questions on LINE (`plugin::maison.questions.answer`) | The two buttons below |
+| Answer customer questions on LINE (`plugin::maison.questions.answer`) | The two buttons below. It needs Read customer questions too, because the buttons live in the section |
 
 - **Let them know**, on an open question, sends the customer one LINE message in the admin's first name: a person has the question and will reply in the chat. The question becomes taken.
-- **Answer**, on an open or taken question, opens a dialog with the question, a box for the answer (never pre-filled) and **Add to product knowledge**, ticked. **Send on LINE** sends the answer in the admin's name and marks the question answered. With the box ticked, it also publishes the answer as a product knowledge entry that every customer's concierge can use, so the answer should suit any customer. The entry's title is the customer's question (cut to 200 characters), in the question's language, about the question's piece, under the category the admin picked.
+- **Answer**, on an open or taken question, opens a dialog with the question, a box for the answer (never pre-filled) and **Add to product knowledge**, ticked. **Send on LINE** sends the answer in the admin's name and marks the question answered. With the box ticked, it also publishes the answer as a product knowledge entry that every customer's concierge can use, so the answer should suit any customer. The entry is in the question's language, about the question's piece, under the category the admin picked, and titled by **Title in product knowledge**: the customer's own question (cut to 200 characters) to start with, which the admin can edit. Customers see the title with the answer, so the dialog says to take out anything personal. **Send on LINE** stays disabled while the box is ticked and the title is empty.
 
 Both buttons are disabled while a request runs. Nothing guards two admins pressing them for the same question at the same moment: both messages could go out.
 
@@ -323,27 +323,27 @@ Both buttons are disabled while a request runs. Nothing guards two admins pressi
 |---|---|---|
 | `GET /maison/questions?status=open\|answered\|all` | Read customer questions | None. Answers `{ questions }` |
 | `POST /maison/questions/:reference/notify` | Answer customer questions on LINE | None |
-| `POST /maison/questions/:reference/answer` | Answer customer questions on LINE | `{ text, addToKnowledge, category }` |
+| `POST /maison/questions/:reference/answer` | Answer customer questions on LINE | `{ text, addToKnowledge, category, title }` |
 
-`text` is 1 to 2,000 characters. `addToKnowledge` defaults to `true`, and while it's true, `category` is one of `care`, `materials`, `sizing`, `personalization`, `delivery`, `returns`, `repairs`, `warranty`, `gifting` and `store`. With `addToKnowledge: false`, leave `category` out. The message is signed with the first name of the signed-in admin's account, never with anything the request says. An admin without a first name writes for the team.
+`text` is 1 to 2,000 characters. `addToKnowledge` defaults to `true`, and while it's true, `category` is one of `care`, `materials`, `sizing`, `personalization`, `delivery`, `returns`, `repairs`, `warranty`, `gifting` and `store`. With `addToKnowledge: false`, leave `category` out. `title` is 1 to 200 characters and only used while `addToKnowledge` is true: it titles the knowledge entry, and without one the customer's question (cut to 200 characters) is the title. The message is signed with the first name of the signed-in admin's account, never with anything the request says. An admin without a first name, or whose first name is the house's own, writes for the team.
 
 The two POSTs answer:
 
 | Status | When |
 |---|---|
-| 200 | LINE took the message. The answer is `{ reference, status: "sent", message }`, with `knowledgeDocumentId` when the answer became a knowledge entry |
-| 400 (`invalid_input`) | The reference isn't like `Q-4821`, `text` is empty or longer than 2,000 characters, or there's no `category` while `addToKnowledge` is true |
+| 200 | LINE took the message. The answer is `{ reference, status: "sent", message }`, with `knowledgeDocumentId` when the answer became a knowledge entry, and `warning: true` when something after the message went wrong |
+| 400 (`invalid_input`) | The reference isn't like `Q-4821`, `text` is empty or longer than 2,000 characters, `title` is empty or longer than 200 characters, or there's no `category` while `addToKnowledge` is true |
 | 404 (`not_found`) | No question has that reference |
 | 409 (`already_taken`) | Let them know, for a question someone has taken already |
 | 409 (`already_answered`) | Either POST, for an answered question |
 | 502 (`failed`) | LINE refused the message or couldn't be reached. The question stays as it was, apart from recording why, which its row shows, and nothing is saved as knowledge |
 | 503 (`not_configured`) | There's no `lineChannelAccessToken`. Nothing is sent |
 
-Every error says why in its message, which is what the page shows. A 200's `message` can carry a warning, which the page shows as it is: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The customer has the message in both cases.
+Every error says why in its message, which is what the page shows. A 200 with `warning: true` has the customer's message out, and its `message` says what went wrong after: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The page shows that `message` as a warning, and any other 200's as a success.
 
 **What the customer gets** is a LINE text message from Maison's channel, in the question's language, written in the admin's first name and quoting the question cut to 80 characters. Let them know, in English:
 
-> Hello, this is Jane, a client advisor at Maison. Thank you for your question about the Jewelry Coffret: "Can it hold a watch?" I'm looking into it and will reply here in this chat as soon as I can.
+> Hello, this is Jane, a client advisor at Maison. Thank you for your question about the Jewelry Coffret: "Can it hold a watch?" I'm looking into it and will reply here in this chat as soon as I can.\
 > Jane, Maison
 
 And an answer:
@@ -352,10 +352,10 @@ And an answer:
 >
 > Yes, a watch up to 42 mm fits.
 >
-> If anything else comes to mind, just reply here.
+> If anything else comes to mind, just reply here.\
 > Jane, Maison
 
-A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
+A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, or with the house's own as the first name ("Maison", in any case, or either `houseName` in the config), the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
 
 **Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, knowledge }`, what it deleted, and the page says so.
 

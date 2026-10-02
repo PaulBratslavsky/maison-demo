@@ -32,4 +32,10 @@ describe('the customer question content type', () => {
   it("keeps the customer's identity out of API responses", () => {
     expect(schema.attributes.customer.private).toBe(true);
   });
+
+  // The LINE name and the staff name are cut to 100 UTF-16 units before they are stored (fitUnits), which is what these hold.
+  it('holds a customer name and a staff name of 100 UTF-16 units, the length they are cut to', () => {
+    expect(schema.attributes.customerName.maxLength).toBe(100);
+    expect(schema.attributes.staffName.maxLength).toBe(100);
+  });
 });

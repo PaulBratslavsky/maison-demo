@@ -1,5 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
+import { getConfig } from '../config';
+import { fitUnits } from '../domain/text';
 import { answerInput, describeIssues, questionReferenceInput, questionsListInput } from '../mcp/schemas';
 import { fromQuery } from '../rest/query';
 import type { ReplyOutcome, ReplyStatus } from '../services/questions';
@@ -16,11 +18,8 @@ const REPLY_ERRORS: Record<Exclude<ReplyStatus, 'sent'>, string> = {
   not_configured: 'serviceUnavailable',
 };
 
-/** The signed-in admin's first name: the name staff messages are signed with. */
-const staffNameOf = (ctx): string | null => {
-  const name = ctx.state?.user?.firstname;
-  return typeof name === 'string' && name.trim() ? name.trim().slice(0, 100) : null;
-};
+/** What a staff name is cut to, in UTF-16 units: the question's `staffName` `maxLength`. */
+const NAME_LENGTH = 100;
 
 /**
  * The Customer questions section on the Maison page: the rows, Let them know, and Answer. Whoever is signed in is who
@@ -28,6 +27,21 @@ const staffNameOf = (ctx): string | null => {
  */
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const questions = () => strapi.plugin('maison').service('questions');
+
+  /**
+   * The signed-in admin's first name: the name staff messages are signed with, cut to what the question's `staffName`
+   * holds without splitting an emoji. Null makes the message speak for Maison's client advisor team: the admin has no
+   * first name, or it is the house's own, "Maison" or either name in the config, in any case, which would have the
+   * message introduce Maison as one of its own advisors and sign "Maison, Maison".
+   */
+  const staffNameOf = (ctx): string | null => {
+    const firstname = ctx.state?.user?.firstname;
+    const name = typeof firstname === 'string' ? firstname.trim() : '';
+    if (!name) return null;
+    const { houseName } = getConfig(strapi);
+    const houseNames = ['Maison', houseName.en, houseName.ja].map((house) => house.trim().toLowerCase());
+    return houseNames.includes(name.toLowerCase()) ? null : fitUnits(name, NAME_LENGTH);
+  };
 
   /**
    * A 200 with the outcome when LINE took the message. Otherwise the error that says why not: 404, 409 when the

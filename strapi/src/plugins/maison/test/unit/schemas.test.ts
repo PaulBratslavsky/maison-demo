@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { handOffToStaffInput, isoDateInput, isoDateTimeInput, questionOutput } from '../../server/src/mcp/schemas';
+import knowledgeSchema from '../../server/src/content-types/knowledge/schema.json';
+import { answerInput, handOffToStaffInput, isoDateInput, isoDateTimeInput, questionOutput } from '../../server/src/mcp/schemas';
 
 /** The messages a schema gives for a value; none when it's valid. */
 const messagesOf = (schema: typeof isoDateInput, value: string) => {
@@ -124,5 +125,65 @@ describe('questionOutput', () => {
 
   it.each(['taken', 'answered'])('is never a question that is already %s', (status) => {
     expect(questionOutput.safeParse({ reference: 'Q-4821', status, product: null }).success).toBe(false);
+  });
+});
+
+describe('answerInput, the title of the knowledge entry', () => {
+  const ANSWER = { text: 'Yes, a watch up to 42 mm fits.', addToKnowledge: true, category: 'sizing' };
+  const parse = (value: Record<string, unknown>) => answerInput.safeParse({ ...ANSWER, ...value });
+
+  it('needs no title: without one the question is the title, and the parsed answer has no title at all', () => {
+    const result = parse({});
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(ANSWER);
+    expect(Object.keys(result.data ?? {})).not.toContain('title');
+  });
+
+  it('takes a title, and trims it', () => {
+    expect(parse({ title: '  Does a watch fit in the coffret?\n' }).data?.title).toBe('Does a watch fit in the coffret?');
+  });
+
+  it.each([1, 200])('accepts a title of %i characters', (length) => {
+    expect(parse({ title: 'x'.repeat(length) }).success).toBe(true);
+  });
+
+  it('counts the title after trimming it: 200 characters between spaces are accepted', () => {
+    expect(parse({ title: ` ${'x'.repeat(200)} ` }).data?.title).toBe('x'.repeat(200));
+  });
+
+  it('counts UTF-16 units, as Strapi does for a title: 100 emoji fit, and 101 do not', () => {
+    expect(parse({ title: '😀'.repeat(100) }).success).toBe(true);
+    expect(parse({ title: '😀'.repeat(101) }).success).toBe(false);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['spaces only', '   '],
+    ['whitespace only', ' \n\t '],
+    ['201 characters', 'x'.repeat(201)],
+    ['not text', 42],
+  ])('refuses a title that is %s', (_label, title) => {
+    const result = parse({ title });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(['title']);
+  });
+
+  it("allows as many characters as a knowledge entry's title holds", () => {
+    const { maxLength } = knowledgeSchema.attributes.title;
+    expect(maxLength).toBe(200);
+    expect(parse({ title: 'x'.repeat(maxLength) }).success).toBe(true);
+    expect(parse({ title: 'x'.repeat(maxLength + 1) }).success).toBe(false);
+  });
+
+  it('accepts a title when the answer is not added to product knowledge, for the service to leave unused', () => {
+    const result = answerInput.safeParse({ text: ANSWER.text, addToKnowledge: false, title: 'Anything' });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ text: ANSWER.text, addToKnowledge: false, title: 'Anything' });
+  });
+
+  it('still needs a category to add the answer to product knowledge, whatever the title', () => {
+    const result = answerInput.safeParse({ text: ANSWER.text, addToKnowledge: true, title: 'Does a watch fit?' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(['category']);
   });
 });

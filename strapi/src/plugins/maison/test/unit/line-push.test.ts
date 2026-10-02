@@ -16,6 +16,12 @@ const HI: LineMessage[] = [{ type: 'text', text: 'Hi' }];
 const answers = (status = 200, body = '') => vi.fn(async (_url: string, _init: RequestInit) => new Response(body, { status }));
 /** `fetch` when no answer comes: it rejects with `error`. */
 const rejects = (error: unknown) => vi.fn(async (_url: string, _init: RequestInit): Promise<Response> => Promise.reject(error));
+/** `fetch` when LINE answers `status` and then the connection breaks: reading the body of the Response fails. */
+const answersThenBreaks = (status: number) =>
+  vi.fn(
+    async (_url: string, _init: RequestInit) =>
+      new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError('terminated')) }), { status })
+  );
 
 let fetchMock: ReturnType<typeof answers>;
 const useFetch = (mock: ReturnType<typeof answers>) => {
@@ -78,6 +84,15 @@ describe('pushMessages', () => {
     expect(await pushMessages(API, CUSTOMER, HI)).toEqual({ status: 'failed', detail: 'LINE answered 500.' });
   });
 
+  // LINE's status is all there is to go on when its body can't be read, so it is all the detail says.
+  it.each([
+    ['sent, for a 200, which is LINE taking the push', 200, { status: 'sent', detail: 'LINE answered 200.' }],
+    ['failed, for a 500, which is LINE refusing it', 500, { status: 'failed', detail: 'LINE answered 500.' }],
+  ])('answers %s, with its status alone, when the body of the answer cannot be read', async (_label, status, answer) => {
+    useFetch(answersThenBreaks(status));
+    expect(await pushMessages(API, CUSTOMER, HI)).toEqual(answer);
+  });
+
   it("gives LINE 8 seconds, and answers failed when it doesn't answer in time", async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout');
     useFetch(rejects(new DOMException('The operation was aborted due to timeout', 'TimeoutError')));
@@ -115,6 +130,11 @@ describe('getDisplayName', () => {
     expect(init.method ?? 'GET').toBe('GET');
     expect(init.headers).toEqual({ Authorization: 'Bearer tok' });
     expect(init.body).toBeUndefined();
+  });
+
+  it('collapses the whitespace inside the name to single spaces, as well as trimming it', async () => {
+    useFetch(answers(200, JSON.stringify({ displayName: '  Paul\n  (test)\t ' })));
+    expect(await getDisplayName(API, 'Uabc')).toBe('Paul (test)');
   });
 
   it('keeps the user ID inside the path it asks for', async () => {

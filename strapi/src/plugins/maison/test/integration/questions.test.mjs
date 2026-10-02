@@ -112,6 +112,15 @@ describe('customer questions, from the hand-off to product knowledge', () => {
     );
   });
 
+  it('answers the same reference, and records nothing, when the customer asks the same question again', async () => {
+    const again = await questions.ask({
+      subject: SUBJECT_A, question: `  CAN the coffret\n hold a   watch? `, reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en',
+    });
+    assert.deepEqual(again, { ok: true, value: { reference, status: 'open', product: { slug: 'jewelry-coffret', name: 'Jewelry Coffret' } } });
+    assert.equal(await strapi.documents(QUESTION).count({ filters: { customer: { $eq: SUBJECT_A } } }), 1, 'there is still one question');
+    assert.equal(line.requests.length, 1, 'it asked LINE for nothing: the only call is the name, from the first hand-off');
+  });
+
   it("Let them know pushes the customer one text message in Jane's name, and the question is taken", async () => {
     const outcome = await questions.notify(reference, 'Jane');
     assert.deepEqual(outcome, { reference, status: 'sent', message: `Sent the LINE message for ${reference}.` });
@@ -191,6 +200,33 @@ describe('customer questions, from the hand-off to product knowledge', () => {
     assert.ok(entry, `the entries found are ${JSON.stringify(titles)}`);
     assert.equal(entry.answer, ANSWER);
     assert.deepEqual(entry.productSlugs, ['jewelry-coffret']);
+  });
+
+  it("Answer with a title of its own gives the entry that title, and the customer's own words stay out of product knowledge", async () => {
+    // The first question is answered, so this one is not a repeat of it.
+    const asked = await questions.ask({
+      subject: SUBJECT_A, question: 'My name is Paul. Can the coffret be engraved?', reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en',
+    });
+    assert.equal(asked.ok, true, JSON.stringify(asked));
+    assert.notEqual(asked.value.reference, reference, 'a new question');
+
+    const outcome = await questions.answer(
+      asked.value.reference,
+      { text: 'Yes, with up to three initials.', addToKnowledge: true, category: 'personalization', title: 'Can the coffret be engraved?' },
+      'Jane'
+    );
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.ok(outcome.knowledgeDocumentId, 'it names the knowledge entry');
+
+    const entry = await strapi.documents(KNOWLEDGE).findOne({ documentId: outcome.knowledgeDocumentId, locale: 'en', status: 'published' });
+    assert.ok(entry, 'the entry has a published English version');
+    assert.equal(entry.title, 'Can the coffret be engraved?');
+    assert.equal(entry.answer, 'Yes, with up to three initials.');
+    assert.equal([entry.title, entry.answer, entry.keywords].join(' ').includes('Paul'), false, 'nothing of the customer is in the entry');
+    // The customer's own message still quotes their words.
+    const [message] = pushes().at(-1).body.messages;
+    assert.ok(message.text.includes('"My name is Paul. Can the coffret be engraved?"'), 'it quotes the question as asked');
+    assert.ok(message.text.includes('Yes, with up to three initials.'), 'it carries the answer');
   });
 
   it('refuses a customer’s sixth question while five are still open: too_many_open_questions', async () => {

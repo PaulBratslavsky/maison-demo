@@ -198,8 +198,9 @@ describe('Send again (notify)', () => {
 });
 
 describe('questions controller', () => {
-  /** The controller over a service that has only `methods`. */
-  const controllerOver = (methods: Record<string, unknown>) => questionsController({ strapi: fakeStrapi({ services: { questions: methods } }) });
+  /** The controller over a service that has only `methods`, and a plugin config of `config`: the defaults when there is none. */
+  const controllerOver = (methods: Record<string, unknown>, config: Record<string, unknown> = {}) =>
+    questionsController({ strapi: fakeStrapi({ services: { questions: methods }, config }) });
   /** Nothing in the request went to an error helper. */
   const expectNoError = (ctx: any) => {
     for (const helper of Object.keys(ERROR_HELPERS)) expect(ctx[helper], helper).not.toHaveBeenCalled();
@@ -268,7 +269,14 @@ describe('questions controller', () => {
   ])('$action', ({ action, body, args }) => {
     const ctxFor = (overrides: Record<string, unknown> = {}) =>
       fakeCtx({ params: { reference: 'Q-4821' }, state: { user: { firstname: 'Jane' } }, request: { body }, ...overrides });
-    const run = (service: unknown, ctx: unknown) => (controllerOver({ [action]: service }) as any)[action](ctx);
+    const run = (service: unknown, ctx: unknown, config: Record<string, unknown> = {}) =>
+      (controllerOver({ [action]: service }, config) as any)[action](ctx);
+    const staffNameFor = async (firstname: unknown, config: Record<string, unknown> = {}) => {
+      const service = vi.fn(async () => OUTCOME);
+      await run(service, ctxFor({ state: { user: { firstname } } }), config);
+      expect(service).toHaveBeenCalledOnce();
+      return (service.mock.calls[0] as unknown[]).at(-1);
+    };
 
     it("passes the signed-in admin's first name as the staff name, and answers the outcome with 200 when LINE took it", async () => {
       const service = vi.fn(async () => OUTCOME);
@@ -283,11 +291,29 @@ describe('questions controller', () => {
       expectNoError(ctx);
     });
 
-    it('answers a sent outcome as it is, with the knowledge entry it made', async () => {
-      const sent = { ...OUTCOME, knowledgeDocumentId: 'k-new' };
+    it.each([
+      ['with the knowledge entry it made', { knowledgeDocumentId: 'k-new' }],
+      [
+        'with a warning, when something after the message went wrong',
+        { message: "Sent the LINE message for Q-4821, but recording it failed (database is locked). Don't send it again.", warning: true },
+      ],
+      [
+        'with a warning and no entry, when the entry could not be added',
+        { message: "Sent the answer to Q-4821 on LINE. It couldn't be added to product knowledge: database is locked", warning: true },
+      ],
+    ])('answers a sent outcome as it is, %s, with 200', async (_label, fields) => {
+      const sent = { ...OUTCOME, ...fields };
       const ctx = ctxFor();
       await run(vi.fn(async () => sent), ctx);
+      expect(ctx.status).toBe(200);
       expect(ctx.body).toEqual(sent);
+      expectNoError(ctx);
+    });
+
+    it('answers a sent outcome with no warning as it is: there is no warning key at all', async () => {
+      const ctx = ctxFor();
+      await run(vi.fn(async () => OUTCOME), ctx);
+      expect(ctx.body).not.toHaveProperty('warning');
     });
 
     it.each([
@@ -299,11 +325,63 @@ describe('questions controller', () => {
       [null, null],
       [42, null],
       [{ first: 'Jane' }, null],
-      ['J'.repeat(150), 'J'.repeat(100)],
+      ['Mary   Ann', 'Mary Ann'],
     ])('takes %j for the first name as the staff name %j', async (firstname, staffName) => {
       const service = vi.fn(async () => OUTCOME);
       await run(service, ctxFor({ state: { user: { firstname } } }));
       expect(service).toHaveBeenCalledExactlyOnceWith(...args(staffName as string | null));
+    });
+
+    // The staff name is recorded in a field of 100 UTF-16 units, and an emoji is two of them: the name is cut like the
+    // customer's LINE name, whole characters only, ending with "…" when it was cut.
+    it.each([
+      ['100 letters stay whole', 'J'.repeat(100), 'J'.repeat(100)],
+      ['50 emoji, 100 units, stay whole', '😀'.repeat(50), '😀'.repeat(50)],
+      ['150 letters are cut to 99 and an ellipsis', 'J'.repeat(150), `${'J'.repeat(99)}…`],
+      ['60 emoji are cut to 49 and an ellipsis, none in half', '😀'.repeat(60), `${'😀'.repeat(49)}…`],
+      ['99 letters and an emoji, whose halves straddle the cut, are cut to the 99 letters', `${'J'.repeat(99)}😀`, `${'J'.repeat(99)}…`],
+    ])('cuts the staff name to 100 UTF-16 units: %s', async (_label, firstname, staffName) => {
+      const name = (await staffNameFor(firstname)) as string;
+      expect(name).toBe(staffName);
+      expect(name.length).toBeLessThanOrEqual(100);
+      expect(name).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    });
+
+    // An admin whose first name is the house's would have the message say "this is Maison, a client advisor at Maison", and
+    // sign "Maison, Maison": the message speaks for the team instead, whatever the capitals and the spaces around it.
+    it.each(['Maison', 'maison', 'MAISON', 'mAiSoN', '  Maison \n', 'メゾン', ' メゾン '])(
+      'speaks for the team, with null for the staff name, for the first name %j',
+      async (firstname) => {
+        expect(await staffNameFor(firstname)).toBeNull();
+      }
+    );
+
+    it.each(['Maisonette', 'Maison Paul', 'La Maison', 'メゾンヌ', 'Jane'])('signs with %j: it is not the house name, only like it', async (firstname) => {
+      expect(await staffNameFor(firstname)).toBe(firstname);
+    });
+
+    describe("with the house's name set in the config", () => {
+      const config = { houseName: { ja: 'アトリエ・ルージュ', en: 'Atelier Rouge' } };
+
+      it.each(['Atelier Rouge', 'atelier rouge', ' ATELIER ROUGE ', 'アトリエ・ルージュ', ' アトリエ・ルージュ\n'])(
+        'speaks for the team for the first name %j: either of the two names',
+        async (firstname) => {
+          expect(await staffNameFor(firstname, config)).toBeNull();
+        }
+      );
+
+      it.each(['Maison', 'maison'])('still speaks for the team for %j', async (firstname) => {
+        expect(await staffNameFor(firstname, config)).toBeNull();
+      });
+
+      it.each(['Jane', 'Atelier', 'Rouge'])('signs with %j', async (firstname) => {
+        expect(await staffNameFor(firstname, config)).toBe(firstname);
+      });
+
+      it('takes the names with the spaces around them left out, as the config may have them', async () => {
+        expect(await staffNameFor('Atelier Rouge', { houseName: { ja: ' アトリエ ', en: ' Atelier Rouge ' } })).toBeNull();
+        expect(await staffNameFor('アトリエ', { houseName: { ja: ' アトリエ ', en: ' Atelier Rouge ' } })).toBeNull();
+      });
     });
 
     it.each([
@@ -414,6 +492,50 @@ describe('questions controller', () => {
       const { service, done } = answer({ ...ANSWER, text: `  ${ANSWER.text}\n` });
       await done;
       expect(service.mock.calls[0][1].text).toBe(ANSWER.text);
+    });
+
+    describe('the title in product knowledge', () => {
+      it('passes the title along with the answer, trimmed, for the service to use', async () => {
+        const { service, done } = answer({ ...ANSWER, title: '  Does a watch fit in the coffret?\n' });
+        await done;
+        expect(service).toHaveBeenCalledExactlyOnceWith('Q-4821', { ...ANSWER, title: 'Does a watch fit in the coffret?' }, 'Jane');
+      });
+
+      it('passes no title when the body has none: the service makes the customer’s question the title', async () => {
+        const { service, done } = answer(ANSWER);
+        await done;
+        expect(service.mock.calls[0][1]).not.toHaveProperty('title');
+      });
+
+      it.each([1, 200])('accepts a title of %i characters', async (length) => {
+        const { service, ctx, done } = answer({ ...ANSWER, title: 'x'.repeat(length) });
+        await done;
+        expect(service).toHaveBeenCalledOnce();
+        expectNoError(ctx);
+      });
+
+      it.each([
+        ['an empty title', ''],
+        ['a title of spaces', '  \n '],
+        ['a title of 201 characters', 'x'.repeat(201)],
+        ['a title that is not text', 42],
+        ['a title that is null', null],
+      ])('refuses %s with 400 invalid_input, saying it is the title, before calling the service', async (_label, title) => {
+        const { service, ctx, done } = answer({ ...ANSWER, title });
+
+        await done;
+
+        expect(ctx.status).toBe(400);
+        expect(ctx.body.error.message).toMatch(/^title: /);
+        expect(ctx.body.error.details.code).toBe('invalid_input');
+        expect(service).not.toHaveBeenCalled();
+      });
+
+      it('passes a title along with addToKnowledge false, for the service to leave unused', async () => {
+        const { service, done } = answer({ text: ANSWER.text, addToKnowledge: false, title: 'Anything' });
+        await done;
+        expect(service).toHaveBeenCalledExactlyOnceWith('Q-4821', { text: ANSWER.text, addToKnowledge: false, title: 'Anything' }, 'Jane');
+      });
     });
 
     it.each([1, 2000])('accepts an answer of %i characters', async (length) => {

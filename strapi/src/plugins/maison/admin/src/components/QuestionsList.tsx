@@ -14,6 +14,7 @@ import {
   Thead,
   Tr,
   Typography,
+  VisuallyHidden,
 } from '@strapi/design-system';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
@@ -23,9 +24,11 @@ import {
   askedAt,
   canAnswer as canAnswerQuestion,
   canLetThemKnow,
+  replyNotice,
   statusLabel,
   type AnswerBody,
   type QuestionStatus,
+  type SentReply,
   type StaffQuestion,
 } from '../questions';
 import { AnswerDialog } from './AnswerDialog';
@@ -84,14 +87,15 @@ export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; r
 
   /**
    * Let them know, or Answer (with its body): Strapi sends the LINE message in the signed-in admin's name. The notice is
-   * the server's own message, which also says when LINE took the message but something after it went wrong. A sent
-   * answer closes its dialog; a refused one leaves it open, with what was written. Then the list reloads.
+   * the server's own message: a warning when it says LINE took the message but something after it went wrong, a
+   * success otherwise. A sent answer closes its dialog; a refused one leaves it open, with what was written. Then the
+   * list reloads.
    */
   const send = async (reference: string, action: Sending['action'], body?: AnswerBody) => {
     setSending({ reference, action });
     try {
-      const { data } = await post<{ message: string }>(`/maison/questions/${reference}/${action}`, body);
-      toggleNotification({ type: 'success', message: data.message });
+      const { data } = await post<SentReply>(`/maison/questions/${reference}/${action}`, body);
+      toggleNotification(replyNotice(data));
       if (action === 'answer') setAnswering(null);
     } catch (error) {
       // Why nothing went out, in the server's words: it's taken or answered already, LINE refused it, or the token is missing.
@@ -104,7 +108,7 @@ export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; r
   const isSending = (question: StaffQuestion, action: Sending['action']) =>
     sending?.reference === question.reference && sending.action === action;
 
-  const columns = ['Reference', 'Asked', 'Customer', 'Piece', 'Question', 'Why', 'Status', ...(canAnswer ? [''] : [])];
+  const columns = ['Reference', 'Asked', 'Customer', 'Piece', 'Question', 'Why', 'Status'];
 
   return (
     <Flex direction="column" alignItems="stretch" gap={4}>
@@ -147,7 +151,7 @@ export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; r
           <Typography textColor="neutral600">{EMPTY[filter]}</Typography>
         </Box>
       ) : (
-        <Table colCount={columns.length} rowCount={questions.length + 1}>
+        <Table colCount={columns.length + (canAnswer ? 1 : 0)} rowCount={questions.length + 1}>
           <Thead>
             <Tr>
               {columns.map((column) => (
@@ -155,6 +159,11 @@ export const QuestionsList = ({ canAnswer, refreshKey }: { canAnswer: boolean; r
                   <Typography variant="sigma">{column}</Typography>
                 </Th>
               ))}
+              {canAnswer && (
+                <Th>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </Th>
+              )}
             </Tr>
           </Thead>
           <Tbody>

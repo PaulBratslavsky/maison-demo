@@ -10,8 +10,8 @@ const TITLE_LENGTH = 200;
 export const quoteOf = (question: string): string => teaser(question, QUOTE_LENGTH);
 
 /**
- * A knowledge entry's title, from the question it answers, cut to the 200 UTF-16 units Strapi's `maxLength` counts: a
- * question of emoji still fits.
+ * A knowledge entry's title, from the question it answers or the title staff wrote for it, with its whitespace collapsed
+ * and cut to the 200 UTF-16 units Strapi's `maxLength` counts: a question of emoji still fits.
  */
 export const knowledgeTitleOf = (question: string): string => fitUnits(question, TITLE_LENGTH);
 

@@ -160,12 +160,18 @@ export const questionsListInput = z.object({
   limit: z.number().int().min(1).max(100).optional(),
 });
 
-/** What staff send with Answer: the text for the customer, and whether it also becomes product knowledge, under a category. */
+/**
+ * What staff send with Answer: the text for the customer, and whether it also becomes product knowledge, under a
+ * category and with a title. The title is what customers see over the answer in the concierge, so staff can write it
+ * in place of the customer's own words. It is used only while `addToKnowledge` is true, and without one the title is
+ * the customer's question.
+ */
 export const answerInput = z
   .object({
     text: z.string().trim().min(1).max(2000),
     addToKnowledge: z.boolean().optional().default(true),
     category: z.enum(KNOWLEDGE_CATEGORIES).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
   })
   .refine((reply) => !reply.addToKnowledge || reply.category !== undefined, {
     message: 'Pick a category to add the answer to product knowledge.',

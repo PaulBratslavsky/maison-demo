@@ -22,7 +22,7 @@ const COFFRET: Piece[] = [
 ];
 
 interface WorldOptions {
-  /** How many open or taken questions the customer has. */
+  /** How many open or taken questions the customer has, besides any in `rows`, each about something else. */
   waiting?: number;
   /** The references some question already has. */
   taken?: string[];
@@ -33,19 +33,29 @@ interface WorldOptions {
 }
 
 /**
- * The Document Service as the questions service reads and writes it. `count` answers by what it is asked: the
- * open-question count filters on `customer`, the reference check on `reference`, and anything else is a mistake in
- * the service. A piece is found only in its own language, and only in the status asked for. `create` and `findMany`
- * are kept, for a test to read what was stored and asked.
+ * The Document Service as the questions service reads and writes it. `count` answers the reference check, which filters
+ * on `reference`, and anything else is a mistake in the service. `findMany` answers a customer's open or taken
+ * questions, as the database would, from `waiting` questions about other things and `rows`, and answers the list's own
+ * query with `rows` as they are. A piece is found only in its own language, and only in the status asked for. `create`
+ * and `findMany` are kept, for a test to read what was stored and asked.
  */
 const world = ({ waiting = 0, taken = [], pieces = [], rows = [], config = {} }: WorldOptions = {}) => {
   const count = vi.fn(async ({ filters }: Doc) => {
     if (filters?.reference) return taken.filter((reference) => reference === filters.reference.$eq).length;
-    if (filters?.customer) return waiting;
     throw new Error(`count was asked something these tests don't know: ${JSON.stringify(filters)}`);
   });
+  const others: Doc[] = Array.from({ length: waiting }, (_, index) => ({
+    reference: `Q-${2000 + index}`,
+    customer: SUBJECT,
+    question: `Another question, number ${index + 1}?`,
+    status: 'open',
+  }));
   const create = vi.fn(async ({ data }: { data: Doc }) => ({ documentId: 'doc-new', ...data }));
-  const findMany = vi.fn(async (_params: Doc) => rows);
+  const findMany = vi.fn(async ({ filters }: Doc) =>
+    filters?.customer
+      ? [...others, ...rows].filter((row) => row.customer === filters.customer.$eq && filters.status.$in.includes(row.status))
+      : rows
+  );
   const findFirst = vi.fn(
     async ({ locale, status, filters }: Doc) =>
       pieces.find((piece) => piece.locale === locale && (piece.status ?? 'published') === status && piece.slug === filters?.slug?.$eq) ?? null
@@ -251,13 +261,192 @@ describe('questions.ask, the limit', () => {
   });
 
   it('counts only this customer, and only their open or taken questions', async () => {
-    const { service, count } = world({ waiting: 4 });
+    const { service, findMany } = world({ waiting: 4 });
 
     const result = await service.ask(input);
 
-    expect(count).toHaveBeenNthCalledWith(1, { filters: { customer: { $eq: SUBJECT }, status: { $in: ['open', 'taken'] } } });
+    expect(findMany).toHaveBeenNthCalledWith(1, { filters: { customer: { $eq: SUBJECT }, status: { $in: ['open', 'taken'] } } });
     // The fifth question is still allowed.
     expect(result.ok).toBe(true);
+  });
+
+  it('counts a question that is taken as one of the five, and an answered one as none', async () => {
+    const other = { reference: 'Q-3000', customer: SUBJECT, question: 'Is there a warranty?' };
+    expect(await world({ waiting: 4, rows: [{ ...other, status: 'taken' }] }).service.ask(input)).toMatchObject({ ok: false, code: 'too_many_open_questions' });
+    expect((await world({ waiting: 4, rows: [{ ...other, status: 'answered' }] }).service.ask(input)).ok).toBe(true);
+  });
+});
+
+describe('questions.ask, a question the customer has handed over already', () => {
+  /** Q-4821 as the Document Service holds it: this customer's open question, in English, about the coffret. */
+  const EXISTING: Doc = {
+    documentId: 'doc-1',
+    reference: 'Q-4821',
+    customer: SUBJECT,
+    question: ASKED,
+    reason: 'no_answer',
+    language: 'en',
+    productSlug: 'jewelry-coffret',
+    status: 'open',
+  };
+  const REPEAT = { ...input, productSlug: 'jewelry-coffret', locale: 'en' as const };
+  const ANSWER_OF_EXISTING = {
+    ok: true,
+    value: { reference: 'Q-4821', status: 'open', product: { slug: 'jewelry-coffret', name: 'Jewelry Coffret' } },
+  };
+
+  it('answers the reference it has, and creates nothing, when the same question is asked again', async () => {
+    const { service, create } = world({ rows: [EXISTING], pieces: COFFRET });
+
+    expect(await service.ask(REPEAT)).toEqual(ANSWER_OF_EXISTING);
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['spaces around it', `  ${ASKED}  `],
+    ['a line break and a tab for spaces', 'Can the coffret\nhold\ta watch?'],
+    ['runs of spaces', 'Can  the   coffret hold a   watch?'],
+    ['other capitals', 'CAN THE Coffret hold a WATCH?'],
+    ['all of that at once', '\n CAN  the coffret\r\n\thold   a Watch?  '],
+  ])('takes the same words with %s for the same question', async (_label, question) => {
+    const { service, create } = world({ rows: [EXISTING], pieces: COFFRET });
+
+    expect(await service.ask({ ...REPEAT, question })).toEqual(ANSWER_OF_EXISTING);
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('takes a full-width space for a space, so a question in Japanese matches as well', async () => {
+    const stored = { ...EXISTING, language: 'ja', question: '腕時計は 入りますか？', productSlug: null };
+    const { service, create } = world({ rows: [stored] });
+
+    const result = await service.ask({ subject: SUBJECT, question: '腕時計は\u3000入りますか？', reason: 'no_answer', locale: 'ja' });
+
+    expect(result).toEqual({ ok: true, value: { reference: 'Q-4821', status: 'open', product: null } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['another question', 'Can the coffret hold two watches?'],
+    ['the same words and more', `${ASKED} And a ring?`],
+    ['the same words with another between them', 'Can the jewelry coffret hold a watch?'],
+    ['the same words after a greeting', `Hello! ${ASKED}`],
+  ])('records %s as a question of its own', async (_label, question) => {
+    const { service, create } = world({ rows: [EXISTING], pieces: COFFRET });
+
+    const result = await service.ask({ ...REPEAT, question });
+
+    const stored = storedBy(create);
+    expect(stored.question).toBe(question);
+    expect(stored.reference).not.toBe('Q-4821');
+    expect(result).toMatchObject({ ok: true, value: { reference: stored.reference } });
+  });
+
+  it('records a question that is only the beginning of the one the customer has as a question of its own', async () => {
+    const { service, create } = world({ rows: [{ ...EXISTING, question: `${ASKED} And a ring?` }], pieces: COFFRET });
+
+    const result = await service.ask(REPEAT);
+
+    expect(storedBy(create).question).toBe(ASKED);
+    expect(result).toMatchObject({ ok: true, value: { reference: storedBy(create).reference } });
+    expect(storedBy(create).reference).not.toBe('Q-4821');
+  });
+
+  it('answers status open for a question staff have taken, as the tool says it for every question', async () => {
+    const { service, create } = world({ rows: [{ ...EXISTING, status: 'taken', staffName: 'Jane' }], pieces: COFFRET });
+
+    expect(await service.ask(REPEAT)).toEqual(ANSWER_OF_EXISTING);
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("looks only at this customer's open or taken questions", async () => {
+    const { service, findMany } = world({ rows: [EXISTING], pieces: COFFRET });
+
+    await service.ask(REPEAT);
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({ filters: { customer: { $eq: SUBJECT }, status: { $in: ['open', 'taken'] } } });
+  });
+
+  it.each([
+    ['answered', { status: 'answered' }],
+    ['another customer’s', { customer: `line:U${'b'.repeat(32)}` }],
+  ])('records the question when the same words are in a question that is %s', async (_label, fields) => {
+    const { service, create } = world({ rows: [{ ...EXISTING, ...fields }], pieces: COFFRET });
+
+    const result = await service.ask(REPEAT);
+
+    expect(storedBy(create).reference).not.toBe('Q-4821');
+    expect(result).toMatchObject({ ok: true, value: { status: 'open' } });
+  });
+
+  it("finds the question among the customer's others", async () => {
+    const rows = [
+      { ...EXISTING, reference: 'Q-1111', question: 'Is there a warranty?' },
+      { ...EXISTING, reference: 'Q-2222' },
+      { ...EXISTING, reference: 'Q-3333', question: 'Can it be engraved?' },
+    ];
+    const { service, create } = world({ rows, pieces: COFFRET });
+
+    expect(await service.ask(REPEAT)).toMatchObject({ ok: true, value: { reference: 'Q-2222' } });
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  describe('before the limit', () => {
+    it('never counts a repeat against it: a customer with five waiting questions, one of them this, gets the reference', async () => {
+      const { service, create } = world({ waiting: 4, rows: [EXISTING], pieces: COFFRET });
+
+      expect(await service.ask(REPEAT)).toEqual(ANSWER_OF_EXISTING);
+
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a question that is not a repeat, at the limit, whatever else the customer has waiting', async () => {
+      const { service, create } = world({ waiting: 4, rows: [EXISTING], pieces: COFFRET });
+
+      const result = await service.ask({ ...REPEAT, question: 'Can the coffret hold two watches?' });
+
+      expect(result).toMatchObject({ ok: false, code: 'too_many_open_questions' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('what it answers', () => {
+    it("names the existing question's piece in the chat's language, with the default language filling in", async () => {
+      const { service } = world({ rows: [EXISTING], pieces: COFFRET });
+      expect(await service.ask({ ...REPEAT, locale: 'ja' })).toMatchObject({
+        ok: true,
+        value: { reference: 'Q-4821', product: { slug: 'jewelry-coffret', name: 'ジュエリー・コフレ' } },
+      });
+
+      const onlyJapanese = world({ rows: [EXISTING], pieces: [COFFRET[0]] });
+      expect(await onlyJapanese.service.ask(REPEAT)).toMatchObject({ ok: true, value: { product: { name: 'ジュエリー・コフレ' } } });
+    });
+
+    it("answers the piece the existing question has, not the one this asking names: that is what staff see", async () => {
+      const aboutNothing = world({ rows: [{ ...EXISTING, productSlug: null }], pieces: COFFRET });
+      expect(await aboutNothing.service.ask(REPEAT)).toEqual({ ok: true, value: { reference: 'Q-4821', status: 'open', product: null } });
+      expect(aboutNothing.findFirst).not.toHaveBeenCalled();
+
+      const otherPiece = world({ rows: [EXISTING], pieces: [...COFFRET, { slug: 'weekender-50', name: 'Weekender 50', locale: 'en' }] });
+      expect(await otherPiece.service.ask({ ...REPEAT, productSlug: 'weekender-50' })).toEqual(ANSWER_OF_EXISTING);
+    });
+
+    it('answers no piece when the existing question’s piece is no longer published', async () => {
+      const { service } = world({ rows: [EXISTING], pieces: COFFRET.map((piece) => ({ ...piece, status: 'draft' as const })) });
+      expect(await service.ask(REPEAT)).toEqual({ ok: true, value: { reference: 'Q-4821', status: 'open', product: null } });
+    });
+
+    it('asks LINE for no name, and looks for no reference, for a question it will not record', async () => {
+      const { service, count } = world({ rows: [EXISTING], pieces: COFFRET, config: WITH_TOKEN });
+
+      await service.ask(REPEAT);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(count).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -282,8 +471,8 @@ describe('questions.ask, the reference', () => {
     await expect(service.ask(input)).rejects.toThrow('[maison] Could not find a free question reference after 20 attempts.');
 
     expect(create).not.toHaveBeenCalled();
-    // The count of open questions, then 20 references.
-    expect(count).toHaveBeenCalledTimes(21);
+    // The 20 references it looked for.
+    expect(count).toHaveBeenCalledTimes(20);
   });
 });
 
@@ -360,13 +549,13 @@ describe('questions.list', () => {
   it('puts the newest first, and shows 50 by default', async () => {
     const { service, findMany } = world();
     await service.list();
-    expect(findMany.mock.calls[0][0]).toMatchObject({ sort: { createdAt: 'desc' }, limit: 50 });
+    expect(findMany.mock.calls[0][0]).toMatchObject({ sort: 'createdAt:desc', limit: 50 });
   });
 
   it('shows as many as it is asked for', async () => {
     const { service, findMany } = world();
     await service.list({ status: 'answered', limit: 5 });
-    expect(findMany.mock.calls[0][0]).toMatchObject({ sort: { createdAt: 'desc' }, limit: 5 });
+    expect(findMany.mock.calls[0][0]).toMatchObject({ sort: 'createdAt:desc', limit: 5 });
   });
 
   it('shows an open question: the customer masked, and nothing from staff or LINE yet', async () => {

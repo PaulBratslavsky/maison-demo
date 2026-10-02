@@ -145,6 +145,7 @@ describe('questions.notify', () => {
       data: { status: 'taken', staffName: 'Jane', takenAt: NOW, lineOutcome: 'sent', lineDetail: '' },
     });
     expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message: 'Sent the LINE message for Q-4821.' });
+    expect(outcome).not.toHaveProperty('warning');
   });
 
   it.each([
@@ -222,6 +223,8 @@ describe('questions.notify', () => {
       expect(stored).toMatchObject({ status: 'open', staffName: null, takenAt: null, lineOutcome: 'failed', lineDetail: detail });
       expect(outcome).toEqual({ reference: 'Q-4821', status: 'failed', message: `The LINE message for Q-4821 wasn't sent. ${detail}` });
       expect(outcome.message.startsWith("The LINE message for Q-4821 wasn't sent.")).toBe(true);
+      // Nothing went out, so it is an error for the admin to read, not a warning on a message that did.
+      expect(outcome).not.toHaveProperty('warning');
     });
 
     it("records that LINE couldn't be reached", async () => {
@@ -392,7 +395,7 @@ describe('questions.notify', () => {
       const outcome = await service.notify('Q-4821', 'Jane', NOW);
 
       const message = `Sent the LINE message for Q-4821, but recording it failed (${reason}). Don't send it again.`;
-      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message });
+      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message, warning: true });
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(strapi.log.error).toHaveBeenCalledExactlyOnceWith(`[maison] ${message}`);
       expect(strapi.log.info).not.toHaveBeenCalled();
@@ -469,6 +472,7 @@ describe('questions.answer', () => {
       message: 'Sent the answer to Q-4821 on LINE. Added it to product knowledge.',
       knowledgeDocumentId: 'k-new',
     });
+    expect(outcome).not.toHaveProperty('warning');
   });
 
   it('pushes first, then creates the entry, then publishes it, and records it all on the question last', async () => {
@@ -544,6 +548,83 @@ describe('questions.answer', () => {
     expect(update.mock.calls[0][0].data.answer).toBe(TEXT);
   });
 
+  // The title is what customers see over the answer in the concierge, so staff can write it in place of the customer's words.
+  describe('the title of the knowledge entry', () => {
+    const TITLE = 'Does a watch fit in the coffret?';
+    const titleOfEntry = (createEntry: World['createEntry']): string => createEntry.mock.calls[0][0].data.title;
+
+    it("is the title staff wrote, in place of the customer's question", async () => {
+      const { service, createEntry, publishEntry } = world();
+
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title: TITLE }, 'Jane', NOW);
+
+      expect(createEntry).toHaveBeenCalledExactlyOnceWith({
+        locale: 'en',
+        data: { title: TITLE, answer: TEXT, category: 'sizing', productSlugs: ['jewelry-coffret'], keywords: '' },
+      });
+      expect(publishEntry).toHaveBeenCalledExactlyOnceWith({ documentId: 'k-new', locale: 'en' });
+    });
+
+    it("leaves the message to the customer quoting their own words, and the question's record without a title", async () => {
+      const { service, update } = world();
+
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title: TITLE }, 'Jane', NOW);
+
+      expect(pushed().message.text).toBe(answerText({ language: 'en', staffName: 'Jane', question: ASKED, productName: 'Jewelry Coffret', answer: TEXT }));
+      expect(pushed().message.text).not.toContain(TITLE);
+      expect(update.mock.calls[0][0].data).not.toHaveProperty('title');
+    });
+
+    it.each([
+      ['given none', undefined],
+      ['given a title of only spaces', '  \n '],
+      ['given an empty title', ''],
+    ])("is the customer's question when the service is %s", async (_label, title) => {
+      const { service, createEntry } = world();
+
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title }, 'Jane', NOW);
+
+      expect(titleOfEntry(createEntry)).toBe(ASKED);
+    });
+
+    it('is cut to the 200 UTF-16 units Strapi allows, as a question is: no emoji is split', async () => {
+      const long = `Does a watch fit ${'😀'.repeat(150)} in the coffret?`;
+      const { service, createEntry } = world();
+
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title: long }, 'Jane', NOW);
+
+      const title = titleOfEntry(createEntry);
+      expect(title).toBe(knowledgeTitleOf(long));
+      expect(title.length).toBeLessThanOrEqual(200);
+      expect(title.endsWith('…')).toBe(true);
+      expect(title).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    });
+
+    it('has its whitespace collapsed and its ends trimmed, as a question does', async () => {
+      const { service, createEntry } = world();
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title: '  Does a watch\n fit   in the coffret? ' }, 'Jane', NOW);
+      expect(titleOfEntry(createEntry)).toBe(TITLE);
+    });
+
+    it('is written in the question’s language along with the entry', async () => {
+      const { service, createEntry } = world({ question: { ...OPEN, language: 'ja', question: '腕時計は入りますか？' } });
+
+      await service.answer('Q-4821', { ...ADD_TO_KNOWLEDGE, title: 'コフレに腕時計は入りますか' }, 'Jane', NOW);
+
+      expect(createEntry.mock.calls[0][0]).toMatchObject({ locale: 'ja', data: { title: 'コフレに腕時計は入りますか' } });
+    });
+
+    it('is not used, and nothing is created, when the answer is not added to product knowledge', async () => {
+      const { service, createEntry, publishEntry } = world();
+
+      const outcome = await service.answer('Q-4821', { ...ONLY_SEND, title: TITLE }, 'Jane', NOW);
+
+      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message: 'Sent the answer to Q-4821 on LINE.' });
+      expect(createEntry).not.toHaveBeenCalled();
+      expect(publishEntry).not.toHaveBeenCalled();
+    });
+  });
+
   describe('without adding it to product knowledge', () => {
     it('sends the answer and records it, and creates and publishes nothing', async () => {
       const { service, update, createEntry, publishEntry } = world();
@@ -559,6 +640,7 @@ describe('questions.answer', () => {
       expect(update.mock.calls[0][0].data).not.toHaveProperty('knowledgeDocumentId');
       expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message: 'Sent the answer to Q-4821 on LINE.' });
       expect(outcome).not.toHaveProperty('knowledgeDocumentId');
+      expect(outcome).not.toHaveProperty('warning');
     });
 
     it('creates nothing even when a category came with it', async () => {
@@ -655,7 +737,7 @@ describe('questions.answer', () => {
 
       const message =
         'Sent the answer to Q-4821 on LINE. It couldn\'t be added to product knowledge: productSlugs contains "NOPE"; use product slugs like "weekender-50"';
-      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message });
+      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message, warning: true });
       expect(outcome).not.toHaveProperty('knowledgeDocumentId');
       expect(publishEntry).not.toHaveBeenCalled();
       expect(update).toHaveBeenCalledExactlyOnceWith({
@@ -676,6 +758,7 @@ describe('questions.answer', () => {
         reference: 'Q-4821',
         status: 'sent',
         message: "Sent the answer to Q-4821 on LINE. It couldn't be added to product knowledge: database is locked",
+        warning: true,
       });
       expect(update.mock.calls[0][0].data).not.toHaveProperty('knowledgeDocumentId');
       expect(stored).toMatchObject({ status: 'answered', knowledgeDocumentId: null });
@@ -703,7 +786,7 @@ describe('questions.answer', () => {
       const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
 
       const message = `Sent the answer to Q-4821 on LINE, but recording it failed (${reason}). Don't send it again.`;
-      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message });
+      expect(outcome).toEqual({ reference: 'Q-4821', status: 'sent', message, warning: true });
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(strapi.log.error).toHaveBeenCalledExactlyOnceWith(`[maison] ${message}`);
       expect(strapi.log.info).not.toHaveBeenCalled();
@@ -716,6 +799,7 @@ describe('questions.answer', () => {
       const outcome = await service.answer('Q-4821', ONLY_SEND, 'Jane', NOW);
 
       expect(outcome.message).toBe("Sent the answer to Q-4821 on LINE, but recording it failed (database is locked). Don't send it again.");
+      expect(outcome.warning).toBe(true);
       expect(createEntry).not.toHaveBeenCalled();
     });
 
