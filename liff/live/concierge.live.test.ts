@@ -133,6 +133,21 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
   });
   afterAll(() => stopMock());
 
+  /** One English turn through the real route, as the app sends it: the stream's events. */
+  const turn = async (text: string) => {
+    const response = await POST(
+      new Request('http://localhost:3003/api/concierge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ locale: 'en', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] }),
+      })
+    );
+    expect(response.status).toBe(200);
+    return sseEvents(await response.text());
+  };
+  const toolsIn = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'tool-input-available').map((event) => event.toolName as string);
+  const textOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta as string).join('');
+
   it('answers the demo question from the catalog tools, and names only products they returned', async () => {
     const response = await POST(
       new Request('http://localhost:3003/api/concierge', {
@@ -235,5 +250,24 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
       expect(datesIn(reply, year).filter((date) => date !== saturday), `the ${which} reply names another date. ${trace}`).toEqual([]);
       expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the ${which} reply names another weekday. ${trace}`).toEqual([]);
     }
+  });
+
+  it("answers a care question from Maison's product knowledge", async () => {
+    const events = await turn('How do I care for the leather?');
+    const answer = textOf(events);
+    const found = events
+      .filter((event) => event.type === 'tool-output-available')
+      .flatMap((event) => (event.output?.structuredContent?.entries as Array<{ title: string }> | undefined) ?? []);
+    expect(toolsIn(events), answer).toContain('search_knowledge');
+    expect(found.map((entry) => entry.title), answer).toContain('How do I care for the leather?');
+    expect(toolsIn(events), answer).not.toContain('hand_off_to_staff');
+    expect(answer, 'the answer uses the entry').toMatch(/cloth|sunlight|balm/i);
+  });
+
+  it("sends a question Maison hasn't written about to the LINE chat", async () => {
+    const events = await turn('Can I pay in bitcoin?');
+    const answer = textOf(events);
+    expect(toolsIn(events), answer).toContain('search_knowledge');
+    expect(toolsIn(events), answer).toContain('hand_off_to_staff');
   });
 });

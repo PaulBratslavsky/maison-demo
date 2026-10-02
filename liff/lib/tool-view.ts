@@ -1,0 +1,61 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
+import { COPY } from './copy';
+import { toolErrorOf } from './mcp';
+import type { Appointment, Locale, ProductCard } from './types';
+
+/** What the chat needs from AI SDK 7's dynamic-tool UI part (MCP tools arrive as dynamic tools). */
+export interface ToolPart {
+  toolName: string;
+  state: string;
+  output?: unknown;
+  errorText?: string;
+}
+
+/**
+ * A message part as a tool call, or null when it isn't one. MCP tools arrive as `dynamic-tool` parts, which carry their
+ * name. The concierge's own tools (resolve_date, hand_off_to_staff) arrive as `tool-<name>` parts, with the name in the type.
+ */
+export const toolPartOf = (part: { type: string }): ToolPart | null => {
+  if (part.type === 'dynamic-tool') return part as unknown as ToolPart;
+  if (part.type.startsWith('tool-')) return { ...part, toolName: part.type.slice('tool-'.length) } as unknown as ToolPart;
+  return null;
+};
+
+/** The concierge's own tools. They aren't Maison tools, so their lines say "Local", not "MCP". */
+const LOCAL_TOOLS = ['resolve_date', 'hand_off_to_staff'];
+
+/** What `resolve_date` returned, for its line: the weekday and date the model was given. */
+const resolvedDay = (output: unknown): string | null => {
+  const day = output as { date?: unknown; weekday?: unknown } | null;
+  return typeof day?.date === 'string' && typeof day.weekday === 'string' ? `${day.weekday} ${day.date}` : null;
+};
+
+/**
+ * What a tool call shows in the chat, built from its structuredContent, never from the model's text: its line ("MCP ·
+ * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "… ✕ boutique_closed"), the products a
+ * search found, the appointment a request made, and whether a hand-off went through, for the note and the LINE chat
+ * button under it.
+ */
+export const toolView = (part: ToolPart, locale: Locale) => {
+  const t = COPY[locale];
+  const local = LOCAL_TOOLS.includes(part.toolName);
+  const output = part.state === 'output-available' ? (part.output as CallToolResult) : null;
+  const error = output ? toolErrorOf(output) : null;
+  const failed = part.state === 'output-error' || error !== null;
+  const data = output && !error ? (output.structuredContent as Record<string, unknown> | undefined) : undefined;
+  const list = Object.values(data ?? {}).find(Array.isArray) as unknown[] | undefined;
+  const answer = local && !failed ? resolvedDay(part.output) : null;
+  const status = part.state.startsWith('input')
+    ? '…'
+    : failed
+      ? `✕ ${error?.code ?? 'error'}`
+      : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
+  return {
+    line: `${local ? 'Local' : 'MCP'} · ${part.toolName} ${status}`,
+    failed,
+    products: part.toolName === 'search_products' && Array.isArray(data?.products) ? (data.products as ProductCard[]) : null,
+    appointment: part.toolName === 'request_appointment' ? ((data?.appointment as Appointment | undefined) ?? null) : null,
+    handOff: part.toolName === 'hand_off_to_staff' && part.state === 'output-available' && !failed,
+  };
+};

@@ -129,6 +129,7 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 - **The local model** is Qwen3 14B with a 32k context: `ollama pull qwen3:14b`, then `ollama create qwen3-14b-32k -f Modelfile` with a `Modelfile` of `FROM qwen3:14b` and `PARAMETER num_ctx 32768`. Any Ollama model that calls tools works through `OLLAMA_MODEL`.
 - **Qwen3 is slower:** about 20–60 seconds a turn, where Claude takes seconds.
 - **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its tool line reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
+- **Product questions go to product knowledge.** For care, sizing, delivery, repairs, warranty, gift wrapping and the like, the concierge calls `search_knowledge` and answers only from the entries it returns. When none answers, it calls `hand_off_to_staff`, a local tool like `resolve_date`. Its line reads `Local · hand_off_to_staff ✓`, with "Our team answers questions like this in Maison's LINE chat." and **Chat with Maison on LINE** under it. Nothing reaches staff from the app yet: the customer asks in the chat.
 - **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
 - **Strapi runs no model.** The concierge's is the demo's only model.
@@ -207,6 +208,8 @@ console.log("Added maison-ops to", file);
 | 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
 | 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
+
+**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". The line under the reply reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi.
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
 

@@ -65,6 +65,9 @@ export const COPY = {
     // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
     lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
+    // Under the concierge's hand_off_to_staff line, above "Chat with Maison on LINE" (components/chat-parts.tsx). Nothing
+    // reaches staff from the app yet: the customer asks in Maison's LINE chat.
+    handOff: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
     // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
     // Account: on My visits under `line`, on a visit's page, and after a booking. For a customer who hasn't added Maison
     // yet (liff.getFriendship() in LINE mode), the add-friend words take their place (lineChatWords in lib/line-chat.ts).
@@ -162,6 +165,7 @@ export const COPY = {
     confirmationSent: 'Confirmed · LINE sent',
     lineSent: 'LINE sent',
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
+    handOff: "Our team answers questions like this in Maison's LINE chat.",
     lineChat: {
       button: 'Chat with Maison on LINE',
       line: 'Your confirmation arrives in the Maison chat.',

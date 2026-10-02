@@ -223,12 +223,12 @@ describe('handleConcierge', () => {
     expect(instructions).toContain('Reply in English');
   });
 
-  it('gives the model resolve_date next to the Maison tools', async () => {
+  it('gives the model resolve_date and hand_off_to_staff next to the Maison tools', async () => {
     const model = replyModel();
     const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
     const createMcpClient = vi.fn(async () => ({ tools: async () => ({ search_products: search }), close: vi.fn(async () => {}) }));
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['hand_off_to_staff', 'resolve_date', 'search_products']);
   });
 
   /**
@@ -325,6 +325,16 @@ describe('handleConcierge', () => {
     expect(events.some((event) => event.type === 'tool-input-error' || event.type === 'tool-output-error')).toBe(true);
     // The step after it, the model is shown the reason, so it can ask again with one.
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('exactly one of weekday, date or relative');
+  });
+
+  it('answers hand_off_to_staff with handedOff, whatever blanks or extra keys the model sends', async () => {
+    for (const input of [{}, { question: null, locale: 'en' }]) {
+      const { createMcpClient } = fakeMcp();
+      const model = callsThenReplies('hand_off_to_staff', input);
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient, model }));
+      const result = eventsOf(await response.text()).find((event) => event.type === 'tool-output-available');
+      expect(result?.output, JSON.stringify(input)).toEqual({ handedOff: true });
+    }
   });
 
   it("resolves next week's weekday and the day after tomorrow through the tool, in the reply language", async () => {
@@ -674,6 +684,16 @@ describe('conciergeInstructions', () => {
   it('forbids saying a visit is confirmed, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
       expect(conciergeInstructions(locale, now), locale).toMatch(/Never say a visit is confirmed\. Say it is requested, and that the boutique will confirm it on LINE/);
+    }
+  });
+
+  it('sends questions about policies to search_knowledge, and the ones it has no answer to, to hand_off_to_staff, in both reply languages', () => {
+    for (const locale of ['en', 'ja'] as const) {
+      const text = conciergeInstructions(locale, now);
+      expect(text, locale).toMatch(/call search_knowledge with the customer's own words/);
+      expect(text, locale).toMatch(/Answer only from the entries it returns, and never invent a policy, a price or a time\./);
+      expect(text, locale).toMatch(/If no entry answers the question, call hand_off_to_staff/);
+      expect(text, locale).toMatch(/Never say the team will contact them\./);
     }
   });
 
