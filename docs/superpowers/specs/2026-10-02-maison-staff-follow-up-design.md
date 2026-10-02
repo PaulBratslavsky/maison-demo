@@ -16,11 +16,11 @@ Ask, answer from knowledge or from a person, and the person's answer becomes kno
 
 1. **Ask about this piece.** A product page gets **Ask about this piece**. It opens the concierge with that piece in context, so "Can it hold a watch?" means that piece.
 2. **Answered from knowledge** when an entry fits, as product knowledge already does.
-3. **Otherwise the question goes to staff.** The concierge calls `hand_off_to_staff`. Strapi records the question for the signed-in customer, with the piece, and gives it a reference such as `Q-4821`.
+3. **Otherwise the question goes to staff.** When the knowledge search finds nothing, the app's server calls `hand_off_to_staff` itself, so the record doesn't depend on the model. The concierge calls it when the customer asks for a person, or when the entries it found don't answer. Strapi records the question for the signed-in customer, with the piece, and gives it a reference such as `Q-4821`.
 4. **The customer is told exactly what happens next:** the concierge has no reliable answer, Maison's client advisors have the question, and they reply in the LINE chat with Maison between 11:00 and 20:00, Japan time. A button opens that chat with the question already typed in.
 5. **Staff see the question on the Maison page,** under **Customer questions**: when it came in, the customer's LINE name, the piece, the question, why it was handed off, and its status.
 6. **Let them know** sends one LINE message in the staff member's own name: "Hello, this is Jane, a client advisor at Maison. Thank you for your question about the Jewelry Coffret… I'm looking into it and will reply here in this chat as soon as I can." The question is then taken by Jane.
-7. **Answer** sends the answer on LINE in Jane's name. With **Add to product knowledge** ticked (the default), it also becomes a published knowledge entry for that piece. The next customer who asks gets the answer at once.
+7. **Answer** sends the answer on LINE in Jane's name. With **Add to product knowledge** ticked (the default), it also becomes a published knowledge entry for that piece, under a title Jane can edit, which starts as the customer's question. The next customer who asks gets the answer at once.
 8. **Jane carries on in the LINE chat,** in LINE Official Account Manager, once Paul turns chat on.
 
 ## What the research changed
@@ -49,16 +49,25 @@ Left for later, from the research: an always-visible "Ask an advisor" button, `l
 
 ### The hand-off
 
-- **`hand_off_to_staff` moves into Strapi,** as a Maison MCP tool, so Strapi records the question. The app's local tool of the same name goes. The chat line becomes `MCP · hand_off_to_staff ✓`.
+- **`hand_off_to_staff` moves into Strapi,** as a Maison MCP tool, so Strapi records the question. The app's local tool of the same name goes. The chat line for the model's own call is `MCP · hand_off_to_staff ✓`.
+- **When the knowledge search finds nothing, the app's server calls Strapi's `hand_off_to_staff` itself,** so the record doesn't depend on the model. The local model searched, found nothing, skipped the call and wrote that the question was with the advisors: nothing was recorded, and its words were false.
+  - **What it sends:** the customer's last message as the question, the reason `no_answer`, the chat's language, and the piece the search was about. That is the one piece the search names, when it names exactly one; else the page's piece, when the search names none or includes it; else none. A customer on the Jewelry Coffret's page who asks about the Weekender has the Weekender recorded, so staff see it, and an answer saved to knowledge is tagged to it.
+  - **Once per request.** After a question is recorded, by the server or by the model, the model's own call in the same request returns the same reference and doesn't reach Strapi. A hand-off that failed doesn't count, so a retry does.
+  - **The model gets one sentence saying so,** added to the search's result: the question was passed to Maison's client advisors as `Q-4821`, and it needn't call `hand_off_to_staff` for it.
+  - **The note sits under `MCP · search_knowledge ✓ 0 results`:** the server's call has no line of its own.
+  - **The model's own call remains** for `asked_for_person`, and for searches that found entries which don't answer.
+  - **The cost:** an empty search the model ran for a question that isn't a policy question records one for staff too. In a Japanese chat every search is empty, because the knowledge is English only, so every question about a policy there goes to staff. Strapi's limit of five open questions, and its refusal to record the same open question twice (see the tool), keep that from piling up.
 - **The concierge's rules** (rules 9 and 10 in `lib/concierge.ts`):
-  - When no knowledge entry answers, call `hand_off_to_staff` with the customer's question in their own words, the reason `no_answer`, and the piece's slug when it's about one piece. Then say, in one or two sentences, that there's no reliable answer, the question is with Maison's client advisors, and they'll reply in the LINE chat.
-  - When the customer asks for a person, call it at once with the reason `asked_for_person`.
+  - When no knowledge entry answers, call `hand_off_to_staff` with the customer's question in their own words, the reason `no_answer`, and the piece's slug when it's about one piece. Then say, in one short sentence, that there's no reliable answer and the question is with Maison's client advisors. The note shows where and when they reply, and the concierge never promises a time itself.
+  - Never say a question is with the advisors unless `hand_off_to_staff`, or the search's own hand-off, succeeded for it, in this reply or an earlier one.
+  - When the customer asks for a person, call `hand_off_to_staff` at once with the reason `asked_for_person`.
   - Hand off a question once. If it's already with the advisors, say so.
-- **Under the hand-off's tool line,** a note and a button replace step 2's note:
+- **Under the line of the call that recorded the question,** a note and a button replace step 2's note:
   - English: "Your question is with Maison's client advisors (Q-4821). They reply in your LINE chat with Maison, 11:00–20:00 Japan time."
   - Japanese: 「ご質問（Q-4821）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。」
   - The button, **Send it in the LINE chat** (「LINEトークで送る」), opens `https://line.me/R/oaMessage/<basic ID>/?<text>`, the chat with Maison with this already typed in: "Question for a Maison advisor (Q-4821): <the question>" (「アドバイザーへの質問（Q-4821）：<the question>」). Without the setting `NEXT_PUBLIC_LINE_OA_ID`, there's no button.
-- **A failed hand-off** (the tool returns an error) shows the usual red tool line, and the concierge says what the error's hint says. Step 2's plain chat button stays as the fallback.
+- **A failed hand-off by the model's own call** (the tool returns an error) shows the usual red tool line, and the concierge says what the error's hint says. Step 2's plain chat button stays as the fallback, under a note that says only where the team answers.
+- **A failed hand-off by the app's server** shows that plain note and button, under the search's line, and a log line on the server: Strapi refused it, it broke on the way, or its answer had no reference. There is no red line, because the search itself went through. A hand-off cut short because the customer closed the chat isn't a failure, and isn't logged.
 
 ## The staff side (Strapi)
 
@@ -68,7 +77,7 @@ Left for later, from the research: an always-visible "Ask an advisor" button, `l
 - Columns: Reference, Asked (Tokyo time), Customer (LINE name, with the masked ID under it), Piece, Question, Why ("No answer in product knowledge" or "Asked for a person"), Status, and the actions.
 - **Status:** Open; Taken by Jane; Answered by Jane, with "Added to product knowledge" when it was. When the last LINE message failed, the row says so, in LINE's words.
 - **Let them know,** on an open question: sends the acknowledgement. The question becomes taken.
-- **Answer,** on an open or taken question: a dialog with the question, a text box (never pre-filled), **Add to product knowledge** (ticked), and a category, needed only while the box is ticked. **Send on LINE** sends the answer. The hint under the text box: "It's sent on LINE in your name. With the box ticked, it's also saved as product knowledge, so write it for any customer."
+- **Answer,** on an open or taken question: a dialog with the question, a text box (never pre-filled), **Add to product knowledge** (ticked), an editable **Title in product knowledge**, pre-filled with the question, and a category, needed only while the box is ticked. The title is what every customer sees over the answer in the concierge, so staff see it before it's published, and can rewrite it. **Send on LINE** sends the answer. The hint under the text box: "It's sent on LINE in your name. With the box ticked, it's also saved as product knowledge, so write it for any customer."
 - Only staff who may answer see the buttons.
 
 ### Permissions
@@ -85,18 +94,18 @@ The names end in `ask`, `read` and `answer`, never `review`: the admin's `useRBA
 
 - `GET /maison/questions?status=open|answered|all` (read): `{ questions: StaffQuestionView[] }`.
 - `POST /maison/questions/:reference/notify` (answer): sends the acknowledgement.
-- `POST /maison/questions/:reference/answer` (answer), body `{ text, addToKnowledge, category }`: sends the answer, and saves it as knowledge.
+- `POST /maison/questions/:reference/answer` (answer), body `{ text, addToKnowledge, category, title }`: sends the answer, and saves it as knowledge, under `title`, which is optional: without one the entry's title is the question.
 
 | Outcome | Notify | Answer |
 |---|---|---|
 | Sent | 200 | 200, with `knowledgeDocumentId` when it was saved |
-| Bad input | 400 | 400 (text 1–2,000 characters, a category while `addToKnowledge` is true) |
+| Bad input | 400 | 400 (text 1–2,000 characters, a category while `addToKnowledge` is true, a title of 1–200 characters when there is one) |
 | No such question | 404 | 404 |
 | Taken already (notify), or answered already | 409 | 409 |
 | LINE refused or didn't answer | 502, and the question is unchanged | 502, unchanged, nothing saved |
 | No LINE token in Strapi | 503 | 503 |
 
-The staff member's name is the signed-in admin's first name. Without one, the messages speak for "Maison's client advisors".
+The staff member's name is the signed-in admin's first name. Without one, the messages speak for "Maison's client advisors". A first name equal to the house name (Maison, メゾン) counts as no name, so a message never reads "this is Maison, a client advisor at Maison".
 
 ### Reset
 
@@ -158,7 +167,7 @@ Not localized, no draft and publish, and hidden from the Content Manager and the
 
 ### The knowledge entry an answer becomes
 
-In the question's language, published at once: the question as its title (cut to 200 characters), the answer, the category staff picked, the piece's slug in `productSlugs` (or none), and no keywords. The title carries most of the search weight, so a customer asking the same thing in other words still finds it.
+In the question's language, published at once: the title staff confirmed in the dialog, which starts as the question (cut to 200 characters), the answer, the category staff picked, the piece's slug in `productSlugs` (or none), and no keywords. The title carries most of the search weight, so a customer asking the same thing in other words still finds it. It's public, since every customer who finds the entry sees it, which is why staff see it in the dialog and can rewrite it first.
 
 ## The tool: `hand_off_to_staff`
 
@@ -166,10 +175,11 @@ In the question's language, published at once: the question as its title (cut to
 - **Input:** `question` (1–1,000 characters, the customer's own words), `reason` (`no_answer` by default, or `asked_for_person`), an optional `productSlug`, and `locale`.
 - **The customer comes from the session,** never from the arguments, as in every customer tool.
 - **A limit:** five questions per customer still open or taken. Past that: `too_many_open_questions`, with the hint to tell the customer their earlier questions are with the advisors, who will reply in the LINE chat.
+- **No duplicates:** Strapi doesn't record the same open question twice for a customer. When one of their open or taken questions has the same text, once case and spacing are ignored, the tool answers with that question's reference and records nothing new.
 - **An unknown `productSlug` never refuses the hand-off.** It's dropped, so the question still reaches staff.
 - **The LINE name** comes from LINE's Get profile API, with Strapi's channel token, within 3 seconds. Without a token, or when LINE doesn't answer, the question is saved without it.
 - **Output:** `{ question: { reference, status: "open", product: { slug, name } | null } }`.
-- **Known limit of the POC:** the record depends on the model calling the tool. The full spec logs every turn from the app's server instead.
+- **Known limit of the POC:** the record still depends on the model calling the tool in two cases: the customer asks for a person (`asked_for_person`), and the search found entries that don't answer. A search that finds nothing is recorded by the app's server. The full spec logs every turn from the server instead.
 
 ## The code
 
@@ -180,7 +190,7 @@ In the question's language, published at once: the question as its title (cut to
 | `hand_off_to_staff` | `server/src/mcp/tools/hand-off-to-staff.ts` |
 | The admin routes and the section | `server/src/controllers/questions.ts`, `admin/src/components/QuestionsList.tsx`, `admin/src/components/AnswerDialog.tsx` |
 | The app | `lib/concierge.ts`, `lib/tool-view.ts`, `lib/line-chat.ts`, `components/chat-parts.tsx`, `app/concierge/page.tsx`, `app/products/[slug]/page.tsx`, `lib/copy.ts` |
-| Setup, and a LINE stand-in for local tests | `strapi/scripts/maison-setup.mjs`; `strapi/config/plugins.ts` reads `MAISON_LINE_API_BASE_URL`, unset everywhere but local tests |
+| Setup, and a LINE stand-in for local tests | `strapi/scripts/maison-setup.mjs`; `scripts/line-stand-in.mjs` (`npm run line:stand-in`); `strapi/config/plugins.ts` reads `MAISON_LINE_API_BASE_URL`, unset everywhere but local tests |
 
 ## Security and privacy
 
@@ -195,14 +205,13 @@ In the question's language, published at once: the question as its title (cut to
 - Labels, sentiment and queues (spec step 4).
 - A reply box in Strapi for a conversation. Staff reply in LINE's own chat.
 - A LINE webhook, so customers' chat messages reach Strapi.
-- Logging every turn on the server (spec step 3), instead of relying on the model's call.
 - A guard for two staff pressing Let them know or Answer on the same question at the same moment: both could send. The buttons disable while one person's request runs.
 
 ## Testing
 
 - **Unit:** the push helpers (moved, same behaviour), the message builder in both languages, with and without a piece and a name; the service (record, the open limit, an unknown slug dropped, the LINE name with and without a token, the list masked and filtered, notify and answer with each outcome, the knowledge entry); the tool; the routes; the controller's status codes.
 - **Integration:** with a session and the LINE stand-in: the tool records a question, the list shows it masked with the LINE name, notify pushes one message quoting the question, answer pushes the answer and `search_knowledge` then finds it.
-- **App:** the tool view's reference, the note and the chat link with the typed-in text, the product instruction, rules 9 and 10.
+- **App:** the tool view's reference, the note and the chat link with the typed-in text, the product instruction, rules 9 and 10, and the server-side hand-off: what it sends (the question, the reason, the piece the search was about), that it records once per request, what it adds to the search's result, the failures it logs, and the stream it writes read back as the page reads it.
 - **In the browser, locally,** against the LINE stand-in: ask about a piece, get handed off, see the question in Strapi, answer it with knowledge ticked, and ask again to get the answer from knowledge.
 
 ## What Paul switches on
