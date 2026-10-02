@@ -484,7 +484,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `7b63867` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. The demo doesn't change Maison: it only configures it, in `strapi/config/plugins.ts`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `27fb8a6` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. The demo doesn't change Maison: it only configures it, in `strapi/config/plugins.ts`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 

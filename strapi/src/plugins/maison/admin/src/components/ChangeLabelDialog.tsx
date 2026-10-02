@@ -6,6 +6,7 @@ import {
   KIND_OPTIONS,
   SENTIMENT_OPTIONS,
   canSaveLabels,
+  kindNeededNotice,
   labelBody,
   labelForm,
   type LabelBody,
@@ -59,7 +60,8 @@ export const ChangeLabelDialog = ({
               {HINT}
             </Typography>
 
-            <Field.Root>
+            {/* A sentiment alone isn't saved for an inquiry with no kind: the notice says why Save label is disabled, in the server's words. */}
+            <Field.Root error={kindNeededNotice(form, inquiry) ?? undefined}>
               <Field.Label>Kind</Field.Label>
               <SingleSelect
                 value={form.kind}
@@ -73,6 +75,7 @@ export const ChangeLabelDialog = ({
                   </SingleSelectOption>
                 ))}
               </SingleSelect>
+              <Field.Error />
             </Field.Root>
 
             <Field.Root>

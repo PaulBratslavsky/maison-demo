@@ -83,8 +83,9 @@ describe('what labelling sends to Anthropic', () => {
 
 /*
  * What labelling.sweep makes of a failure rests on the classes the SDK throws for them, and these are those, from the real
- * provider: a refused key is an APICallError with its status, one request and no retry; a call that never gets an answer
- * is retried twice, and ends as a RetryError; an answer in the wrong shape is a NoObjectGeneratedError.
+ * provider: a status the API answers with (a refused key or model, or a request it rejects) is an APICallError with that
+ * status, one request and no retry; a call that never gets an answer is retried twice, and ends as a RetryError; an answer
+ * in the wrong shape is a NoObjectGeneratedError.
  */
 describe('what the SDK throws when the Messages API fails', () => {
   const service = () => labelling({ strapi: fakeStrapi({ config: { aiProvider: 'anthropic', aiApiKey: KEY } }) });
@@ -103,7 +104,11 @@ describe('what the SDK throws when the Messages API fails', () => {
   it.each([
     [401, 'authentication_error', 'invalid x-api-key'],
     [403, 'permission_error', 'Your API key does not have permission to use the specified resource.'],
-  ])('is an APICallError with status %i, after one request, when the key is refused', async (status, type, message) => {
+    // A model name Anthropic doesn't know, which is what a wrong AI_MODEL gives.
+    [404, 'not_found_error', 'model: claude-nope'],
+    // A request it rejects: the sweep counts that against the inquiry it was about, and goes on.
+    [400, 'invalid_request_error', 'messages: text content blocks must be non-empty'],
+  ])('is an APICallError with status %i, after one request, when the API answers it', async (status, type, message) => {
     failing.with = failure(status, type, message);
 
     const error = await thrownBy(service().label(EXCHANGE));

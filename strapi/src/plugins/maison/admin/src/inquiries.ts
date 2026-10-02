@@ -283,6 +283,19 @@ export const canSaveLabels = (form: LabelForm, current: Labels): boolean => {
   return Object.keys(body).length > 0 && (body.kind !== undefined || current.kind !== null);
 };
 
+/** What the server answers, with `invalid_input`, when Change label gets a sentiment alone for an inquiry with no kind. A test holds this equal to it. */
+const PICK_A_KIND = 'Pick a kind too.';
+
+/**
+ * What the dialog of Change label says under Kind while Save label is disabled for want of a kind: staff changed the
+ * sentiment of an inquiry that has no kind, and picked none. The server's own words for that body, so the page explains the
+ * disabled button in the words the server would refuse it with. Nothing otherwise.
+ */
+export const kindNeededNotice = (form: LabelForm, current: Labels): string | null => {
+  const { kind, sentimentLabel } = labelBody(form, current);
+  return sentimentLabel !== undefined && kind === undefined && current.kind === null ? PICK_A_KIND : null;
+};
+
 /** A count LINE reports. */
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 

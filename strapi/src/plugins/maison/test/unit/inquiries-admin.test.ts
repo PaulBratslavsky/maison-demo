@@ -19,6 +19,7 @@ import {
   introText,
   isSummary,
   kindLabel,
+  kindNeededNotice,
   labelBody,
   labelForm,
   labelNote,
@@ -597,6 +598,49 @@ describe('the labels the dialog of Change label sends', () => {
 
     if (result.ok === false) throw new Error(result.message);
     expect(result.value).toMatchObject({ kind: 'complaint', sentimentLabel: 'negative', humanCorrected: true, queue: 'complaint' });
+  });
+
+  // Save label is disabled for want of a kind, and the dialog says so under Kind, in the words the server refuses it with.
+  describe('what the dialog says under Kind', () => {
+    it('is "Pick a kind too." when staff pick only a sentiment for an inquiry that has no kind', () => {
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, UNLABELLED)).toBe('Pick a kind too.');
+      expect(kindNeededNotice({ kind: 'angry', sentimentLabel: 'negative' }, UNLABELLED)).toBe('Pick a kind too.');
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'neutral' }, { kind: null, sentimentLabel: 'positive' })).toBe('Pick a kind too.');
+    });
+
+    it('is nothing once a kind is picked, for an inquiry that has one, and while nothing is changed', () => {
+      expect(kindNeededNotice({ kind: 'praise', sentimentLabel: 'positive' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice({ kind: 'praise', sentimentLabel: '' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'negative' }, MODEL)).toBeNull();
+      expect(kindNeededNotice({ kind: 'question', sentimentLabel: 'negative' }, MODEL)).toBeNull();
+      expect(kindNeededNotice({ kind: '', sentimentLabel: '' }, UNLABELLED)).toBeNull();
+      expect(kindNeededNotice(labelForm(MODEL), MODEL)).toBeNull();
+      // A sentiment the inquiry has already is no change, so there is nothing to ask a kind for.
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, { kind: null, sentimentLabel: 'positive' })).toBeNull();
+    });
+
+    // Only the sentiment-alone rule disables Save label for a change: the notice shows exactly when it does.
+    it('shows exactly when Save label is disabled for want of a kind, for every pick of kind and sentiment', () => {
+      const picks = ['', ...INQUIRY_KINDS, 'angry'];
+      const sentiments = ['', ...SENTIMENT_LABELS, '3'];
+      const rows: Array<Pick<StaffInquiry, 'kind' | 'sentimentLabel'>> = [MODEL, UNLABELLED, { kind: null, sentimentLabel: 'positive' }, { kind: 'other', sentimentLabel: null }];
+      for (const row of rows) {
+        for (const kind of picks) {
+          for (const sentimentLabel of sentiments) {
+            const form = { kind, sentimentLabel };
+            const changesSomething = Object.keys(labelBody(form, row)).length > 0;
+            expect(kindNeededNotice(form, row) !== null, JSON.stringify({ form, row })).toBe(changesSomething && !canSaveLabels(form, row));
+          }
+        }
+      }
+    });
+
+    it("is the server's own words for that refusal", async () => {
+      const refused = await worldOf({ kind: null }).service.changeLabel('inq-x', { sentimentLabel: 'positive' });
+
+      expect(refused).toMatchObject({ ok: false, code: 'invalid_input' });
+      expect(kindNeededNotice({ kind: '', sentimentLabel: 'positive' }, UNLABELLED)).toBe((refused as { message: string }).message);
+    });
   });
 });
 

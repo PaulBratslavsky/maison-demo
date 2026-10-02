@@ -59,9 +59,18 @@ const OTHER: Labels = { kind: 'other', sentimentScore: 0, sentimentLabel: 'neutr
 /** An answer that doesn't fit the labels (a sentiment of 3): the SDK checks it against the schema, and throws NoObjectGeneratedError. */
 const WRONG_SHAPE = { ...COMPLAINT, sentimentScore: 3 };
 
-/** What the SDK throws when the API refuses the key: an APICallError with that status, which no retry can fix. */
-const refusedKey = (statusCode: number, message = 'invalid x-api-key') =>
+/** What the SDK throws when the API answers with an error status: an APICallError with that status. A 400, 401, 403, 404, 413 or 422 is not retried. */
+const apiError = (statusCode: number, message = 'invalid x-api-key') =>
   new APICallError({ message, url: 'https://api.anthropic.com/v1/messages', requestBodyValues: {}, statusCode });
+
+/** What the SDK throws for a connection that never came up, when nothing retried it into a RetryError: an APICallError with no status, as no answer came. */
+const unreachable = () =>
+  new APICallError({
+    message: 'Cannot connect to API: connect ECONNREFUSED 127.0.0.1:11434',
+    url: 'http://127.0.0.1:11434/v1/chat/completions',
+    requestBodyValues: {},
+    isRetryable: false,
+  });
 
 /** What the SDK throws for a connection that never came up: a retryable APICallError, which it tries three times before it gives up. */
 const droppedConnection = () =>
@@ -646,25 +655,31 @@ describe('labelling.sweep, an answer in the wrong shape', () => {
 });
 
 /*
- * A refused key, no answer, or any other failure that isn't about what the model said: no verdict on the inquiry. Every
- * row would meet it, so it changes nothing on the row (no status, no attempt, no write), and the sweep ends after one
- * warning that says which kind it was, to try again on the next sweep. A wrong key or a dropped connection parks nothing.
+ * A failure that says nothing against the inquiry: the provider refusing the key or the setup (401, 403 or 404), or giving no
+ * answer. Every row would meet it until it is fixed, so it changes nothing on the row (no status, no attempt, no write), and
+ * the sweep ends after one warning that says which kind it was, to try again on the next sweep. A wrong key, a wrong model
+ * name or a dropped connection parks nothing. Every other failure counts against the row, as a wrong answer does.
  */
-describe('labelling.sweep, a key the API refuses', () => {
-  const REFUSED = stopped('The AI provider refused the API key', 'invalid x-api-key');
+describe('labelling.sweep, a key or a setup the API refuses', () => {
+  const refusedWith = (reason: string) => stopped('The AI provider refused the key or the setup', reason);
 
-  it.each([401, 403])('leaves every row as it was on a %i: no status change, no attempt, no write, and one warning that says why', async (status) => {
-    const { result, update, stored, before, strapi } = await sweptOver(modelAnswering(() => refusedKey(status)));
+  it.each([
+    [401, 'invalid x-api-key'],
+    [403, 'Your API key does not have permission to use the specified resource.'],
+    // A model name the provider doesn't know, which is what a wrong AI_MODEL gives.
+    [404, 'model: claude-nope'],
+  ])('leaves every row as it was on a %i: no status change, no attempt, no write, and one warning that says why', async (status, message) => {
+    const { result, update, stored, before, strapi } = await sweptOver(modelAnswering(() => apiError(status, message)));
 
     expect(result).toEqual({ labelled: 0, failed: 0, skipped: 0 });
     expect(update).not.toHaveBeenCalled();
     expect(stored).toEqual(before);
-    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(REFUSED);
+    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(refusedWith(message));
     expect(strapi.log.error).not.toHaveBeenCalled();
   });
 
-  it('ends the batch: the rows after it are not tried in the same sweep', async () => {
-    const model = modelAnswering(() => refusedKey(401));
+  it.each([401, 404])('ends the batch on a %i: the rows after it are not tried in the same sweep', async (status) => {
+    const model = modelAnswering(() => apiError(status));
 
     await sweptOver(model);
 
@@ -672,7 +687,7 @@ describe('labelling.sweep, a key the API refuses', () => {
   });
 
   it('keeps what the rows before it got, and leaves it and the rows after it as they were', async () => {
-    const model = modelAnswering((message) => (message === 'Message of inq-2' ? refusedKey(401) : COMPLAINT));
+    const model = modelAnswering((message) => (message === 'Message of inq-2' ? apiError(401) : COMPLAINT));
     const { service, stored, strapi } = world({ rows: WAITING(), model });
 
     expect(await service.sweep()).toEqual({ labelled: 1, failed: 0, skipped: 0 });
@@ -682,21 +697,21 @@ describe('labelling.sweep, a key the API refuses', () => {
       ['inq-2', 'pending', 0],
       ['inq-3', 'pending', 0],
     ]);
-    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(REFUSED);
+    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(refusedWith('invalid x-api-key'));
     expect(strapi.log.info).toHaveBeenCalledExactlyOnceWith('[maison] Labelling sweep: 1 labelled, 0 failed, 0 skipped.');
   });
 
   it('adds no attempt to a row that failed before: it keeps the count it had', async () => {
     const rows = [row('inq-1', { analysisStatus: 'failed', analysisAttempts: 2 })];
-    const { service, stored } = world({ rows, model: modelAnswering(() => refusedKey(401)) });
+    const { service, stored } = world({ rows, model: modelAnswering(() => apiError(401)) });
 
     await service.sweep();
 
     expect(stored[0]).toMatchObject({ analysisStatus: 'failed', analysisAttempts: 2 });
   });
 
-  it('parks nothing, however many sweeps meet it: every row is labelled as soon as the key is right', async () => {
-    const { service, stored } = world({ rows: WAITING(), model: modelAnswering(() => refusedKey(401)) });
+  it.each([401, 404])('parks nothing, however many sweeps meet a %i: every row is labelled as soon as the key or the model is right', async (status) => {
+    const { service, stored } = world({ rows: WAITING(), model: modelAnswering(() => apiError(status)) });
 
     for (let sweep = 1; sweep <= MAX_LABEL_ATTEMPTS + 2; sweep += 1) {
       expect(await service.sweep(), `sweep ${sweep}`).toEqual({ labelled: 0, failed: 0, skipped: 0 });
@@ -712,13 +727,13 @@ describe('labelling.sweep, a key the API refuses', () => {
   });
 
   it('cuts the API key out of what it logs', async () => {
-    const model = modelAnswering(() => refusedKey(401, `Incorrect API key provided: ${KEY}. Check ${KEY} at the console.`));
+    const model = modelAnswering(() => apiError(401, `Incorrect API key provided: ${KEY}. Check ${KEY} at the console.`));
     const { service, strapi } = world({ rows: [row('inq-1')], model });
 
     await service.sweep();
 
     expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(
-      stopped('The AI provider refused the API key', 'Incorrect API key provided: [key]. Check [key] at the console.')
+      stopped('The AI provider refused the key or the setup', 'Incorrect API key provided: [key]. Check [key] at the console.')
     );
     // Every argument of every log call. JSON.stringify of the loggers themselves is `{}`, which would pass whatever was logged.
     const logged = JSON.stringify(Object.values(strapi.log).flatMap((method: any) => method.mock.calls));
@@ -734,6 +749,11 @@ describe('labelling.sweep, no answer from the model', () => {
     ['a RetryError, which the SDK throws once its retries are used up', gaveUp, 'Failed after 3 attempts. Last error: AI_APICallError: Cannot connect to API: connect ECONNREFUSED 127.0.0.1:11434'],
     ['a timeout', () => new DOMException('The operation was aborted due to timeout', 'TimeoutError'), 'The operation was aborted due to timeout'],
     ['an abort', () => new DOMException('This operation was aborted', 'AbortError'), 'This operation was aborted'],
+    // A connection that never came up and was not retried into a RetryError: an APICallError that has no status because no answer came.
+    ['a connection that never came up, as an APICallError with no status', unreachable, 'Cannot connect to API: connect ECONNREFUSED 127.0.0.1:11434'],
+    // The fetch failure itself, as Node's fetch and a browser's say it: the SDK's own check for a connection that never came up.
+    ['the fetch failure itself', () => new TypeError('fetch failed'), 'fetch failed'],
+    ["the fetch failure in a browser's words", () => new TypeError('Failed to fetch'), 'Failed to fetch'],
   ] as const)('leaves every row as it was on %s: no status change, no attempt, no write, and one warning that says why', async (_what, failure, reason) => {
     const { result, update, stored, before, strapi } = await sweptOver(modelAnswering(() => failure()));
 
@@ -744,8 +764,12 @@ describe('labelling.sweep, no answer from the model', () => {
     expect(strapi.log.error).not.toHaveBeenCalled();
   });
 
-  it('ends the batch: the rows after it are not tried in the same sweep', async () => {
-    const model = modelAnswering(() => gaveUp());
+  it.each([
+    ['a RetryError', gaveUp],
+    ['a connection that never came up', unreachable],
+    ['the fetch failure itself', () => new TypeError('fetch failed')],
+  ] as const)('ends the batch on %s: the rows after it are not tried in the same sweep', async (_what, failure) => {
+    const model = modelAnswering(() => failure());
 
     await sweptOver(model);
 
@@ -815,45 +839,95 @@ describe('labelling.sweep, no answer from the model', () => {
   });
 });
 
+// Anything the sweep doesn't know says nothing about the whole setup, so it counts against the row it met, as a wrong answer does:
+// the row fails, is parked after its fifth attempt, and the sweep goes on with the next row. The log is what it always was.
 describe('labelling.sweep, any other failure', () => {
-  const OTHER = 'It failed for another reason';
+  it('marks the row failed with one more attempt, writes none of the labels, and logs the reason', async () => {
+    const rows = [row('inq-1', { analysisAttempts: 1 })];
+    const { service, update, stored, strapi } = world({ rows, model: modelAnswering(() => new Error('503 Service Unavailable')) });
 
-  it.each([
-    ['an error the SDK has no class for', () => new Error('503 Service Unavailable'), '503 Service Unavailable'],
-    ['a refusal that is not about the key, such as a model that does not exist', () => refusedKey(404, 'model: claude-nope'), 'model: claude-nope'],
-  ] as const)('leaves every row as it was on %s, ends the batch, and gives one warning', async (_what, failure, reason) => {
-    const model = modelAnswering(() => failure());
-    const { result, update, stored, before, strapi } = await sweptOver(model);
+    const result = await service.sweep();
 
-    expect(result).toEqual({ labelled: 0, failed: 0, skipped: 0 });
-    expect(update).not.toHaveBeenCalled();
-    expect(stored).toEqual(before);
-    expect(model.doGenerateCalls).toHaveLength(1);
-    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(stopped(OTHER, reason));
+    expect(result).toEqual({ labelled: 0, failed: 1, skipped: 0 });
+    expect(update).toHaveBeenCalledExactlyOnceWith({ documentId: 'inq-1', data: { analysisStatus: 'failed', analysisAttempts: 2 } });
+    expect(stored[0]).toMatchObject({ ...NO_LABELS, analysisStatus: 'failed', analysisAttempts: 2, queue: 'none', modelVersion: null, promptVersion: null });
+    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(
+      `[maison] Labelling inquiry inq-1 failed (attempt 2 of ${MAX_LABEL_ATTEMPTS}): 503 Service Unavailable`
+    );
   });
 
-  it('logs a failure that is not an Error as it is', async () => {
-    const { service, stored, strapi } = world({ rows: [row('inq-1')], model: modelAnswering(() => Promise.reject('The connection reset.')) });
+  // A status that comes with one inquiry's own text (a 400, a 413, a 422) must never block the rows behind it.
+  it.each([
+    ['a 400', () => apiError(400, 'Your request was rejected'), 'Your request was rejected'],
+    ['a 413', () => apiError(413, 'Request too large'), 'Request too large'],
+    ['a 422', () => apiError(422, 'Unprocessable'), 'Unprocessable'],
+    ['an error the SDK has no class for', () => new Error('The model is down.'), 'The model is down.'],
+    ['a TypeError that is no failed fetch', () => new TypeError('Cannot read properties of undefined (reading "kind")'), 'Cannot read properties of undefined (reading "kind")'],
+  ] as const)('counts an attempt on %s, writes none of the labels, and goes on with the next row of the batch', async (_what, failure, reason) => {
+    const model = modelAnswering((message) => (message === 'Message of inq-2' ? failure() : COMPLAINT));
+    const { service, update, stored, strapi } = world({ rows: WAITING(), model });
+
+    expect(await service.sweep()).toEqual({ labelled: 2, failed: 1, skipped: 0 });
+
+    expect(model.doGenerateCalls.map(customerMessageOf)).toEqual(['Message of inq-1', 'Message of inq-2', 'Message of inq-3']);
+    expect(stored.map((candidate) => [candidate.documentId, candidate.analysisStatus, candidate.analysisAttempts, candidate.kind])).toEqual([
+      ['inq-1', 'analyzed', 0, 'complaint'],
+      ['inq-2', 'failed', 1, null],
+      ['inq-3', 'analyzed', 0, 'complaint'],
+    ]);
+    expect(update).toHaveBeenCalledWith({ documentId: 'inq-2', data: { analysisStatus: 'failed', analysisAttempts: 1 } });
+    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(`[maison] Labelling inquiry inq-2 failed (attempt 1 of ${MAX_LABEL_ATTEMPTS}): ${reason}`);
+  });
+
+  it('parks a row the provider keeps rejecting after its fifth attempt, while the rows behind it are labelled', async () => {
+    // inq-1 is the oldest, so it is first in every batch: were it to stop the sweep, nothing behind it would ever be labelled.
+    const model = modelAnswering((message) => (message === 'Message of inq-1' ? apiError(400, 'Your request was rejected') : COMPLAINT));
+    const { service, stored } = world({ rows: [row('inq-1', { createdAt: minute(1) }), row('inq-2', { createdAt: minute(2) })], model });
+
+    expect(await service.sweep(), 'sweep 1').toEqual({ labelled: 1, failed: 1, skipped: 0 });
+    expect(stored[1]).toMatchObject({ analysisStatus: 'analyzed', kind: 'complaint' });
+    for (let attempt = 2; attempt <= MAX_LABEL_ATTEMPTS; attempt += 1) {
+      expect(await service.sweep(), `sweep ${attempt}`).toEqual({ labelled: 0, failed: 1, skipped: 0 });
+      expect(stored[0]).toMatchObject({ analysisStatus: 'failed', analysisAttempts: attempt });
+    }
+
+    // Parked: no model call for it any more, until staff press Label again.
+    expect(await service.sweep()).toEqual({ labelled: 0, failed: 0, skipped: 0 });
+    expect(model.doGenerateCalls.filter((call) => customerMessageOf(call) === 'Message of inq-1')).toHaveLength(MAX_LABEL_ATTEMPTS);
+    expect(stored[0]).toMatchObject({ analysisStatus: 'failed', analysisAttempts: MAX_LABEL_ATTEMPTS });
+  });
+
+  it('cuts the API key out of what it logs', async () => {
+    const model = modelAnswering(() => new Error(`401: Incorrect API key provided: ${KEY}. Check ${KEY} at the console.`));
+    const { service, strapi } = world({ rows: [row('inq-1')], model });
 
     await service.sweep();
 
-    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(stopped(OTHER, 'The connection reset.'));
-    expect(stored[0]).toMatchObject({ analysisStatus: 'pending', analysisAttempts: 0 });
+    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(
+      `[maison] Labelling inquiry inq-1 failed (attempt 1 of ${MAX_LABEL_ATTEMPTS}): 401: Incorrect API key provided: [key]. Check [key] at the console.`
+    );
+    // Every argument of every log call. JSON.stringify of the loggers themselves is `{}`, which would pass whatever was logged.
+    const logged = JSON.stringify(Object.values(strapi.log).flatMap((method: any) => method.mock.calls));
+    expect(logged).toContain('[key]');
+    expect(logged).not.toContain(KEY);
   });
 
-  // The labels were fine, and Strapi couldn't keep them: nothing is said against the inquiry, so it waits for the next sweep.
-  it('leaves the row as it was, as it does for any failure that is not a wrong answer, when the labels cannot be written', async () => {
-    const { service, stored, strapi, update } = world({ rows: WAITING(), model: modelAnswering(() => COMPLAINT) });
+  it('logs a failure that is not an Error as it is', async () => {
+    const { service, strapi } = world({ rows: [row('inq-1')], model: modelAnswering(() => Promise.reject('The connection reset.')) });
+
+    await service.sweep();
+
+    expect(strapi.log.warn.mock.calls[0][0]).toContain('The connection reset.');
+  });
+
+  it('fails the row, as it does any failure, when the labels cannot be written', async () => {
+    const { service, update, stored, strapi } = world({ rows: [row('inq-1')], model: modelAnswering(() => COMPLAINT) });
     update.mockRejectedValueOnce(new Error('The database is locked.'));
 
-    expect(await service.sweep()).toEqual({ labelled: 0, failed: 0, skipped: 0 });
+    expect(await service.sweep()).toEqual({ labelled: 0, failed: 1, skipped: 0 });
 
-    expect(stored.map((candidate) => [candidate.analysisStatus, candidate.analysisAttempts, candidate.kind])).toEqual([
-      ['pending', 0, null],
-      ['pending', 0, null],
-      ['pending', 0, null],
-    ]);
-    expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(stopped(OTHER, 'The database is locked.'));
+    expect(stored[0]).toMatchObject({ ...NO_LABELS, analysisStatus: 'failed', analysisAttempts: 1 });
+    expect(strapi.log.warn.mock.calls[0][0]).toContain('The database is locked.');
   });
 });
 
