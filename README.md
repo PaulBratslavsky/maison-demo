@@ -50,7 +50,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `liff/scripts/mock-line-verify.mjs` | The local stand-in for LINE's verify endpoint |
 | `scripts/init-env.mjs` | Creates the two `.env` files on `npm install` |
 | `scripts/line-mode.mjs`, `scripts/line-tunnel.mjs` | Option B: `npm run mode:line` and `mode:local` switch both `.env` files, and `npm run tunnel` refuses an unsafe tunnel |
-| `scripts/line-stand-in.mjs` | `npm run line:stand-in`: a local stand-in for LINE's Messaging API, so checks of the staff follow-up message no one (see "Production notes") |
+| `scripts/line-stand-in.mjs` | `npm run line:stand-in`: a local stand-in for LINE's Messaging API, so local checks of the staff follow-up reach no one's phone (see "Production notes") |
 | `liff/scripts/line-qr.mjs` | Option B: `npm run qr`, the app's LINE link as a QR code, saved in `liff/line/qr/` (gitignored: it holds your LIFF ID) |
 | `liff/lib/strapi-proxy.ts` and its routes (`liff/app/mcp`, `liff/app/uploads`, `liff/app/api/strapi-oauth-mcp-manager`) | Option B: Strapi's `/mcp`, token endpoint and `/uploads` on the app's own origin |
 | `liff/line/channel-icon.png` | The channel icon, to LINE's MINI App icon spec |

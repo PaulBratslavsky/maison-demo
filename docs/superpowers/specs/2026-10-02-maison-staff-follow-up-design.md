@@ -179,7 +179,7 @@ In the question's language, published at once: the title staff confirmed in the 
 - **An unknown `productSlug` never refuses the hand-off.** It's dropped, so the question still reaches staff.
 - **The LINE name** comes from LINE's Get profile API, with Strapi's channel token, within 3 seconds. Without a token, or when LINE doesn't answer, the question is saved without it.
 - **Output:** `{ question: { reference, status: "open", product: { slug, name } | null } }`.
-- **Known limit of the POC:** the record still depends on the model calling the tool in two cases: the customer asks for a person (`asked_for_person`), and the search found entries that don't answer. A search that finds nothing is recorded by the app's server. The full spec logs every turn from the server instead.
+- **Known limit of the POC:** the record still depends on the model in three cases: the customer asks for a person (`asked_for_person`), the search found entries that don't answer, and the model never searches the knowledge at all. A search that finds nothing is recorded by the app's server. The full spec logs every turn from the server instead.
 
 ## The code
 
