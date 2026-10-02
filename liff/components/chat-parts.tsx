@@ -9,6 +9,7 @@ import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
 import { toolErrorOf } from '@/lib/mcp';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
+import { LineChat } from './line-chat';
 import { ProductImage } from './product-grid';
 
 function Lines({ lines }: { lines: Line[] }) {
@@ -158,7 +159,8 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
 
 /**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
- * with a booking card right under the lines that made it, and the pieces a search found under the message's words.
+ * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, and the pieces a
+ * search found under the message's words.
  */
 export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
   const blocks: ReactNode[] = [];
@@ -188,7 +190,14 @@ export function AssistantParts({ parts, locale }: { parts: Array<{ type: string;
     if (!tool) return;
     const view = toolView(tool, locale);
     lines.push(<ToolLine key={index} text={view.line} failed={view.failed} />);
-    if (view.appointment) cards.push(<BookingCard key={`card-${index}`} appointment={view.appointment} locale={locale} />);
+    if (view.appointment) {
+      cards.push(
+        <div key={`card-${index}`} className="flex flex-col gap-2.5">
+          <BookingCard appointment={view.appointment} locale={locale} />
+          <LineChat />
+        </div>
+      );
+    }
     if (view.products) found.push(<ProductSuggestions key={`found-${index}`} products={view.products} locale={locale} />);
   });
   endRun();

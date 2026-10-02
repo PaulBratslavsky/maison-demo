@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
+import { LineChat } from '@/components/line-chat';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
 import { Spinner } from '@/components/spinner';
@@ -19,7 +20,9 @@ const TOOLS = ['my_appointments'];
 
 /**
  * My visits: rows under hairlines, each the boutique and its status tag, the day and time, and the reference in mono. A
- * request just sent (`?ref=`) is said so above the list, and its row sits on the wash.
+ * request just sent (`?ref=`) is said so above the list, and its row sits on the wash. "Chat with Maison on LINE"
+ * appears once: next to "Request sent" after a booking, and otherwise under the list, after a line that says where the
+ * confirmation arrives.
  */
 function Visits() {
   const { locale } = useMaison();
@@ -27,10 +30,16 @@ function Visits() {
   const highlight = useSearchParams().get('ref');
   const visits = useTool<{ appointments: Appointment[] }>('visits', 'my_appointments', { locale });
   const list = visits.data?.appointments ?? [];
+  const requestSent = requestSentFor(visits.data?.appointments, highlight);
   return (
     <Screen name="visits" tools={TOOLS}>
       <h1 className="px-5 pb-6 pt-5 text-headline">{t.myVisits}</h1>
-      {requestSentFor(visits.data?.appointments, highlight) && <p className="mx-5 mb-6 border-l border-ink pl-4 text-body">{t.visitRequested}</p>}
+      {requestSent && (
+        <div className="mx-5 mb-6 flex flex-col gap-4">
+          <p className="border-l border-ink pl-4 text-body">{t.visitRequested}</p>
+          <LineChat />
+        </div>
+      )}
       <StatusNote loading={visits.loading} error={visits.error} retry={visits.retry} />
       {visits.data && list.length === 0 && <p className="px-5 text-body text-mist">{t.noVisits}</p>}
       {list.length > 0 && (
@@ -54,6 +63,7 @@ function Visits() {
           ))}
         </ul>
       )}
+      {visits.data && !requestSent && <LineChat line className="px-5 pt-8" />}
     </Screen>
   );
 }

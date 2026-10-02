@@ -3,6 +3,7 @@
 import { useParams } from 'next/navigation';
 
 import { Detail, Details } from '@/components/details';
+import { LineChat } from '@/components/line-chat';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
 import { StatusNote } from '@/components/status-note';
@@ -14,7 +15,7 @@ import { useTool } from '@/lib/use-tool';
 
 /**
  * Where the LINE confirmation's button leads: the visit's reference in mono, the boutique as the headline, the day and
- * time, its status tag, and a details list of the pieces and the customer's note.
+ * time, its status tag, a details list of the pieces and the customer's note, and "Chat with Maison on LINE".
  */
 export default function VisitPage() {
   const { reference } = useParams<{ reference: string }>();
@@ -42,6 +43,7 @@ export default function VisitPage() {
               </Detail>
             )}
           </Details>
+          <LineChat className="mt-8" />
         </article>
       )}
     </Screen>

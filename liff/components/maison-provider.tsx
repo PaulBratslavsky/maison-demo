@@ -23,6 +23,11 @@ interface MaisonContext {
   /** A failed sign-in as the screens show it (errorText), with any wait the server named, or null. */
   signInError: ScreenError | null;
   maison: Maison | null;
+  /**
+   * Whether the customer has added Maison's LINE Official Account (Maison's friendFlag), for the words of "Chat with
+   * Maison on LINE": asked once, after sign-in, and null until LINE answers, or when it can't.
+   */
+  friendFlag: boolean | null;
   /** With status open-in-line: the link that opens this page in LINE, and the OS (a phone gets a button). Else null. */
   openInLine: Pick<OpenInLineError, 'url' | 'os'> | null;
   /**
@@ -55,6 +60,7 @@ const browserStorage = (): Storage | null => {
 
 export function MaisonProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SignIn>(STARTING);
+  const [friendFlag, setFriendFlag] = useState<boolean | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [calls, setCalls] = useState<ToolCallRecord[]>([]);
   const [agentView, setAgentViewState] = useState(false);
@@ -76,7 +82,13 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
     setState(STARTING);
     getMaison().then(
       (maison) => {
-        if (!cancelled) setState({ ...STARTING, status: 'ready', maison });
+        if (cancelled) return;
+        setState({ ...STARTING, status: 'ready', maison });
+        // Asked here, once, so every screen's button has the same words from its first render. Without
+        // NEXT_PUBLIC_LINE_OA_ID it's null at once, and LINE isn't asked.
+        void maison.friendFlag().then((answer) => {
+          if (!cancelled) setFriendFlag(answer);
+        });
       },
       (error: unknown) => {
         if (cancelled) return;
@@ -116,13 +128,14 @@ export function MaisonProvider({ children }: { children: ReactNode }) {
         signedIn: state.maison?.locale ?? state.openInLine?.locale ?? null,
         demo: config.demoLocale,
       }),
+      friendFlag,
       calls,
       agentView,
       setAgentView,
       setLocale,
       retrySignIn,
     }),
-    [state, localeOverride, calls, agentView, setAgentView, setLocale, retrySignIn]
+    [state, friendFlag, localeOverride, calls, agentView, setAgentView, setLocale, retrySignIn]
   );
 
   // Screen readers and the browser's font choice follow the language. The server renders lang="ja" (app/layout.tsx);
