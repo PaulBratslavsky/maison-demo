@@ -41,7 +41,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | Path | What it is |
 |---|---|
 | `strapi/` | A Strapi 5.55.1 app (TypeScript, SQLite), made with `create-strapi` |
-| `strapi/src/plugins/maison/` | The Maison plugin: content types, eleven MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
+| `strapi/src/plugins/maison/` | The Maison plugin: content types, twelve MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
 | `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
@@ -185,7 +185,7 @@ console.log("Added maison-ops to", file);
 
 ### Before going on stage
 
-- [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits or tokens behind.
+- [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits, questions or tokens behind.
 - [ ] On the board, **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and the LINE confirmation need the internet.
@@ -392,7 +392,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
   - `temporarily_unavailable` (503): try again after `Retry-After` seconds.
   - One LINE client can be active per Strapi.
 - **MCP:** `POST {STRAPI}/mcp` with `Authorization: Bearer <access_token>`.
-  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `search_knowledge`, `request_appointment`, `my_appointments`
+  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `search_knowledge`, `request_appointment`, `my_appointments`, `hand_off_to_staff`
   - Staff tools, for staff agents: `appointment_requests` and `confirm_appointment`
   - Errors come back as `isError` results whose text is `{ "error": { "code", "message", "hint" } }`. Arguments the SDK rejects, such as a date that isn't on the calendar, come back as plain text that starts `Input validation error:`.
 - **REST, for websites:** the catalog at `/api/maison/…` with no credentials, and the customer's own bookings with the same session (see "The REST door").
@@ -447,7 +447,7 @@ LINE's pages behind this:
 |---|---|---|
 | `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
 | `npm run test:e2e` | Browser tests: booking and **My visits**, Home's headline from Strapi in English and Japanese, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, LINE's safe area in portrait and landscape, and **Chat with Maison on LINE** (with `NEXT_PUBLIC_LINE_OA_ID` set or empty: see below). API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
-| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
+| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits and hands questions to staff, for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
 - **Chat with Maison on LINE needs two runs,** one per case, because the app is built with the setting: `npm run test:e2e` with `NEXT_PUBLIC_LINE_OA_ID` in `liff/.env`, then `NEXT_PUBLIC_LINE_OA_ID= npm run test:e2e`. Stop any app on :3003 before each, so Playwright starts one with the same setting. Each run tests its case and skips the other.
@@ -479,7 +479,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `e60c558`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `485ae67` (branch `feat/maison-follow-up`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
@@ -504,6 +504,7 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 ## Production notes
 
+- **Customer questions** (the staff follow-up proof of concept): the "Maison customer" token needs "MCP: hand questions to staff" (`plugin::maison.questions.ask`). `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand (never run setup against Cloud). Staff need "Read customer questions" to see the section and "Answer customer questions on LINE" for its buttons. `MAISON_LINE_API_BASE_URL` points Strapi at a LINE stand-in for local checks: leave it unset everywhere else.
 - **Staff** get an admin role with the Maison actions they need (`catalog.read`, `appointments.review`, `appointments.confirm`) instead of Super Admin.
 - **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
 - **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.
