@@ -105,7 +105,7 @@
     "sentimentScore": { "type": "float" },
     "sentimentLabel": { "type": "enumeration", "enum": ["positive", "neutral", "negative"] },
     "answered": { "type": "boolean" },
-    "reason": { "type": "string", "maxLength": 400 },
+    "reason": { "type": "text", "maxLength": 400 },
     "topic": { "type": "string", "maxLength": 80 },
     "analysisStatus": { "type": "enumeration", "enum": ["pending", "analyzed", "failed", "skipped"], "default": "pending" },
     "analysisAttempts": { "type": "integer", "default": 0 },
@@ -119,7 +119,7 @@
     "repliedAt": { "type": "datetime" },
     "repliedBy": { "type": "string", "maxLength": 100 },
     "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed"] },
-    "lineDetail": { "type": "string", "maxLength": 500 }
+    "lineDetail": { "type": "text", "maxLength": 500 }
   }
 }
 ```
@@ -311,7 +311,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- <the same paths>
     - It sets the given kind and/or sentimentLabel, and sets `humanCorrected`.
     - It recomputes the queue: a hand-off stays needs-answer.
     - Nothing given is `invalid_input`.
-  - **labelAgain:** a `failed` row becomes `pending` with 0 attempts. Any other row answers `not_failed`.
+  - **labelAgain:** a `failed` row becomes `pending` with 0 attempts. Any other row answers `not_failed`. So does a row a person labelled (`humanCorrected`), with `A person labelled this inquiry, so it isn't labelled again.`
   - **markQuestionReplied:** every open inquiry with that `questionReference` becomes `replied`, with `replyText`, `repliedAt`, `repliedBy` and `lineOutcome: 'sent'`.
   - **questions.answer:** after a sent answer, it calls `inquiries.markQuestionReplied(reference, …)`. A throw there still answers `sent`, and is logged.
   - **The tool `log_inquiry`:**
@@ -699,7 +699,7 @@ limit: LABEL_BATCH,
     - `Reply on LINE` when `canReplyTo`
     - `Close`, with a reason select: Answered elsewhere, Not needed, Spam
     - `Change label`: a small dialog with kind and sentiment selects
-    - `Label again` on failed rows
+    - `Label again` on failed rows that no person has labelled (`humanCorrected` rows are refused)
   - The quota line sits above the table.
   - Notifications show the server's `message`, as `warning` when `data.warning`.
 - [ ] **Step 5: `InquiryReplyDialog.tsx`:**
