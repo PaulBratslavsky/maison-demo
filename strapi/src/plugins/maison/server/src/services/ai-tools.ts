@@ -42,7 +42,7 @@ export interface ChatToolError {
 type HandlerResult = { isError?: boolean; content: Array<{ type: string; text?: string }>; structuredContent?: unknown };
 
 /**
- * What the in-admin chat offers: the catalog reads and the two staff tools.
+ * What the in-admin chat offers: four catalog reads (not search_knowledge) and the two staff tools.
  * request_appointment and my_appointments act for a signed-in LINE customer, and a chat has an admin instead.
  * pending_confirmations and record_confirmation are for the ops agent that delivers LINE confirmations. The chat has no
  * LINE tool, and pending_confirmations returns every customer's full LINE user ID, which would reach the model and its
