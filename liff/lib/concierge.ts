@@ -26,6 +26,8 @@ const MAX_MESSAGES = 20;
 const MAX_CHARS = 1000;
 /** The longest question hand_off_to_staff takes (its schema's limit), in UTF-16 units: how Strapi counts a string's length. */
 const MAX_QUESTION = 1000;
+/** The longest reply log_inquiry takes (its schema's limit), in UTF-16 units as above: a longer turn is cut to it, not refused whole. */
+const MAX_REPLY = 8000;
 const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 left a long search no room to answer
 /** How long the end-of-turn log may take: Strapi is close, and the customer's stream waits for it to finish. */
 const LOG_TIMEOUT_MS = 5000;
@@ -184,15 +186,22 @@ export const withConversationLocale = async <TOOLS extends ToolSet>(tools: TOOLS
 };
 
 /**
+ * `text` cut to `max` UTF-16 units, how Strapi counts a string's length: never through half of an emoji, and without the
+ * blanks the cut leaves at its end. Text that fits is returned as it is.
+ */
+const cutTo = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  return (/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head).trimEnd(); // the cut may have left a lone half of a pair
+};
+
+/**
  * The customer's last message as the question for staff: its text parts, trimmed, and cut to what hand_off_to_staff
  * takes, never through half of an emoji. Empty when it has no text.
  */
 const lastQuestionOf = (messages: UIMessage[]): string => {
   const text = messages.findLast((message) => message.role === 'user')?.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n') ?? '';
-  const trimmed = text.trim();
-  if (trimmed.length <= MAX_QUESTION) return trimmed;
-  const head = trimmed.slice(0, MAX_QUESTION);
-  return (/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head).trimEnd(); // the cut may have left a lone half of a pair
+  return cutTo(text.trim(), MAX_QUESTION);
 };
 
 /** What the app records for staff when the knowledge search finds nothing (withAutoHandOff). */
@@ -441,28 +450,36 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
      */
     const logTurn = async (event: { content: Parameters<typeof turnReplyOf>[0]; toolResults: Parameters<typeof turnFactsOf>[0] }) => {
       if (!logTool?.execute || question === '') return;
+      // The call's own limit, not the request's signal: a customer who closes the chat after the last word doesn't cut the log.
+      const timeout = AbortSignal.timeout(LOG_TIMEOUT_MS);
       let why: string | undefined;
       try {
         const { knowledgeFound, handedOff, questionReference } = turnFactsOf(event.toolResults);
         const answer = await logTool.execute(
           {
             message: question,
-            reply: turnReplyOf(event.content),
+            // A long turn is logged cut to what the tool takes: refused whole, it wouldn't be logged at all.
+            reply: cutTo(turnReplyOf(event.content), MAX_REPLY),
             knowledgeFound,
             handedOff,
             ...(questionReference ? { questionReference } : {}),
             ...(piece ? { productSlug: piece } : {}),
             locale,
           },
-          // The call's own limit, not the request's signal: a customer who closes the chat after the last word doesn't cut the log.
-          { toolCallId: 'log-inquiry', messages: [], context: undefined, abortSignal: AbortSignal.timeout(LOG_TIMEOUT_MS) }
+          { toolCallId: 'log-inquiry', messages: [], context: undefined, abortSignal: timeout }
         );
         if (isObject(answer) && answer.isError === true) why = refusalTextOf(answer) ?? 'its answer gives no reason';
       } catch (error) {
-        why = error instanceof Error ? error.message : String(error);
+        // The MCP client words a call the signal cut off as "Request was aborted", which doesn't say who did it.
+        why = timeout.aborted ? `it took longer than ${LOG_TIMEOUT_MS / 1000} seconds` : error instanceof Error ? error.message : String(error);
       }
       if (why !== undefined) console.warn("[concierge] The turn couldn't be logged:", why);
     };
+    /**
+     * Whether the turn failed or was cut off. onEnd isn't told: it also runs for a turn that fails once a step has finished
+     * (see onEnd below). No stream retries are set, so every onError ends the turn.
+     */
+    let failed = false;
     const result = streamText({
       model: deps.model,
       instructions: conciergeInstructions(locale, now, piece),
@@ -472,14 +489,20 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
-      // onEnd is skipped on abort, and when no step completes, so close in all three. Only a finished turn is logged, and
-      // before the client closes: closing it first would cut the log short.
+      // onEnd is skipped on abort, and when no step completes, so close in all three. It also runs, after onError, for a turn
+      // that fails once a step has finished (a tool step, then a model call that throws or a stream that errors), so `failed`
+      // keeps that turn out of the log: only a turn that ended whole is logged, and before the client closes, since closing
+      // it first would cut the log short.
       onEnd: async (event) => {
-        await logTurn(event);
+        if (!failed) await logTurn(event);
         await close();
       },
-      onAbort: close,
+      onAbort: async () => {
+        failed = true;
+        await close();
+      },
       onError: async ({ error }) => {
+        failed = true;
         // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).
         console.error('[concierge]', describeModelError(error, deps.modelLabel, deps.modelFix), error);
         await close();

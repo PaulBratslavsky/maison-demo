@@ -1369,6 +1369,42 @@ describe('the end-of-turn log', () => {
         },
       ],
     });
+  /** A model that answers with `text`, in one piece. */
+  const says = (text: string) =>
+    new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 't1' },
+              { type: 'text-delta', id: 't1', delta: text },
+              { type: 'text-end', id: 't1' },
+              { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+            ],
+          }),
+        },
+      ],
+    });
+  /**
+   * A model that calls search_knowledge in its first step and fails in its second: the call throws (`how` is 'throws'), or
+   * its stream gives some words and then an error chunk ('error chunk'). A step has finished by then, so the SDK still
+   * ends the turn with onEnd, after onError.
+   */
+  const failsAfterAStep = (how: 'throws' | 'error chunk') => {
+    let calls = 0;
+    return new MockLanguageModelV4({
+      doStream: async () => {
+        calls += 1;
+        if (calls === 1) {
+          const chunks = [{ type: 'tool-call', toolCallId: 'call-1', toolName: 'search_knowledge', input: '{}' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }];
+          return { stream: simulateReadableStream({ chunks }) } as any;
+        }
+        if (how === 'throws') throw new Error('The model broke.');
+        const chunks = [{ type: 'text-start', id: 't1' }, { type: 'text-delta', id: 't1', delta: 'Let me ch' }, { type: 'error', error: new Error('The provider broke.') }];
+        return { stream: simulateReadableStream({ chunks }) } as any;
+      },
+    });
+  };
   /** The reply's words, as the stream carries them. */
   const wordsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta).join('');
   /** One turn through the route with the tools and a log_inquiry that answers: what the app sent it, once the client has closed. */
@@ -1468,6 +1504,33 @@ describe('the end-of-turn log', () => {
     });
     const input = await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, tools, model);
     expect(input).toMatchObject({ reply: '', knowledgeFound: true });
+  });
+
+  it('cuts the reply it logs to the 8000 characters log_inquiry takes, so a long turn is logged and not refused whole, and the customer still reads all of it', async () => {
+    const log = logInquiry();
+    const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+    const long = 'x'.repeat(9000);
+    const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model: says(long) }))).text());
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect(wordsOf(events)).toBe(long); // the customer's own reply is whole
+    expect(log.execute).toHaveBeenCalledTimes(1);
+    expect((log.execute.mock.calls[0][0] as { reply: string }).reply).toBe('x'.repeat(8000));
+  });
+
+  it('cuts it by UTF-16 units, as Strapi counts, never through half an emoji, and leaves a reply that fits as it is', async () => {
+    const cases: Array<[string, string, string]> = [
+      ['exactly 8000', 'x'.repeat(8000), 'x'.repeat(8000)],
+      ['8001', 'x'.repeat(8001), 'x'.repeat(8000)],
+      ['9000 in Japanese', 'あ'.repeat(9000), 'あ'.repeat(8000)],
+      ['an emoji across the cut', `${'a'.repeat(7999)}😀${'b'.repeat(50)}`, 'a'.repeat(7999)],
+      ['an emoji that fits whole', `${'a'.repeat(7998)}😀${'b'.repeat(50)}`, `${'a'.repeat(7998)}😀`],
+      ['spaces at the cut', `${'a'.repeat(7990)}${' '.repeat(20)}end`, 'a'.repeat(7990)],
+    ];
+    for (const [what, reply, cut] of cases) {
+      const sent = ((await loggedBy(hello, {}, says(reply))) as { reply: string }).reply;
+      expect(sent, what).toBe(cut);
+      expect(sent.isWellFormed(), `${what}: no lone half of a pair`).toBe(true);
+    }
   });
 
   it("doesn't let a failed log touch the customer's turn: the stream ends with the model's reply, the client closes, and the log says why", async () => {
@@ -1603,9 +1666,9 @@ describe('the end-of-turn log', () => {
       expect(events.some((event) => event.type === 'error')).toBe(false);
       await vi.waitFor(() => expect(strapi.close).toHaveBeenCalled());
       expect(strapi.calls).toHaveLength(1); // it was sent, and Strapi never answered
-      // The client's own words for a call cut off: the signal that did it is the log's own, never the customer's.
+      // Not the client's "Request was aborted": the log's own signal did it, never the customer's, and the log says how long it allows.
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(NOT_LOGGED, expect.stringMatching(/abort/i));
+      expect(warn).toHaveBeenCalledWith(NOT_LOGGED, 'it took longer than 5 seconds');
     } finally {
       timeout.mockRestore();
       warn.mockRestore();
@@ -1710,6 +1773,54 @@ describe('the end-of-turn log', () => {
       error.mockRestore();
       warn.mockRestore();
     }
+  });
+
+  /**
+   * One turn that fails after a step has finished (failsAfterAStep), through the route, with a log_inquiry: what the
+   * customer was told, how often the log was called, and what was warned. The SDK still runs onEnd for such a turn, after
+   * onError, and onError has closed the client by then, so the log tool here refuses as a closed client does.
+   */
+  const failingAfterAStep = async (how: 'throws' | 'error chunk') => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {}); // the handler logs the model's failure
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const log = logInquiry(async () => {
+        if (close.mock.calls.length > 0) throw new Error('Attempted to send a request from a closed client');
+        return logged;
+      });
+      const { createMcpClient, close } = fakeMcp({ search_knowledge: maisonTool(() => searched({ title: 'Care' })), log_inquiry: log.tool });
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { messages: [say(QUESTION)], locale: 'en' }), deps({ createMcpClient, model: failsAfterAStep(how) }));
+      const events = eventsOf(await response.text());
+      await vi.waitFor(() => expect(close).toHaveBeenCalled()); // onError closes it, and so does onEnd
+      return { told: events.filter((event) => event.type === 'error').map((event) => event.errorText), logCalls: log.execute.mock.calls.length, warned: [...warn.mock.calls] };
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  };
+
+  it("doesn't log a turn whose next model call threw after a step had finished", async () => {
+    const turn = await failingAfterAStep('throws');
+    expect(turn.told).toEqual(['The model broke.']); // the customer is told, so the turn did fail
+    expect(turn.warned).toEqual([]);
+    expect(turn.logCalls).toBe(0);
+  });
+
+  it("doesn't log a turn whose stream gave an error after a step had finished", async () => {
+    const turn = await failingAfterAStep('error chunk');
+    expect(turn.told).toEqual(['The provider broke.']);
+    expect(turn.warned).toEqual([]);
+    expect(turn.logCalls).toBe(0);
+  });
+
+  it('still logs a turn in which a tool failed and the model answered after it: that is no failed turn', async () => {
+    const tools = {
+      search_knowledge: maisonTool(() => {
+        throw new TypeError('fetch failed');
+      }),
+    };
+    const input = await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, tools, callsThenReplies('search_knowledge', { query: 'watch' }));
+    expect(input).toStrictEqual({ message: QUESTION, reply: 'Noted.', knowledgeFound: false, handedOff: false, locale: 'en' });
   });
 });
 
