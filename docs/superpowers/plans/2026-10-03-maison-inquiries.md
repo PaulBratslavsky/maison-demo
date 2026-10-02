@@ -94,7 +94,7 @@
     "customer": { "type": "string", "required": true, "private": true, "visible": false, "searchable": false },
     "message": { "type": "text", "required": true, "maxLength": 1000 },
     "reply": { "type": "text", "maxLength": 2000 },
-    "locale": { "type": "enumeration", "enum": ["ja", "en"], "default": "ja" },
+    "language": { "type": "enumeration", "enum": ["ja", "en"], "default": "ja" },
     "knowledgeFound": { "type": "boolean", "default": false },
     "handedOff": { "type": "boolean", "default": false },
     "questionReference": { "type": "string" },
@@ -291,7 +291,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- <the same paths>
 
 - [ ] **Step 1: Write the failing tests.**
   - **log:**
-    - It creates one row with the session's customer and the trimmed `message`. `message` is cut with `fitUnits` to 1000 and `reply` to 2000, and `locale`, `knowledgeFound` and `handedOff` are stored.
+    - It creates one row with the session's customer and the trimmed `message`. `message` is cut with `fitUnits` to 1000 and `reply` to 2000, and `language` (the input's `locale`, else `defaultLocale`, as questions do), `knowledgeFound` and `handedOff` are stored.
     - `productSlug` is stored only for a published product (else null).
     - `questionReference` is stored only when a question with that reference belongs to this customer (else null).
     - `analysisStatus` is `pending`, and `status` is `open`.

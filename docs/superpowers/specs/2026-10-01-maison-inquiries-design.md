@@ -89,7 +89,7 @@ The chat shows that tool call as a short note with **Chat with Maison on LINE** 
 
 | Group | Fields |
 |---|---|
-| Who and what | `customer` (the LINE subject, private, kept out of admin API answers and list search as for appointments), `message`, `reply`, `locale`, `knowledgeFound`, `handedOff`, `productSlug`, `via` (`concierge` now, `line-chat` later) |
+| Who and what | `customer` (the LINE subject, private, kept out of admin API answers and list search as for appointments), `message`, `reply`, `language` (Strapi reserves `locale` for i18n, so it is stored as `language`, as appointments and questions do), `handedOff`, `productSlug`, `via` (`concierge` now, `line-chat` later) |
 | Labels, from the model | `kind` (`question` / `complaint` / `praise` / `other`), `sentimentScore` (−1..1), `sentimentLabel` (`positive` / `neutral` / `negative`), `answered` (bool), `reason` (up to 400 characters), `topic` (one short phrase) |
 | Analysis | `analysisStatus` (`pending` / `analyzed` / `failed` / `skipped`), `analysisAttempts`, `modelVersion`, `promptVersion`, `humanCorrected` |
 | Queue and workflow | `queue` (`needs-answer` / `complaint` / `praise` / `none`), `status` (`open` / `replied` / `closed`), `closeReason` (`answered-elsewhere` / `not-needed` / `spam`) |
