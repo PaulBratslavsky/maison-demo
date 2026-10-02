@@ -1,6 +1,57 @@
 import { describe, expect, it } from 'vitest';
 
-import { lineChatUrl } from './line-chat';
+import { COPY } from './copy';
+import { lineChatUrl, lineChatWords } from './line-chat';
+
+describe("the button's copy", () => {
+  it('names the chat with Maison, says where the confirmation arrives, and asks to add Maison, in English', () => {
+    expect(COPY.en.lineChat).toEqual({
+      button: 'Chat with Maison on LINE',
+      line: 'Your confirmation arrives in the Maison chat.',
+      addButton: 'Add Maison on LINE',
+      addLine: 'Add Maison on LINE to get your confirmation there.',
+    });
+  });
+
+  it('and in Japanese', () => {
+    expect(COPY.ja.lineChat).toEqual({
+      button: 'LINEでメゾンにメッセージ',
+      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
+      addButton: 'メゾンを友だち追加',
+      addLine: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+    });
+  });
+});
+
+describe('lineChatWords: the nudge, from what liff.getFriendship() said', () => {
+  it('asks a customer who has not added Maison yet (friendFlag false) to add it', () => {
+    expect(lineChatWords(COPY.en.lineChat, false)).toEqual({
+      button: 'Add Maison on LINE',
+      line: 'Add Maison on LINE to get your confirmation there.',
+    });
+    expect(lineChatWords(COPY.ja.lineChat, false)).toEqual({
+      button: 'メゾンを友だち追加',
+      line: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+    });
+  });
+
+  it('offers a friend (friendFlag true) the chat', () => {
+    expect(lineChatWords(COPY.en.lineChat, true)).toEqual({
+      button: 'Chat with Maison on LINE',
+      line: 'Your confirmation arrives in the Maison chat.',
+    });
+    expect(lineChatWords(COPY.ja.lineChat, true)).toEqual({
+      button: 'LINEでメゾンにメッセージ',
+      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
+    });
+  });
+
+  it("shows the plain button when the call failed, or hasn't answered yet (null): LINE opens the right screen either way", () => {
+    for (const locale of ['en', 'ja'] as const) {
+      expect(lineChatWords(COPY[locale].lineChat, null), locale).toEqual(lineChatWords(COPY[locale].lineChat, true));
+    }
+  });
+});
 
 // Made-up IDs in the forms LINE gives: never Maison's real basic ID in this repo.
 describe('lineChatUrl', () => {

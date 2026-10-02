@@ -14,3 +14,15 @@ export const lineChatUrl = (basicId: string | undefined): string | null => {
   const id = basicId?.trim() ?? '';
   return LINE_ID.test(id) ? `https://line.me/R/ti/p/${encodeURIComponent(id)}` : null;
 };
+
+/**
+ * The button's words, and the line above it on My visits (COPY[locale].lineChat), from liff.getFriendship()'s friendFlag
+ * (Maison's friendFlag()): a customer who hasn't added Maison yet (false) is asked to add it, which their confirmation
+ * needs. A friend (true) gets the chat's words, and so does everyone while the call hasn't answered or when it failed
+ * (null): the link is the same, and LINE opens the chat or the add-friend screen as it should.
+ */
+export const lineChatWords = (
+  copy: { button: string; line: string; addButton: string; addLine: string },
+  friendFlag: boolean | null
+): { button: string; line: string } =>
+  friendFlag === false ? { button: copy.addButton, line: copy.addLine } : { button: copy.button, line: copy.line };

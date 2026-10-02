@@ -65,6 +65,15 @@ export const COPY = {
     // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
     lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
+    // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
+    // Account: on My visits under `line`, on a visit's page, and after a booking. For a customer who hasn't added Maison
+    // yet (liff.getFriendship() in LINE mode), the add-friend words take their place (lineChatWords in lib/line-chat.ts).
+    lineChat: {
+      button: 'LINEでメゾンにメッセージ',
+      line: '確定のご連絡はメゾンのLINEトークにお届けします。',
+      addButton: 'メゾンを友だち追加',
+      addLine: '確定のご連絡をLINEで受け取るには、メゾンを友だち追加してください。',
+    },
     noVisits: 'ご来店予約はまだありません。',
     visitNotFound: 'この予約は見つかりませんでした。',
     // A visit's details list: the pieces it's for, and the customer's note.
@@ -153,6 +162,12 @@ export const COPY = {
     confirmationSent: 'Confirmed · LINE sent',
     lineSent: 'LINE sent',
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
+    lineChat: {
+      button: 'Chat with Maison on LINE',
+      line: 'Your confirmation arrives in the Maison chat.',
+      addButton: 'Add Maison on LINE',
+      addLine: 'Add Maison on LINE to get your confirmation there.',
+    },
     noVisits: 'No visits yet.',
     visitNotFound: "We couldn't find this visit.",
     visitPieces: 'Pieces',
