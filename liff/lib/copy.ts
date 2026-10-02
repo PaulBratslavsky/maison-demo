@@ -45,6 +45,8 @@ export const COPY = {
     },
     leadDays: (n: number) => `お届けまで約${n}日`,
     bookVisit: '来店を予約',
+    // Under a product's details list: it opens the concierge with that piece in context (/concierge?product=<slug>).
+    askAboutPiece: 'この商品について質問する',
     boutique: 'ブティック',
     // After a boutique's name in the booking sheet, whose radio is disabled: it doesn't have the piece.
     notInStock: '在庫なし',
@@ -96,11 +98,14 @@ export const COPY = {
     // The concierge's title bar: the button that lists the screen's MCP tools.
     mcpTools: (n: number) => `${n}つのMCPツール`,
     conciergeIntro: 'ギフト選びやご来店のご予約をお手伝いします。',
+    // With a piece (Ask about this piece): the intro and the suggestions in place of conciergeIntro and suggestions.
+    conciergeIntroPiece: 'この商品について、お手入れ、サイズ、名入れ、配送など、何でもお尋ねください。',
     placeholder: 'メッセージを入力',
     send: '送信',
     // Under a reply that ended with nothing to read, beside `retry`'s button (the concierge page).
     noReply: '返信を受け取れませんでした。',
     suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', 'はい、お願いします。'],
+    pieceSuggestions: ['名入れはできますか？', 'お手入れ方法を教えてください。', 'どのブティックに在庫がありますか？'],
     results: (n: number) => `${n}件`,
     noProducts: 'このコレクションには、まだ商品がありません。',
     // Follows an error's copy when the server named the wait (Retry-After).
@@ -159,6 +164,7 @@ export const COPY = {
     },
     leadDays: (n: number) => `About ${n} days`,
     bookVisit: 'Book a visit',
+    askAboutPiece: 'Ask about this piece',
     boutique: 'Boutique',
     notInStock: 'not in stock',
     date: 'Date',
@@ -194,10 +200,12 @@ export const COPY = {
     concierge: 'Concierge',
     mcpTools: (n: number) => `${n} MCP tools`,
     conciergeIntro: 'I can help you choose a gift and book a boutique visit.',
+    conciergeIntroPiece: 'Ask me anything about this piece: care, sizing, personalization, delivery.',
     placeholder: 'Write a message',
     send: 'Send',
     noReply: 'No reply came back.',
     suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Yes, please.'],
+    pieceSuggestions: ['Can I have it personalized?', 'How do I care for it?', 'Which boutique has it in stock?'],
     results: (n: number) => `${n} result${n === 1 ? '' : 's'}`,
     noProducts: 'Nothing in this collection yet.',
     // Follows an error's copy when the server named the wait (Retry-After).

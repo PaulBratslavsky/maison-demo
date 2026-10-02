@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 
 import { tokyoDays } from './format';
+import { pieceSlugOf } from './piece-slug';
 import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
 import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
 
@@ -34,16 +35,21 @@ const WEEKDAY_NAMES = {
 const tokyoDay = (date: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 
+// The slug check is a file of its own, which the concierge page imports (lib/piece-slug.ts says why). Exported from here too, with its tests.
+export { pieceSlugOf };
+
 /**
  * The concierge's instructions, built for each request. Dates are what a small model gets wrong: on the local model
  * "Saturday" came out as Friday, even with a calendar in front of it. So it never works a date out. It asks
  * resolve_date, uses what that returns, and restates the visit from what the booking returns. The calendar is only
  * context: Tokyo's (lib/format.ts), whatever time zone the server runs in, with the weekdays in the reply's language.
+ * For a customer who came from a piece's page (Ask about this piece), `piece` is its slug (pieceSlugOf), and a last
+ * paragraph, after the rules, says that "it" and "this" mean that piece.
  */
-export const conciergeInstructions = (locale: 'ja' | 'en', now: Date) => {
+export const conciergeInstructions = (locale: 'ja' | 'en', now: Date, piece?: string | null) => {
   const days = tokyoDays(CALENDAR_DAYS, now);
   const calendar = days.map(({ date, weekday }) => `${date} ${WEEKDAY_NAMES[locale][weekday]}`).join('\n');
-  return `You are the concierge of Maison, a fictional luxury house of trunks, bags and small gifts. You help one signed-in customer choose a gift and request a boutique visit.
+  const instructions = `You are the concierge of Maison, a fictional luxury house of trunks, bags and small gifts. You help one signed-in customer choose a gift and request a boutique visit.
 Today in Tokyo: ${tokyoDay(now)}. Boutique times are Japan time (Asia/Tokyo, +09:00).
 
 Calendar of the next ${CALENDAR_DAYS} days in Tokyo, today first:
@@ -60,6 +66,9 @@ Rules:
 8. Suggest at most three products at a time.
 9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded for it, in this reply or an earlier one, and never promise a time yourself.
 10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.`;
+  return piece
+    ? `${instructions}\n\nThe customer is on the page of the piece with slug "${piece}". Unless they name another piece, "it" and "this" mean that piece: use that slug with view_product, as productSlugs for search_knowledge, and as productSlug for hand_off_to_staff.`
+    : instructions;
 };
 
 /**
@@ -171,7 +180,7 @@ export const withConversationLocale = async <TOOLS extends ToolSet>(tools: TOOLS
 };
 
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
-const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string } | null => {
+const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string; product?: unknown } | null => {
   try {
     return JSON.parse(new TextDecoder().decode(raw));
   } catch {
@@ -220,6 +229,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     return Response.json({ error: `Send 1 to ${MAX_MESSAGES} messages of up to ${MAX_CHARS} characters.` }, { status: 400 });
   }
   const locale = body?.locale === 'en' ? 'en' : 'ja';
+  // The piece whose page the customer asked from, when they did: a value that isn't a slug is ignored, never passed on.
+  const piece = pieceSlugOf(body?.product);
 
   let mcp: Awaited<ReturnType<typeof createMCPClient>>;
   try {
@@ -238,7 +249,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     const tools = { ...(await withConversationLocale(await mcp.tools(), locale)), resolve_date: resolveDateTool(locale, now) };
     const result = streamText({
       model: deps.model,
-      instructions: conciergeInstructions(locale, now),
+      instructions: conciergeInstructions(locale, now, piece),
       // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as
       // they did in that turn, and not as the raw MCP result.
       messages: await convertToModelMessages(messages, { tools }),

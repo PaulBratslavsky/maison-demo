@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 
@@ -16,8 +17,8 @@ import { useTool } from '@/lib/use-tool';
 
 /**
  * A product: its photo, full bleed and square; its collection, name and price; its description and craft; and a details
- * list. "Book a visit" stays at the bottom of the screen (Screen's `bar`), and the header's link leads up to the
- * product's collection.
+ * list, with "Ask about this piece" under it, which opens the concierge with this piece in context. "Book a visit" stays
+ * at the bottom of the screen (Screen's `bar`), and the header's link leads up to the product's collection.
  */
 export default function ProductPage() {
   // Slugs are lower case: /products/Weekender-50 is the Weekender 50 too.
@@ -73,6 +74,9 @@ export default function ProductPage() {
             )}
             <Detail label={t.inStockAt}>{inStockAt.length > 0 ? listOf(inStockAt, locale) : t.outOfStock}</Detail>
           </Details>
+          <Link href={`/concierge?product=${item.slug}`} data-testid="ask-about-piece" className="btn-secondary mx-5 mt-[18px]">
+            {t.askAboutPiece}
+          </Link>
         </article>
       )}
       {booking && item && <BookingSheet product={item} onClose={() => setBooking(false)} />}
