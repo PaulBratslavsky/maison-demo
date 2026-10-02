@@ -15,11 +15,12 @@ describe('seed service', () => {
   });
 
   it('loads the catalog in ja and en, published', async () => {
-    assert.deepEqual(await seed.loadDemoCatalog(), { created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36 });
+    assert.deepEqual(await seed.loadDemoCatalog(), { created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 16 });
     for (const locale of ['ja', 'en']) {
       assert.equal(await strapi.documents('plugin::maison.product').count({ locale, status: 'published' }), 12, `12 ${locale} products`);
       assert.equal(await strapi.documents('plugin::maison.boutique').count({ locale, status: 'published' }), 3, `3 ${locale} boutiques`);
     }
+    assert.equal(await strapi.documents('plugin::maison.knowledge').count({ locale: 'en', status: 'published' }), 16, '16 en knowledge entries');
     const weekender = await strapi.documents('plugin::maison.product').findFirst({
       locale: 'en', status: 'published', filters: { slug: 'weekender-50' }, populate: { images: true, collection: true },
     });
@@ -29,7 +30,14 @@ describe('seed service', () => {
   });
 
   it('does nothing the second time', async () => {
-    assert.deepEqual(await seed.loadDemoCatalog(), { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 });
+    assert.deepEqual(await seed.loadDemoCatalog(), { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0 });
+  });
+
+  it('adds the product knowledge to a catalog loaded without it, and leaves the catalog as it is', async () => {
+    const entries = await strapi.documents('plugin::maison.knowledge').findMany({ locale: 'en', fields: ['documentId'], limit: 100 });
+    for (const { documentId } of entries) await strapi.documents('plugin::maison.knowledge').delete({ documentId, locale: '*' });
+    assert.deepEqual(await seed.loadDemoCatalog(), { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 16 });
+    assert.equal(await strapi.documents('plugin::maison.product').count({ locale: 'ja', status: 'published' }), 12);
   });
 
   it('reset removes appointments and notifications and keeps the catalog', async () => {

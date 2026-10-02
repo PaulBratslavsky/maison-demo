@@ -7,6 +7,7 @@ export const UID = {
   stockLevel: 'plugin::maison.stock-level',
   appointment: 'plugin::maison.appointment',
   notification: 'plugin::maison.notification',
+  knowledge: 'plugin::maison.knowledge',
 } as const;
 
 /** Full action UIDs, as stored on admin tokens and checked by tool auth policies. */
@@ -24,6 +25,7 @@ export const TOOL_NAMES = [
   'search_products',
   'view_product',
   'find_boutiques',
+  'search_knowledge',
   'request_appointment',
   'my_appointments',
   'appointment_requests',
@@ -39,6 +41,9 @@ export type Locale = (typeof LOCALES)[number];
 export const CATEGORIES = ['trunk', 'bag', 'small-leather', 'travel', 'objet'] as const;
 export const OCCASIONS = ['travel', 'anniversary', 'birthday', 'wedding', 'new-job'] as const;
 export const PERSONALIZATION_KINDS = ['initials-hot-stamp', 'hand-painted-stripes', 'monogram-color'] as const;
+
+/** What a product knowledge entry is about. The knowledge content type's category enum must match (test/unit/knowledge-schema.test.ts). */
+export const KNOWLEDGE_CATEGORIES = ['care', 'materials', 'sizing', 'personalization', 'delivery', 'returns', 'repairs', 'warranty', 'gifting', 'store'] as const;
 
 /** Where a visit was requested: the AI concierge, the app's own screens, or a website through the REST routes. */
 export const CREATED_VIA = ['concierge', 'app', 'web'] as const;

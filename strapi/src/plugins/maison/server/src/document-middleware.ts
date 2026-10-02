@@ -3,7 +3,7 @@ import { errors } from '@strapi/utils';
 
 import { OCCASIONS, PERSONALIZATION_KINDS, PLUGIN_ID, UID } from './constants';
 import { validateOpeningHours } from './domain/hours';
-import { validateEnumArray } from './domain/validation';
+import { validateEnumArray, validateSlugArray } from './domain/validation';
 
 type Data = Record<string, unknown>;
 
@@ -27,6 +27,13 @@ const validateBoutique = (data: Data) => {
   if (data.openingHours === undefined) return;
   const result = validateOpeningHours(data.openingHours);
   if (result.ok === false) fail(result.reason);
+};
+
+/** A knowledge entry's products are slugs, as stock levels keep them, so republishing a product never breaks the link. */
+const validateKnowledge = (data: Data) => {
+  if (data.productSlugs === undefined || data.productSlugs === null) return;
+  const problem = validateSlugArray(data.productSlugs, 'productSlugs');
+  if (problem) fail(problem);
 };
 
 const assertUniqueStockPair = async (strapi: Core.Strapi, data: Data) => {
@@ -93,6 +100,7 @@ export const registerDocumentMiddleware = (strapi: Core.Strapi) => {
       const data = ((ctx.params as { data?: Data }).data ?? {}) as Data;
       if (ctx.uid === UID.product) validateProduct(data);
       if (ctx.uid === UID.boutique) validateBoutique(data);
+      if (ctx.uid === UID.knowledge) validateKnowledge(data);
       if (ctx.uid === UID.stockLevel && ctx.action === 'create') await assertUniqueStockPair(strapi, data);
     }
     return next();

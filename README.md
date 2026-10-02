@@ -41,7 +41,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | Path | What it is |
 |---|---|
 | `strapi/` | A Strapi 5.55.1 app (TypeScript, SQLite), made with `create-strapi` |
-| `strapi/src/plugins/maison/` | The Maison plugin: content types, ten MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
+| `strapi/src/plugins/maison/` | The Maison plugin: content types, eleven MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
 | `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
@@ -76,7 +76,7 @@ Maison's services hold the rules: the catalog, opening hours, who may book what,
 
 ### The REST door
 
-**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's four catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne` and `boutiques.find`) and the Home page's `api::home-page.home-page.find`, and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
+**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's five catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne`, `boutiques.find` and `knowledge.find`) and the Home page's `api::home-page.home-page.find`, and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
 
 ```bash
 STRAPI=http://localhost:1338
@@ -84,9 +84,10 @@ curl "$STRAPI/api/maison/collections?locale=en"
 curl "$STRAPI/api/maison/products?occasion=travel&maxPriceJpy=400000&inStockAt=ginza&locale=en"
 curl "$STRAPI/api/maison/products/weekender-50?locale=en"
 curl "$STRAPI/api/maison/boutiques?productSlugs=weekender-50&date=<YYYY-MM-DD>&locale=en"
+curl "$STRAPI/api/maison/knowledge?query=How%20do%20I%20care%20for%20the%20leather%3F&locale=en"
 ```
 
-- **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
+- **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. Product knowledge takes `query`, `productSlugs` and `locale`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
 - **`locale`** is `ja` (the default) or `en`.
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
@@ -184,6 +185,7 @@ console.log("Added maison-ops to", file);
 ### Before going on stage
 
 - [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits or tokens behind.
+- [ ] On the board, **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and the LINE confirmation need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
@@ -387,7 +389,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
   - `temporarily_unavailable` (503): try again after `Retry-After` seconds.
   - One LINE client can be active per Strapi.
 - **MCP:** `POST {STRAPI}/mcp` with `Authorization: Bearer <access_token>`.
-  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `request_appointment`, `my_appointments`
+  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `search_knowledge`, `request_appointment`, `my_appointments`
   - Staff tools, for staff agents: `appointment_requests` and `confirm_appointment`
   - Errors come back as `isError` results whose text is `{ "error": { "code", "message", "hint" } }`. Arguments the SDK rejects, such as a date that isn't on the calendar, come back as plain text that starts `Input validation error:`.
 - **REST, for websites:** the catalog at `/api/maison/…` with no credentials, and the customer's own bookings with the same session (see "The REST door").
@@ -474,7 +476,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `adfeb7b`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `48a79a4`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
@@ -503,7 +505,7 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 - **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
 - **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.
 - **Bind to 127.0.0.1** unless a proxy in front needs otherwise. The demo does it for Strapi, the app and the verify mock.
-- **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it five actions on every run: the four catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its four away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
+- **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it six actions on every run: the five catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its five away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
 - **Staff agents read what customers wrote.** `appointment_requests` gives a staff agent customers' notes, up to 500 characters each, which could try to instruct the model. The tool descriptions tell it to treat notes as information, and to confirm only a reference the staff member asked for. Keep `appointments.confirm` off an agent's token, or add an approval step for tools that write.
 - **One Strapi sends each LINE confirmation once.** A visit's `sent` record stops a second send, and two sends at the same moment share one push, but only within one Strapi process. With more than one, add a claim row, LINE's `X-Line-Retry-Key` or an outbox (the plugin's README, "LINE confirmations").

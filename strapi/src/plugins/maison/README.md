@@ -2,7 +2,7 @@
 
 A Strapi 5 plugin that shows one content model serving people and AI agents. It adds a fictional luxury house, "Maison": collections, products, boutiques and stock. Signed-in customers can request boutique visits, and staff review and confirm them.
 
-- **Ten MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
+- **Eleven MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
 - **REST routes at `/api/maison`** for websites: the catalog under Strapi's role permissions, and bookings for the signed-in LINE customer, on the same services, input checks and sign-in as the tools
 - **Six of the tools in the admin's AI chat**, through [strapi-plugin-tanstack-ai](https://github.com/PaulBratslavsky/strapi-plugin-tanstack-ai) 1.6
 - **A human gate:** agents can request appointments, but only staff confirm them
@@ -84,12 +84,15 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `search_products` | MCP: browse the catalog | Products by collection, category, gift occasion, price, personalization and boutique stock |
 | `view_product` | MCP: browse the catalog | One product: story, dimensions, personalization, stock per boutique |
 | `find_boutiques` | MCP: browse the catalog | Boutiques, opening hours, open on a date, stock for chosen products |
+| `search_knowledge` | MCP: browse the catalog | What Maison has written down for customers, such as care, sizing, delivery, repairs, warranty and gift wrapping: the best four published entries for a question, or none |
 | `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale`, which the visit keeps for its LINE confirmation |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
 | `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
 | `record_confirmation` | MCP: send appointment confirmations | Records whether a LINE confirmation was delivered |
+
+**Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. **Load demo catalog** adds 16 entries in English, also to a catalog loaded before.
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
@@ -115,6 +118,7 @@ Maison's services sit behind three HTTP doors. Each door checks who is calling i
 | `GET /api/maison/products` | `search_products` | `plugin::maison.products.find` |
 | `GET /api/maison/products/:slug` | `view_product` | `plugin::maison.products.findOne` |
 | `GET /api/maison/boutiques` | `find_boutiques` | `plugin::maison.boutiques.find` |
+| `GET /api/maison/knowledge` | `search_knowledge` | `plugin::maison.knowledge.find` |
 | `POST /api/maison/appointments` | `request_appointment` | A LINE customer session |
 | `GET /api/maison/my-appointments` | `my_appointments` | A LINE customer session |
 
@@ -133,6 +137,7 @@ curl "$STRAPI/api/maison/collections?locale=en"
 curl "$STRAPI/api/maison/products?occasion=travel&maxPriceJpy=400000&inStockAt=ginza&locale=en"
 curl "$STRAPI/api/maison/products/weekender-50?locale=en"
 curl "$STRAPI/api/maison/boutiques?productSlugs=weekender-50&productSlugs=passport-cover&date=2026-10-10"
+curl "$STRAPI/api/maison/knowledge?query=How%20do%20I%20care%20for%20the%20leather%3F&locale=en"
 
 # Bookings, with a customer's LINE session
 curl -X POST "$STRAPI/api/maison/appointments" \
@@ -161,11 +166,12 @@ The catalog routes use Strapi's content-API permissions, so a request needs one 
 - **A role holding their actions,** under **Settings → Users & Permissions plugin → Roles**: **Public** for a public website.
 - **A read-only, full-access or custom API token,** under **Settings → API Tokens**. A custom token needs the actions. A read-only token can call them because they're named `find` and `findOne`, the only actions Strapi lets a read-only token call.
 
-The four actions:
+The five actions:
 - `plugin::maison.collections.find`, for `GET /collections`
 - `plugin::maison.products.find`, for `GET /products`
 - `plugin::maison.products.findOne`, for `GET /products/:slug`
 - `plugin::maison.boutiques.find`, for `GET /boutiques`
+- `plugin::maison.knowledge.find`, for `GET /knowledge`
 
 The list there also shows the two customer actions, `plugin::maison.customer.requestAppointment` and `plugin::maison.customer.myAppointments`. Roles don't apply to them, so granting them opens nothing.
 

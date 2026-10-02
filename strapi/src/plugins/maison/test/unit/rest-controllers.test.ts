@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import boutiquesController from '../../server/src/controllers/boutiques';
 import collectionsController from '../../server/src/controllers/collections';
 import customerController from '../../server/src/controllers/customer';
+import knowledgeController from '../../server/src/controllers/knowledge';
 import productsController from '../../server/src/controllers/products';
 import { browseCollectionsTool } from '../../server/src/mcp/tools/browse-collections';
 import { findBoutiquesTool } from '../../server/src/mcp/tools/find-boutiques';
 import { myAppointmentsTool } from '../../server/src/mcp/tools/my-appointments';
 import { requestAppointmentTool } from '../../server/src/mcp/tools/request-appointment';
+import { searchKnowledgeTool } from '../../server/src/mcp/tools/search-knowledge';
 import { searchProductsTool } from '../../server/src/mcp/tools/search-products';
 import { viewProductTool } from '../../server/src/mcp/tools/view-product';
 import { fakeStrapi } from './fake-strapi';
@@ -312,5 +314,36 @@ describe('GET /my-appointments (customer.myAppointments)', () => {
     await customerWith({ listForCustomer }).myAppointments(ctx);
     expect(ctx.status).toBe(401);
     expect(listForCustomer).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /knowledge (knowledge.find)', () => {
+  const entry = { title: 'How do I care for the leather?', answer: 'Wipe it with a dry cloth.', category: 'care', productSlugs: [] };
+
+  it('reads productSlugs as a list, even one, and answers what search_knowledge returns', async () => {
+    const searchKnowledge = vi.fn(async () => ({ ok: true, value: { entries: [entry] } }));
+    const ctx = fakeCtx({ query: { query: 'leather care', productSlugs: 'weekender-50', locale: 'en' } });
+    await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
+    expect(searchKnowledge).toHaveBeenCalledWith('en', expect.objectContaining({ query: 'leather care', productSlugs: ['weekender-50'] }));
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual({ locale: 'en', entries: [entry] });
+    expect(searchKnowledgeTool.resolveOutputSchema(context).parse(ctx.body)).toEqual(ctx.body);
+  });
+
+  it('answers a missing question with 400 invalid_input, before calling the service', async () => {
+    const searchKnowledge = vi.fn();
+    const ctx = fakeCtx({ query: { locale: 'en' } });
+    await withCatalog(knowledgeController, { searchKnowledge }).find(ctx);
+    expect(ctx.status).toBe(400);
+    expect(ctx.body.error.code).toBe('invalid_input');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('answers an unknown product with 404 and the error the tool gives', async () => {
+    const failure = { ok: false, code: 'not_found', message: 'No published product "no-such-piece".', hint: 'Call search_products to find valid product slugs.' };
+    const ctx = fakeCtx({ query: { query: 'Will it fit?', productSlugs: 'no-such-piece' } });
+    await withCatalog(knowledgeController, { searchKnowledge: vi.fn(async () => failure) }).find(ctx);
+    expect(ctx.status).toBe(404);
+    expect(ctx.body).toEqual({ error: { code: 'not_found', message: failure.message, hint: failure.hint } });
   });
 });

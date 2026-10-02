@@ -4,14 +4,10 @@ import { Box, Button, Dialog, Flex, Typography } from '@strapi/design-system';
 import { WarningCircle } from '@strapi/icons';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
-type SeedResult = { created: boolean; collections: number; products: number; boutiques: number; stockLevels: number };
+import { describeSeed, type SeedResult } from '../seed-result';
+
 type ResetResult = { appointments: number; notifications: number };
 type Action = 'seed' | 'reset';
-
-const describeSeed = (result: SeedResult) =>
-  result.created
-    ? `Loaded ${result.products} products, ${result.collections} collections, ${result.boutiques} boutiques and ${result.stockLevels} stock levels.`
-    : 'The demo catalog is already loaded.';
 
 const describeReset = (result: ResetResult) => `Deleted ${result.appointments} appointments and ${result.notifications} notifications.`;
 
@@ -42,8 +38,8 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
         </Typography>
         <Typography variant="omega" textColor="neutral600">
           Load demo catalog creates 3 collections, 12 products and 3 boutiques in Japanese and English, publishes them and sets
-          stock; if they are there already, nothing changes. Reset deletes every appointment and delivery record and keeps the
-          catalog.
+          stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Reset deletes every
+          appointment and delivery record and keeps the catalog.
         </Typography>
         <Flex gap={2}>
           <Button loading={running === 'seed'} disabled={running !== null} onClick={() => run<SeedResult>('seed', describeSeed)}>

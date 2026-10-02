@@ -6,6 +6,7 @@ import { browseCollectionsTool } from './tools/browse-collections';
 import { findBoutiquesTool } from './tools/find-boutiques';
 import { viewProductTool } from './tools/view-product';
 import { searchProductsTool } from './tools/search-products';
+import { searchKnowledgeTool } from './tools/search-knowledge';
 import { myAppointmentsTool } from './tools/my-appointments';
 import { appointmentRequestsTool } from './tools/appointment-requests';
 import { confirmAppointmentTool } from './tools/confirm-appointment';
@@ -28,6 +29,7 @@ export const registerMcp = (strapi: Core.Strapi) => {
   if (enabled('search_products')) mcp.registerTool(searchProductsTool);
   if (enabled('view_product')) mcp.registerTool(viewProductTool);
   if (enabled('find_boutiques')) mcp.registerTool(findBoutiquesTool);
+  if (enabled('search_knowledge')) mcp.registerTool(searchKnowledgeTool);
   if (enabled('request_appointment')) mcp.registerTool(requestAppointmentTool);
   if (enabled('my_appointments')) mcp.registerTool(myAppointmentsTool);
   if (enabled('appointment_requests')) mcp.registerTool(appointmentRequestsTool);

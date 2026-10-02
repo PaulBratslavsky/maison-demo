@@ -57,6 +57,19 @@ export const findBoutiquesInput = z.object({
   locale: localeInput,
 });
 
+export const searchKnowledgeInput = z.object({
+  query: z.string().min(1).max(300).describe('The customer\'s question in their own words, e.g. "How do I care for the leather?"'),
+  productSlugs: z.array(slugInput).max(5).optional().describe('Products the question is about, from search_products: only entries about them, and general ones.'),
+  locale: localeInput,
+});
+
+export const knowledgeEntryOutput = z.object({
+  title: z.string(),
+  answer: z.string().describe('What Maison has written. Answer from this, in the customer\'s language.'),
+  category: z.string(),
+  productSlugs: z.array(z.string()).describe('The pieces it is about; empty when it applies to every piece.'),
+});
+
 /** No customer field: the customer always comes from the caller's LINE sign-in. */
 export const requestAppointmentInput = z.object({
   boutique: slugInput.describe('Boutique slug from find_boutiques, e.g. "ginza".'),

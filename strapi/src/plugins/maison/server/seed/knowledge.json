@@ -1,0 +1,116 @@
+{
+  "entries": [
+    {
+      "category": "care",
+      "productSlugs": [],
+      "title": "How do I care for the leather?",
+      "answer": "Wipe the leather with a soft, dry cloth after use, and keep it away from direct sunlight and heat. If it gets wet, blot it gently and let it dry at room temperature, never with a hair dryer. Once or twice a year, any boutique can treat it with our neutral leather balm, free of charge.",
+      "keywords": "leather, calfskin, clean, cleaning, wipe, polish, balm, cream, conditioner, wet, rain, water, stain, scratch, sun, dry, care, look after, maintain"
+    },
+    {
+      "category": "care",
+      "productSlugs": ["voyage-trunk-110"],
+      "title": "How do I clean the canvas?",
+      "answer": "Dust the canvas with a soft brush or a dry cloth. For a mark, use a cloth barely dampened with water, then let it dry in the open air. Avoid solvents and household cleaners, which dull the coated finish.",
+      "keywords": "canvas, coated canvas, fabric, dust, dirt, mark, stain, clean, cleaning, wipe, water, care, look after"
+    },
+    {
+      "category": "care",
+      "productSlugs": ["voyage-trunk-110", "cabin-case-55"],
+      "title": "How should I store a trunk or hard case?",
+      "answer": "Keep it upright in a dry room, away from radiators and direct sun, and open it every few weeks to let it air. Wipe the brass fittings with a dry cloth. A soft patina on the brass is natural and part of the piece's character.",
+      "keywords": "trunk, hard case, suitcase, cabin case, store, storage, keep, humidity, damp, mould, mold, brass, fittings, corners, patina, tarnish, care"
+    },
+    {
+      "category": "materials",
+      "productSlugs": [],
+      "title": "What are Maison's pieces made of?",
+      "answer": "Our leather is full-grain calfskin, finished by hand, and it gains a sheen with use. Trunks and hard cases are coated canvas over a wooden frame, with solid brass fittings. Linings are cotton satin or suede, depending on the piece.",
+      "keywords": "material, materials, made of, leather, real leather, genuine, calfskin, full-grain, canvas, wood, wooden frame, brass, metal, lining, suede, cotton, satin"
+    },
+    {
+      "category": "sizing",
+      "productSlugs": ["cabin-case-55"],
+      "title": "Will the Cabin Case 55 fit in an airline overhead bin?",
+      "answer": "The Cabin Case 55 measures 55 × 40 × 23 cm with its wheels and handle, which fits the cabin size most airlines allow, usually up to 55 × 40 × 25 cm. Airlines set their own limits, so please check yours before you fly.",
+      "keywords": "cabin, carry-on, carry on, hand luggage, overhead, bin, airline, plane, flight, fly, size, dimensions, fit, fits, allowed"
+    },
+    {
+      "category": "sizing",
+      "productSlugs": ["tote-soleil"],
+      "title": "Does the Tote Soleil fit a laptop?",
+      "answer": "The Tote Soleil measures 38 × 30 × 16 cm. It holds A4 documents and most 13-inch laptops, with an inner zip pocket for small things. A 15-inch laptop is usually too wide.",
+      "keywords": "tote, laptop, computer, macbook, a4, documents, work, office, size, dimensions, fit, fits, how big"
+    },
+    {
+      "category": "sizing",
+      "productSlugs": ["weekender-50"],
+      "title": "How much does the Weekender 50 hold?",
+      "answer": "The Weekender 50 measures 50 × 29 × 22 cm and holds clothes for two or three nights, a pair of shoes and a wash bag. Its shoulder strap detaches, so you can carry it by the handles.",
+      "keywords": "weekender, holdall, duffle, duffel, overnight, weekend, trip, nights, capacity, hold, how much, size, dimensions, how big, strap"
+    },
+    {
+      "category": "sizing",
+      "productSlugs": ["carnet-wallet", "card-case-quatre"],
+      "title": "How many cards do the wallet and card case hold?",
+      "answer": "The Carnet Wallet measures 19 × 10 cm and holds twelve cards, with a full-length pocket for notes. The Card Case Quatre measures 11 × 8 cm and has four pockets, for up to eight cards.",
+      "keywords": "wallet, card case, cards, how many, capacity, notes, bills, cash, slim, size, dimensions, fit"
+    },
+    {
+      "category": "sizing",
+      "productSlugs": ["watch-roll-trois"],
+      "title": "Will my watches fit in the Watch Roll Trois?",
+      "answer": "The Watch Roll Trois holds three watches, each on its own suede cushion, and suits cases up to 46 mm across. Rolled up, it measures 26 × 9 × 9 cm.",
+      "keywords": "watch, watches, watch roll, case size, mm, diameter, how many, three, travel, fit, size"
+    },
+    {
+      "category": "personalization",
+      "productSlugs": [],
+      "title": "Can I personalize a piece, and how long does it take?",
+      "answer": "Every piece can be personalized. Hot-stamped initials take about 3 days, a monogram in your choice of colour about 14 days, and hand-painted stripes on a trunk about 90 days. Each product page shows the options and the time for that piece. Personalized pieces can't be returned or exchanged.",
+      "keywords": "personalize, personalise, personalization, personalisation, custom, initials, monogram, engrave, engraving, emboss, embossing, stamp, hot stamp, letters, name, stripes, paint, painted, colour, color, how long, lead time, days"
+    },
+    {
+      "category": "delivery",
+      "productSlugs": [],
+      "title": "Do you deliver, and can I collect in a boutique?",
+      "answer": "We deliver anywhere in Japan within 2 to 4 business days, free of charge, and you can collect any order at one of our boutiques instead. A personalized piece ships once its work is done. We don't ship outside Japan yet.",
+      "keywords": "delivery, deliver, shipping, ship, send, post, courier, arrive, arrival, how long, pick up, pickup, collect, collection, click and collect, abroad, overseas, international"
+    },
+    {
+      "category": "returns",
+      "productSlugs": [],
+      "title": "Can I return or exchange a piece?",
+      "answer": "You can return or exchange an unused piece within 14 days of purchase, with its receipt, at any boutique. Personalized pieces can't be returned or exchanged.",
+      "keywords": "return, returning, refund, money back, exchange, swap, change, receipt, unused, wrong, mistake, changed my mind"
+    },
+    {
+      "category": "repairs",
+      "productSlugs": [],
+      "title": "Do you repair Maison pieces?",
+      "answer": "Our workshop repairs every Maison piece, for as long as you own it: stitching, handles, zips, wheels, corners and linings. Bring the piece to any boutique, and we'll give you a quote and a date before any work starts. Most repairs take two to four weeks.",
+      "keywords": "repair, repairs, fix, broken, broke, mend, stitching, seam, handle, zip, zipper, strap, wheel, wheels, corner, lining, restore, restoration, damaged"
+    },
+    {
+      "category": "warranty",
+      "productSlugs": [],
+      "title": "Is there a warranty?",
+      "answer": "Every piece has a two-year warranty against defects in materials and workmanship, from the date of purchase. Wear, accidents and water damage aren't covered, but our workshop can repair them for a fee.",
+      "keywords": "warranty, guarantee, guaranteed, defect, defective, faulty, covered, cover, coverage, years, broken"
+    },
+    {
+      "category": "gifting",
+      "productSlugs": [],
+      "title": "Do you gift wrap?",
+      "answer": "Every purchase comes in a Maison box with a ribbon, free of charge, and we can add a handwritten card with your message. Ask for a gift receipt, which doesn't show the price.",
+      "keywords": "gift, gift wrap, gift wrapping, wrap, wrapping, box, ribbon, card, message, note, present, packaging, gift receipt"
+    },
+    {
+      "category": "store",
+      "productSlugs": [],
+      "title": "Do I need an appointment to visit a boutique?",
+      "answer": "You can visit any boutique during its opening hours without an appointment. An appointment gives you a private consultation, with the pieces you chose ready to see, so it's the best way to see a piece that's usually in stock elsewhere.",
+      "keywords": "appointment, booking, walk in, walk-in, visit, visiting, consultation, private, without an appointment, boutique, store, shop"
+    }
+  ]
+}

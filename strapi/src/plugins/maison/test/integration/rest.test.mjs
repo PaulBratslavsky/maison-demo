@@ -10,8 +10,11 @@ const TUESDAY = tokyoDate(10, { weekday: 2 }); // Osaka is closed all day on Tue
 const VISIT = tokyoTime(IN_10_DAYS, '14:00'); // Ginza is open every day
 const APPOINTMENT = 'plugin::maison.appointment';
 /** The catalog's actions, as a role holds them: plugin::maison.<controller>.<action>. */
-const CATALOG_ACTIONS = { collections: ['find'], products: ['find', 'findOne'], boutiques: ['find'] };
-const CATALOG_PATHS = ['/collections?locale=en', '/products?occasion=travel', '/products/weekender-50', '/boutiques?productSlugs=weekender-50'];
+const CATALOG_ACTIONS = { collections: ['find'], products: ['find', 'findOne'], boutiques: ['find'], knowledge: ['find'] };
+const CATALOG_PATHS = [
+  '/collections?locale=en', '/products?occasion=travel', '/products/weekender-50', '/boutiques?productSlugs=weekender-50',
+  '/knowledge?query=leather%20care&locale=en',
+];
 const booking = { boutique: 'ginza', productSlugs: ['weekender-50'], requestedFor: VISIT };
 /** Stands in for the decrypted admin key resolveAccessToken returns with a valid session. It must never come back. */
 const STUB_ADMIN_KEY = 'stub-admin-key-behind-the-session';
@@ -146,6 +149,13 @@ describe('the REST door: /api/maison over HTTP', () => {
     const osaka = body.boutiques.find((b) => b.slug === 'osaka');
     assert.equal(osaka.openOnDate, false, 'Osaka is closed on Tuesdays');
     assert.deepEqual(osaka.stock.map((s) => s.product), ['weekender-50', 'passport-cover']);
+  });
+
+  it("answers a question from product knowledge, with a piece's own entry first", async () => {
+    const { status, body } = await call('GET', '/knowledge?query=Will%20it%20fit%20in%20the%20overhead%20bin%3F&productSlugs=cabin-case-55&locale=en');
+    assert.equal(status, 200, JSON.stringify(body));
+    assert.equal(body.locale, 'en');
+    assert.equal(body.entries[0].title, 'Will the Cabin Case 55 fit in an airline overhead bin?');
   });
 
   it('refuses a booking without a LINE customer session, with 401 and WWW-Authenticate: Bearer', async () => {

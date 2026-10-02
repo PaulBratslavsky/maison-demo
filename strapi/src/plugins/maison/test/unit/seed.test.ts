@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import content from '../../server/seed/content.json';
+import knowledge from '../../server/seed/knowledge.json';
 import seedService, { imageMimeType } from '../../server/src/services/seed';
 
 // The service finds its images from the bundled dist/ layout, so from the source tree they aren't there.
@@ -37,6 +38,7 @@ describe('loadDemoCatalog', () => {
     const upload = vi.fn(async (_args: { files: { originalFilename: string; mimetype: string } }) => [{ id: 1 }]);
     const documents = {
       findFirst: async () => null,
+      count: async () => 0,
       create: async () => ({ documentId: 'doc' }),
       update: async () => ({}),
       publish: async () => ({}),
@@ -56,5 +58,49 @@ describe('loadDemoCatalog', () => {
     // The expected types are spelled out here, not taken from imageMimeType, so a wrong mapping can't agree with itself.
     const typeOf: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
     for (const [fileName, mimetype] of uploaded) expect(mimetype, fileName).toBe(typeOf[path.extname(fileName)]);
+  });
+});
+
+describe('loadDemoCatalog and the product knowledge', () => {
+  /** A Strapi whose catalog is or isn't there, with `knowledgeCount` English knowledge entries, recording what's created and published. */
+  const strapiWith = ({ catalogThere, knowledgeCount }: { catalogThere: boolean; knowledgeCount: number }) => {
+    const created: Array<{ uid: string; locale: string }> = [];
+    const published: Array<{ uid: string; locale: string }> = [];
+    const documents = (uid: string) => ({
+      findFirst: async () => (catalogThere ? { documentId: 'existing' } : null),
+      count: async () => (uid === 'plugin::maison.knowledge' ? knowledgeCount : 0),
+      create: async ({ locale }: { locale: string }) => {
+        created.push({ uid, locale });
+        return { documentId: `doc-${created.length}` };
+      },
+      update: async () => ({}),
+      publish: async ({ locale }: { locale: string }) => {
+        published.push({ uid, locale });
+        return {};
+      },
+    });
+    const strapi = {
+      plugin: (id: string) => ({
+        service: () => (id === 'upload' ? { upload: async () => [{ id: 1 }] } : { findByCode: async () => ({}), create: async () => ({}) }),
+      }),
+      documents,
+    } as any;
+    return { strapi, created, published };
+  };
+
+  it('adds the product knowledge in English to a catalog loaded before, and publishes it', async () => {
+    const { strapi, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 0 });
+    expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({
+      created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: knowledge.entries.length,
+    });
+    const entry = { uid: 'plugin::maison.knowledge', locale: 'en' };
+    expect(created).toEqual(knowledge.entries.map(() => entry));
+    expect(published).toEqual(knowledge.entries.map(() => entry));
+  });
+
+  it('adds nothing when there are English entries already', async () => {
+    const { strapi, created } = strapiWith({ catalogThere: true, knowledgeCount: 3 });
+    expect((await seedService({ strapi }).loadDemoCatalog()).knowledge).toBe(0);
+    expect(created).toEqual([]);
   });
 });

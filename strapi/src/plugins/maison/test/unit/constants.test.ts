@@ -8,9 +8,9 @@ describe('constants', () => {
     for (const action of Object.values(ACTION)) expect(action.startsWith('plugin::maison.')).toBe(true);
   });
 
-  it('declares the ten tools exactly once each', () => {
-    expect(TOOL_NAMES).toHaveLength(10);
-    expect(new Set(TOOL_NAMES).size).toBe(10);
+  it('declares the eleven tools exactly once each', () => {
+    expect(TOOL_NAMES).toHaveLength(11);
+    expect(new Set(TOOL_NAMES).size).toBe(11);
   });
 
   it('declares the staff actions', () => {

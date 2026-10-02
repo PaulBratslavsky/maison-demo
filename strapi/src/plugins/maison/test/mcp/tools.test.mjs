@@ -41,10 +41,10 @@ describe('Maison over /mcp', () => {
 
   it('shows each token only the tools its permissions allow', async () => {
     assert.deepEqual(await toolNames(customer), [
-      'browse_collections', 'find_boutiques', 'my_appointments', 'request_appointment', 'search_products', 'view_product',
+      'browse_collections', 'find_boutiques', 'my_appointments', 'request_appointment', 'search_knowledge', 'search_products', 'view_product',
     ]);
     assert.deepEqual(await toolNames(staff), [
-      'appointment_requests', 'browse_collections', 'confirm_appointment', 'find_boutiques', 'search_products', 'view_product',
+      'appointment_requests', 'browse_collections', 'confirm_appointment', 'find_boutiques', 'search_knowledge', 'search_products', 'view_product',
     ]);
     assert.deepEqual(await toolNames(ops), ['pending_confirmations', 'record_confirmation']);
   });

@@ -10,16 +10,17 @@ import { fakeStrapi } from './fake-strapi';
 const contentApi = (routes as Record<string, any>)['content-api'];
 const route = (method: string, path: string) => contentApi.routes.find((r: any) => r.method === method && r.path === path);
 const CUSTOMER_SESSION = 'plugin::maison.customer-session';
-const CATALOG_PATHS = ['/collections', '/products', '/products/:slug', '/boutiques'];
+const CATALOG_PATHS = ['/collections', '/products', '/products/:slug', '/boutiques', '/knowledge'];
 
 describe('content-API routes (served at /api/maison)', () => {
-  it("are the six REST routes, the catalog's on Strapi's find and findOne actions", () => {
+  it("are the seven REST routes, the catalog's on Strapi's find and findOne actions", () => {
     expect(contentApi.type).toBe('content-api');
     expect(contentApi.routes.map((r: any) => [r.method, r.path, r.handler])).toEqual([
       ['GET', '/collections', 'collections.find'],
       ['GET', '/products', 'products.find'],
       ['GET', '/products/:slug', 'products.findOne'],
       ['GET', '/boutiques', 'boutiques.find'],
+      ['GET', '/knowledge', 'knowledge.find'],
       ['POST', '/appointments', 'customer.requestAppointment'],
       ['GET', '/my-appointments', 'customer.myAppointments'],
     ]);

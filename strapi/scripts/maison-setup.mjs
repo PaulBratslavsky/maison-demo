@@ -1,6 +1,6 @@
 // Sets up the Maison demo on a running Strapi. Safe to run again: it replaces what it made before.
 //   1. on a fresh database, registers the demo admin (DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD) as its first admin
-//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's four catalog actions,
+//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's five catalog actions,
 //      and the Home page's find, for the text on the app's Home screen
 //   3. (re)creates the admin tokens "Maison customer" and "Maison ops"
 //   4. (re)creates the OAuth client "Maison app" (customer sign-in with LINE, mapped to "Maison customer").
@@ -81,7 +81,7 @@ export const writeEnv = (file, values) => {
 
 /**
  * What anyone may read over REST without credentials:
- * - Maison's catalog, for websites (GET /api/maison/collections, /products, /products/:slug and /boutiques). Booking and
+ * - Maison's catalog, for websites (GET /api/maison/collections, /products, /products/:slug, /boutiques and /knowledge). Booking and
  *   "my visits" there take the customer's LINE session, whatever a role holds.
  * - the Home page's published text (GET /api/home-page), which the app's server reads.
  */
@@ -90,6 +90,7 @@ const PUBLIC_ACTIONS = [
   'plugin::maison.products.find',
   'plugin::maison.products.findOne',
   'plugin::maison.boutiques.find',
+  'plugin::maison.knowledge.find',
   'api::home-page.home-page.find',
 ];
 

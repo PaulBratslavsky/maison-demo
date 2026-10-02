@@ -143,7 +143,7 @@ test('without a .env, copies .env.example, then writes the values into it, reada
   assert.equal(readFileSync(join(file, '..', '.env.example'), 'utf8'), example, '.env.example is left as it was');
 });
 
-const CATALOG = ['plugin::maison.collections.find', 'plugin::maison.products.find', 'plugin::maison.products.findOne', 'plugin::maison.boutiques.find'];
+const CATALOG = ['plugin::maison.collections.find', 'plugin::maison.products.find', 'plugin::maison.products.findOne', 'plugin::maison.boutiques.find', 'plugin::maison.knowledge.find'];
 const HOME_PAGE_FIND = 'api::home-page.home-page.find';
 // What a fresh database's Public role allows: users-permissions' own sign-in and sign-up routes.
 const AUTH = ['plugin::users-permissions.auth.callback', 'plugin::users-permissions.auth.connect', 'plugin::users-permissions.auth.register'];

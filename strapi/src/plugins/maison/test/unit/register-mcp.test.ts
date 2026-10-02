@@ -24,7 +24,7 @@ describe('registerMcp', () => {
     registerMcp(fakeStrapi({ mcp, config: { disabledTools: ['find_boutiques'] } }));
     const names = mcp.registerTool.mock.calls.map(([tool]) => tool.name);
     expect(names).toEqual([
-      'browse_collections', 'search_products', 'view_product',
+      'browse_collections', 'search_products', 'view_product', 'search_knowledge',
       'request_appointment', 'my_appointments', 'appointment_requests', 'confirm_appointment',
       'pending_confirmations', 'record_confirmation',
     ]);

@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Product knowledge, and `search_knowledge`.** A new content type, `plugin::maison.knowledge`, localized with draft and publish: a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. Saving one refuses a `productSlugs` that isn't a list of distinct slugs.
+  - `search_knowledge` (MCP: browse the catalog) returns the best four published entries for a question, in its locale with the default locale filling in, scored on the question's words in the title, the keywords and the answer, or none. With `productSlugs`, entries about other pieces are left out, and an unknown or unpublished product is `not_found`.
+  - `GET /api/maison/knowledge` is the same search over REST, on the action `plugin::maison.knowledge.find`.
+  - **Load demo catalog** adds 16 product knowledge entries in English, also to a catalog loaded before. Its notice says what it added.
 - **Strapi sends the LINE confirmation itself, on every confirm path:** the board's Confirm, `confirm_appointment` in the admin chat or from an MCP client, and Publish in the Content Manager.
   - Once a publish of an appointment has gone through, a document middleware pushes the visit's flex message with LINE's push API and waits for the answer, 8 seconds at most. Inside a transaction, as the Content Manager's Publish runs, it sends once the transaction commits instead, without waiting, and a rolled-back publish sends nothing. A failed send never fails the publish. The new `line-confirmations` service sends it, with the message `pending_confirmations` lists, now built by one shared function.
   - Each attempt is recorded as a notification by `strapi`: sent, or failed with LINE's HTTP status and message. A push LINE took but that couldn't be recorded answers `sent_unrecorded`. A visit gets one, so publishing again sends nothing, two sends at once share one push, and a visit that's over gets none. `confirmations.record()` takes an optional `recordedBy`, and still writes `ops-agent` without it.

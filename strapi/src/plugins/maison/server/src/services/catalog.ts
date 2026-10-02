@@ -2,7 +2,9 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { UID, type Locale } from '../constants';
+import { productsNotFound } from '../domain/failures';
 import { hoursForDate, validateOpeningHours, type OpeningHoursEntry } from '../domain/hours';
+import { rankKnowledge, type KnowledgeEntry } from '../domain/knowledge';
 import { failure, type ServiceResult } from '../domain/service-result';
 import { blocksToPlainText, teaser } from '../domain/text';
 import { absoluteUrl } from '../domain/url';
@@ -43,6 +45,14 @@ export interface SearchFilters {
   personalizable?: boolean;
   inStockAt?: string;
   limit?: number;
+}
+
+/** A knowledge entry as search_knowledge returns it. */
+export interface KnowledgeAnswer {
+  title: string;
+  answer: string;
+  category: string;
+  productSlugs: string[];
 }
 
 const arrayOf = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
@@ -192,11 +202,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const productSlugs = options.productSlugs ?? [];
       if (productSlugs.length > 0) {
         const known = await publishedSlugs(UID.product, locale, productSlugs);
-        const unknown = [...new Set(productSlugs.filter((slug) => !known.has(slug)))].map((slug) => `"${slug}"`);
-        if (unknown.length > 0) {
-          const what = unknown.length === 1 ? 'product' : 'products';
-          return failure('not_found', `No published ${what} ${unknown.join(', ')}.`, 'Call search_products to find valid product slugs.');
-        }
+        const unknown = [...new Set(productSlugs.filter((slug) => !known.has(slug)))];
+        if (unknown.length > 0) return productsNotFound(unknown);
       }
       const boutiques = await findPublished(UID.boutique, locale, { sort: 'slug:asc' });
       const stock = productSlugs.length > 0 ? await stockByProduct() : new Map<string, StockEntry[]>();
@@ -219,6 +226,30 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         };
       });
       return { ok: true, value: views };
+    },
+
+    /**
+     * search_knowledge: the published entries that answer the question best, at most four, in `locale`, with the default
+     * locale's entries where a translation is missing. A product that doesn't exist or isn't published is not_found,
+     * never a narrower search that quietly leaves it out.
+     */
+    async searchKnowledge(locale: Locale, input: { query: string; productSlugs?: string[] }): Promise<ServiceResult<{ entries: KnowledgeAnswer[] }>> {
+      const productSlugs = [...new Set(input.productSlugs ?? [])];
+      if (productSlugs.length > 0) {
+        const known = await publishedSlugs(UID.product, locale, productSlugs);
+        const unknown = productSlugs.filter((slug) => !known.has(slug));
+        if (unknown.length > 0) return productsNotFound(unknown);
+      }
+      const docs = await findPublished(UID.knowledge, locale, { fields: ['title', 'answer', 'category', 'productSlugs', 'keywords'] });
+      const entries: KnowledgeEntry[] = docs.map((doc) => ({
+        title: (doc.title as string | null) ?? '',
+        answer: (doc.answer as string | null) ?? '',
+        category: (doc.category as string | null) ?? '',
+        productSlugs: arrayOf(doc.productSlugs),
+        keywords: (doc.keywords as string | null) ?? '',
+      }));
+      const ranked = rankKnowledge(entries, input.query, locale, productSlugs);
+      return { ok: true, value: { entries: ranked.map(({ title, answer, category, productSlugs: slugs }) => ({ title, answer, category, productSlugs: slugs })) } };
     },
   };
 };

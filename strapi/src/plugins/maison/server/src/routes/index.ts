@@ -54,6 +54,7 @@ export default {
       { method: 'GET', path: '/products', handler: 'products.find' },
       { method: 'GET', path: '/products/:slug', handler: 'products.findOne' },
       { method: 'GET', path: '/boutiques', handler: 'boutiques.find' },
+      { method: 'GET', path: '/knowledge', handler: 'knowledge.find' },
       { method: 'POST', path: '/appointments', handler: 'customer.requestAppointment', config: customerOnly() },
       { method: 'GET', path: '/my-appointments', handler: 'customer.myAppointments', config: customerOnly() },
     ],
