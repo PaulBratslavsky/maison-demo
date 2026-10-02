@@ -18,17 +18,26 @@ interface ChatMessage {
 const shown = (part: ChatPart) =>
   part.type === 'text' ? Boolean(part.text?.trim()) : part.type === 'dynamic-tool' || part.type.startsWith('tool-');
 
+/** A tool call's name: a dynamic-tool part carries it (MCP tools arrive as dynamic tools), a static one has it in its type. */
+const toolNameOf = (part: ChatPart): string | undefined =>
+  part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
+
+/** Whether a call's result is a refusal: an MCP error result (isError) that came back. */
+const refused = (part: ChatPart): boolean => part.state === 'output-available' && (part.output as { isError?: unknown } | null | undefined)?.isError === true;
+
 /**
  * Whether a part is a request_appointment call that may have booked a visit. Only Maison's refusal says it didn't: an
  * MCP error result (isError) that came back. A result without one is a booking. A call with no result, or one that failed
  * on the way (output-error), can't be told from a booking that went through, so it counts as one.
  */
-const mayHaveBooked = (part: ChatPart): boolean => {
-  const name = part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
-  if (name !== 'request_appointment') return false;
-  const refused = part.state === 'output-available' && (part.output as { isError?: unknown } | null | undefined)?.isError === true;
-  return !refused;
-};
+const mayHaveBooked = (part: ChatPart): boolean => toolNameOf(part) === 'request_appointment' && !refused(part);
+
+/**
+ * Whether a part is a hand_off_to_staff call that went through: it has its result, and the result isn't an error. That
+ * is when the chat shows the note and the LINE chat button (toolView's `handOff`). A call that failed, or has no result,
+ * shows neither.
+ */
+const handedOff = (part: ChatPart): boolean => toolNameOf(part) === 'hand_off_to_staff' && part.state === 'output-available' && !refused(part);
 
 /**
  * Whether the last reply ended with nothing to read: no text, or tool calls and no words after them. The local model
@@ -40,12 +49,17 @@ const mayHaveBooked = (part: ChatPart): boolean => {
  * included, and sends the customer's yes again, so the model would book the visit a second time: Maison has no duplicate
  * check, only a cap of 3 open requests. The call's chip (and the visit's card) shows what happened, and the customer can
  * still write.
+ *
+ * Nor when the reply holds a hand-off that went through: the note and the LINE chat button under its line are the answer,
+ * so a reply that ends on the hand-off, with no words after it, isn't empty. A hand-off that failed shows neither, and
+ * counts as no answer.
  */
 export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boolean => {
   if (busy) return false;
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return false;
   if (last.parts.some(mayHaveBooked)) return false;
+  if (last.parts.some(handedOff)) return false;
   const end = last.parts.filter(shown).at(-1);
   return end?.type !== 'text';
 };

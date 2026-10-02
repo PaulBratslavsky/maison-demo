@@ -27,6 +27,14 @@ const askedToBook = [
   user('Yes, please.'),
 ];
 
+/** A hand_off_to_staff call as the page holds it: the concierge's own tool, so a `tool-<name>` part. */
+const handOff = (state: string, output?: unknown): Part => ({ type: 'tool-hand_off_to_staff', state, ...(output === undefined ? {} : { output }) });
+const handedOff = handOff('output-available', { handedOff: true });
+/** What search_knowledge answers when no entry fits: a result with an empty list. */
+const searchKnowledge: Part = { type: 'dynamic-tool', toolName: 'search_knowledge', state: 'output-available', output: { content: [], structuredContent: { locale: 'en', entries: [] } } };
+/** A question Maison has written nothing about: search_knowledge finds nothing, and the reply hands off. */
+const askedAboutBitcoin = [user('Can I pay in bitcoin?')];
+
 describe('needsRetry', () => {
   it('is false for a reply that ends in something to read', () => {
     expect(needsRetry([user('Hello'), assistant(text('Good afternoon.'))], false)).toBe(false);
@@ -93,5 +101,19 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedToBook, assistant({ type: 'step-start' })], false)).toBe(true);
     // Asking again keeps the earlier replies, so the model still sees that booking.
     expect(needsRetry([...askedToBook, assistant(booked, text('Requested.')), user('Anything else for him?'), assistant(searchProducts)], false)).toBe(true);
+  });
+
+  // Under the hand-off's line are the note and the LINE chat button: they are the answer, with words after them or none.
+  it('is false after a hand-off went through, even with no words after it', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handedOff)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, searchKnowledge, { type: 'step-start' }, handedOff, { type: 'step-start' })], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOff, searchKnowledge)], false)).toBe(false); // another tool call after it
+  });
+
+  it('still allows it when the hand-off failed or has no result: no note shows, so nothing answered', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handOff('input-available'))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge, handOff('output-available', refusal))], false)).toBe(true); // a result that is an error
+    expect(needsRetry([...askedAboutBitcoin, assistant(searchKnowledge)], false)).toBe(true); // it searched, and stopped
   });
 });

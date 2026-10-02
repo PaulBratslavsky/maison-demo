@@ -231,6 +231,16 @@ describe('handleConcierge', () => {
     expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['hand_off_to_staff', 'resolve_date', 'search_products']);
   });
 
+  it("tells the model, in hand_off_to_staff's own description, to call it before it writes its answer, and that it sends nothing", async () => {
+    const { createMcpClient } = fakeMcp();
+    const model = replyModel();
+    await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
+    const handOff = model.doStreamCalls[0].tools?.find((entry) => entry.name === 'hand_off_to_staff');
+    const description = handOff?.type === 'function' ? handOff.description : undefined;
+    expect(description).toMatch(/Call it when search_knowledge returns no entry that answers the customer's question, before you write your answer\./);
+    expect(description).toMatch(/It sends nothing itself, so never say the team will contact the customer\./);
+  });
+
   /**
    * Maison tools as mcp.tools() gives them: dynamic tools with a JSON schema (from the MCP server's tools/list) and no
    * validation of their own. Each records the input its execute gets.
@@ -690,10 +700,16 @@ describe('conciergeInstructions', () => {
   it('sends questions about policies to search_knowledge, and the ones it has no answer to, to hand_off_to_staff, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
-      expect(text, locale).toMatch(/call search_knowledge with the customer's own words/);
+      expect(text, locale).toMatch(/delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words/);
       expect(text, locale).toMatch(/Answer only from the entries it returns, and never invent a policy, a price or a time\./);
-      expect(text, locale).toMatch(/If no entry answers the question, call hand_off_to_staff/);
-      expect(text, locale).toMatch(/Never say the team will contact them\./);
+      // The call comes before any words. A model that writes first tells the customer where to go without calling it, and no note or button shows.
+      expect(text, locale).toMatch(
+        /If no entry answers the question, call hand_off_to_staff next, before you write anything, and then say in one sentence that Maison's team answers questions like this in the LINE chat\./
+      );
+      expect(text, locale).toMatch(/Never mention the LINE chat unless you called hand_off_to_staff in this reply/);
+      expect(text, locale).toMatch(/and never say the team will contact them\./);
+      // The note and the button render above the model's words, and not at all without a LINE Official Account: it never points at a button.
+      expect(text, locale).not.toMatch(/button below/);
     }
   });
 

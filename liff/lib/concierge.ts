@@ -58,7 +58,7 @@ Rules:
 6. If a tool returns an error, follow its hint. not_found means a slug was wrong: look it up with the tool the hint names, never guess. An input validation error means fix the arguments and call again. Otherwise ask the customer.
 7. ${locale === 'ja' ? 'Reply in polite Japanese (keigo).' : 'Reply in English.'} Pass locale "${locale}" to every tool that takes one, so names match your reply and the app's cards. Keep replies to two or three short sentences of plain text: no markdown, no bold, no numbered or bulleted lists. The app shows product cards, so don't repeat their details.
 8. Suggest at most three products at a time.
-9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff, and say that Maison's team answers questions like this in the LINE chat, which the button below opens. Never say the team will contact them.`;
+9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, and then say in one sentence that Maison's team answers questions like this in the LINE chat. Never mention the LINE chat unless you called hand_off_to_staff in this reply, and never say the team will contact them.`;
 };
 
 /**
@@ -115,12 +115,13 @@ const resolveDateTool = (locale: 'ja' | 'en', now: Date) =>
  * The concierge's second own tool. When nothing Maison has written answers a question, it calls this, and the chat
  * shows where Maison's team answers, with the LINE chat button (components/chat-parts.tsx). It sends nothing and logs
  * nothing yet, so the customer asks the team there. Any input is accepted and ignored: the local model sends nulls and a
- * locale.
+ * locale. Rule 9 and the description both ask for the call before any words: with its words first, the local model once
+ * told the customer to use "the button below", never made the call, and no note or button showed.
  */
 const handOffTool = () =>
   tool({
     description:
-      "Call it when search_knowledge returns no entry that answers the customer's question. The app then shows the customer a button that opens Maison's LINE chat, where Maison's team answers. It sends nothing itself, so never say the team will contact the customer.",
+      "Call it when search_knowledge returns no entry that answers the customer's question, before you write your answer. The app then shows the customer a note and a button that opens Maison's LINE chat, where Maison's team answers. It sends nothing itself, so never say the team will contact the customer.",
     inputSchema: z.object({}),
     execute: async () => ({ handedOff: true }),
   });

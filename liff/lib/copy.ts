@@ -69,8 +69,9 @@ export const COPY = {
     // reaches staff from the app yet: the customer asks in Maison's LINE chat.
     handOff: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
     // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
-    // Account: on My visits under `line`, on a visit's page, and after a booking. For a customer who hasn't added Maison
-    // yet (liff.getFriendship() in LINE mode), the add-friend words take their place (lineChatWords in lib/line-chat.ts).
+    // Account: on My visits under `line`, on a visit's page, after a booking, and under a hand-off in the concierge.
+    // For a customer who hasn't added Maison yet (liff.getFriendship() in LINE mode), the add-friend words take their
+    // place (lineChatWords in lib/line-chat.ts).
     lineChat: {
       button: 'LINEでMaisonにメッセージ',
       line: '確定のご連絡はMaisonのLINEトークにお届けします。',

@@ -209,7 +209,7 @@ console.log("Added maison-ops to", file);
 | 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
 
-**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". The line under the reply reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi.
+**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi.
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
 
@@ -276,7 +276,7 @@ Check these once, in the admin:
    - the board shows LINE sent
    - **My visits** shows "Confirmed · LINE sent" (確定 · LINEで送信済み in Japanese)
 6. Let customers add Maison themselves, since a confirmation only reaches a customer who has added the Official Account as a friend:
-   - **In the app:** put the Official Account's basic ID, with its `@`, in `liff/.env` as `NEXT_PUBLIC_LINE_OA_ID`, and rebuild the app. **Chat with Maison on LINE** then appears on **My visits**, on a visit's page and after a booking. It opens `https://line.me/R/ti/p/%40…`: a friend lands in the chat with Maison, anyone else on its add-friend screen. Without the setting there's no button. LINE's links work in LINE on phones, not in LINE for PC.
+   - **In the app:** put the Official Account's basic ID, with its `@`, in `liff/.env` as `NEXT_PUBLIC_LINE_OA_ID`, and rebuild the app. **Chat with Maison on LINE** then appears on **My visits**, on a visit's page, after a booking and under a hand-off in the concierge. It opens `https://line.me/R/ti/p/%40…`: a friend lands in the chat with Maison, anyone else on its add-friend screen. Without the setting there's no button. LINE's links work in LINE on phones, not in LINE for PC.
    - **At sign-in (option B):** in LINE Developers, open the LINE Login channel's **Basic settings**, set **Linked LINE Official Account** to yours, and turn the LIFF app's **Add friend option** on. LINE then offers to add Maison when a customer first allows the app. With the account linked, the app also asks LINE whether the customer has added Maison, and if not, the button reads **Add Maison on LINE**.
 
 The message's button opens the visit in the app, at `MAISON_LIFF_URL` followed by `/visits/<reference>`. In local mode `MAISON_LIFF_URL` is `http://localhost:3003`, which your phone can't open. With option B it's your LIFF URL, which opens the app inside LINE.
