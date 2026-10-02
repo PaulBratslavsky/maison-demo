@@ -208,6 +208,11 @@ describe("friendFlag: whether the customer has added Maison's Official Account, 
     }
   );
 
+  it('takes an answer without a true or false friendFlag as none', async () => {
+    liff.getFriendship.mockResolvedValue({});
+    expect(await friendFlag()).toBeNull();
+  });
+
   it.each([
     ['unset', undefined],
     ['empty', ''],
@@ -237,28 +242,22 @@ describe("friendFlag: whether the customer has added Maison's Official Account, 
     expect(warn).not.toHaveBeenCalled();
   });
 
-  describe('with the LIFF mock', () => {
-    beforeEach(() => {
-      vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'true');
-      liff.isInClient.mockReturnValue(false);
-    });
-
-    it("gives no answer when the mock throws, as @line/liff-mock does without liff.login(), which mock mode never calls", async () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      liff.getFriendship.mockImplementation(() => {
-        throw new Error('You need to call liff.login first.'); // at once, not a rejected promise
-      });
-      expect(await friendFlag()).toBeNull();
-      expect(warn).toHaveBeenCalledTimes(1);
-    });
-
-    it("takes the mock's answer like LINE's when it gives one, and an answer without a friendFlag as none", async () => {
-      liff.getFriendship.mockResolvedValue({ friendFlag: false }); // @line/liff-mock's default answer
-      expect(await friendFlag()).toBe(false);
-      vi.resetModules(); // a new page load
-      liff.getFriendship.mockResolvedValue({});
-      expect(await friendFlag()).toBeNull();
-    });
+  it.each([
+    ['would answer friendFlag false', async () => ({ friendFlag: false })], // @line/liff-mock's default answer
+    [
+      'would throw, as it does without liff.login()',
+      () => {
+        throw new Error('You need to call liff.login first.');
+      },
+    ],
+  ])("doesn't ask in LIFF-mock mode, though the mock %s: the plain button, and no warning", async (_, answer) => {
+    vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'true');
+    vi.stubEnv('NODE_ENV', 'development');
+    liff.isInClient.mockReturnValue(false); // what @line/liff-mock answers by default
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    liff.getFriendship.mockImplementation(answer);
+    expect(await friendFlag()).toBeNull();
+    expect(liff.getFriendship).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

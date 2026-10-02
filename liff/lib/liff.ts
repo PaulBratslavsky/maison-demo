@@ -15,9 +15,9 @@ export interface LiffState {
   /**
    * Whether the customer has added Maison's LINE Official Account as a friend, for "Chat with Maison on LINE"'s words
    * (lineChatWords): liff.getFriendship()'s friendFlag, for the account linked to the LIFF app's LINE Login channel.
-   * Asked once per page load, and only with NEXT_PUBLIC_LINE_OA_ID set. Null when there's no answer: the setting is
-   * unset, or the call failed, as it does until that account is linked, and with the LIFF mock, which answers only after
-   * liff.login(). A mock that answers is taken at its word, like LINE.
+   * Asked once per page load, inside LINE only, and only with NEXT_PUBLIC_LINE_OA_ID set: the LIFF mock is never asked.
+   * Null when there's no answer: the setting is unset, the app runs on the LIFF mock, or the call failed, as it does
+   * until that account is linked.
    */
   friendFlag: () => Promise<boolean | null>;
 }
@@ -27,9 +27,8 @@ const DEMO_USER_KEY = 'maison.demoUser';
 const SIGNED_IN_AGAIN_AT = 'maison.signedInAgainAt';
 /** Development only: why the plain button shows when liff.getFriendship() fails, and the fix. It names no LINE value. */
 const FRIENDSHIP_FAILED =
-  'liff.getFriendship() failed, so the app shows the plain "Chat with Maison on LINE" button. Inside LINE, link ' +
-  "Maison's Official Account to the LIFF app's LINE Login channel: Basic settings → Linked LINE Official Account. The " +
-  'LIFF mock answers only after liff.login(), which mock mode never calls.';
+  'liff.getFriendship() failed, so the app shows the plain "Chat with Maison on LINE" button. Link Maison\'s ' +
+  "Official Account to the LIFF app's LINE Login channel: Basic settings → Linked LINE Official Account.";
 let ready: Promise<LiffState> | null = null;
 
 export const toLocale = (language: string | undefined): Locale =>
@@ -90,9 +89,10 @@ const init = async (): Promise<LiffState> => {
   // LiffState.friendFlag: asked at most once per page load, and its answer kept, a failure's too.
   let friendship: Promise<boolean | null> | null = null;
   const askFriendship = async (): Promise<boolean | null> => {
-    if (!lineChatUrl(config.lineOaId)) return null;
+    // Inside LINE only: the LIFF mock, on the stage and in development, isn't asked, so it can't warn or nudge.
+    if (!lineChatUrl(config.lineOaId) || config.liffMock) return null;
     try {
-      // Inside the try: @line/liff-mock throws at once rather than reject, when liff.login() hasn't been called.
+      // Inside the try, so a call that throws counts as failed, as one that rejects does.
       const { friendFlag } = await liff.getFriendship();
       return typeof friendFlag === 'boolean' ? friendFlag : null;
     } catch (error) {
