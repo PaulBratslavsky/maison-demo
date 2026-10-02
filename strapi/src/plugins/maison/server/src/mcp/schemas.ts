@@ -1,6 +1,17 @@
 import { z } from '@strapi/utils';
 
-import { CATEGORIES, CREATED_VIA, LOCALES, OCCASIONS } from '../constants';
+import {
+  CATEGORIES,
+  CLOSE_REASONS,
+  CREATED_VIA,
+  INQUIRY_FILTERS,
+  INQUIRY_KINDS,
+  KNOWLEDGE_CATEGORIES,
+  LOCALES,
+  OCCASIONS,
+  QUESTION_REASONS,
+  SENTIMENT_LABELS,
+} from '../constants';
 import { ISO_DATE, isRealIsoDate } from '../domain/hours';
 import { failure, type ServiceFailure } from '../domain/service-result';
 
@@ -57,6 +68,20 @@ export const findBoutiquesInput = z.object({
   locale: localeInput,
 });
 
+export const searchKnowledgeInput = z.object({
+  // Trimmed before min(1), so a question of only spaces is refused like an empty one, and the search gets it trimmed.
+  query: z.string().trim().min(1).max(300).describe('The customer\'s question in their own words, e.g. "How do I care for the leather?"'),
+  productSlugs: z.array(slugInput).max(5).optional().describe('Products the question is about, from search_products: only entries about them, and general ones.'),
+  locale: localeInput,
+});
+
+export const knowledgeEntryOutput = z.object({
+  title: z.string(),
+  answer: z.string().describe('What Maison has written. Answer from this, in the customer\'s language.'),
+  category: z.string(),
+  productSlugs: z.array(z.string()).describe('The pieces it is about; empty when it applies to every piece.'),
+});
+
 /** No customer field: the customer always comes from the caller's LINE sign-in. */
 export const requestAppointmentInput = z.object({
   boutique: slugInput.describe('Boutique slug from find_boutiques, e.g. "ginza".'),
@@ -89,6 +114,23 @@ export const appointmentOutput = z.object({
   confirmationSent: z.boolean().describe('Whether the LINE confirmation has been delivered.'),
 });
 
+/** No customer field: the customer always comes from the caller's LINE sign-in. */
+export const handOffToStaffInput = z.object({
+  question: z.string().trim().min(1).max(1000).describe("The customer's question, in their own words."),
+  reason: z
+    .enum(QUESTION_REASONS)
+    .optional()
+    .describe('"no_answer" (the default) when search_knowledge has no entry that answers it; "asked_for_person" when the customer asked for a person.'),
+  productSlug: slugInput.optional().describe('The piece the question is about, when it is about one piece.'),
+  locale: localeInput,
+});
+
+export const questionOutput = z.object({
+  reference: z.string(),
+  status: z.literal('open'),
+  product: z.object({ slug: z.string(), name: z.string() }).nullable(),
+});
+
 /** An appointment reference such as APT-4821 (see domain/reference.ts). */
 export const referenceInput = z.string().regex(/^APT-\d{4}$/, 'Use a reference like APT-4821.');
 
@@ -119,6 +161,68 @@ export const staffAppointmentOutput = z.object({
   confirmationSent: z.boolean().describe('Whether the LINE confirmation has been delivered.'),
   createdAt: z.string().describe('When the request was made, ISO 8601 with offset.'),
 });
+
+/** A question reference such as Q-4821 (see domain/reference.ts). */
+export const questionReferenceInput = z.string().regex(/^Q-\d{4}$/, 'Use a reference like Q-4821.');
+
+/** Staff filters for customer questions, as the admin's Customer questions section sends them. */
+export const questionsListInput = z.object({
+  status: z.enum(['open', 'answered', 'all']).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+/**
+ * What staff send with Answer: the text for the customer, and whether it also becomes product knowledge, under a
+ * category and with a title. The title is what customers see over the answer in the concierge, so staff can write it
+ * in place of the customer's own words. It is used only while `addToKnowledge` is true, and without one the title is
+ * the customer's question.
+ */
+export const answerInput = z
+  .object({
+    text: z.string().trim().min(1).max(2000),
+    addToKnowledge: z.boolean().optional().default(true),
+    category: z.enum(KNOWLEDGE_CATEGORIES).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+  })
+  .refine((reply) => !reply.addToKnowledge || reply.category !== undefined, {
+    message: 'Pick a category to add the answer to product knowledge.',
+    path: ['category'],
+  });
+
+/**
+ * What the app's server logs after each concierge turn. No customer field: the customer always comes from the caller's
+ * LINE sign-in. The limits are above what the inquiry holds (1,000 and 2,000), which the service cuts to, so a long turn
+ * is logged and never refused.
+ */
+export const logInquiryInput = z.object({
+  message: z.string().trim().min(1).max(4000).describe("The customer's last message."),
+  reply: z.string().max(8000).optional().describe("The concierge's final text for the turn."),
+  knowledgeFound: z.boolean().describe('Whether any search_knowledge call in the turn returned an entry.'),
+  handedOff: z.boolean().describe('Whether the turn handed the question to staff.'),
+  questionReference: questionReferenceInput.optional().describe('The question the hand-off recorded.'),
+  productSlug: slugInput.optional().describe('The product page the customer was on.'),
+  locale: localeInput,
+});
+
+/** Staff filters for inquiries, as the admin's Inquiries tab sends them. Without a filter: needs-answer. */
+export const inquiryListInput = z.object({
+  filter: z.enum(INQUIRY_FILTERS).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+/** What staff send with Close: why the inquiry needs nothing more. */
+export const closeInquiryInput = z.object({ reason: z.enum(CLOSE_REASONS) });
+
+/** What staff send with Change label: a kind, a sentiment, or both. */
+export const changeLabelInput = z
+  .object({ kind: z.enum(INQUIRY_KINDS).optional(), sentimentLabel: z.enum(SENTIMENT_LABELS).optional() })
+  .refine((input) => input.kind !== undefined || input.sentimentLabel !== undefined, { message: 'Give a kind, a sentiment, or both.' });
+
+/**
+ * What staff send with Reply on LINE: the text for the customer, trimmed, of 1 to 2,000 characters, which is what the
+ * inquiry's `replyText` holds. There is no field for who replies: the signed-in admin does.
+ */
+export const replyInquiryInput = z.object({ text: z.string().trim().min(1).max(2000) });
 
 /** Zod issues on one line, e.g. `reference: Use a reference like APT-4821.` */
 export const describeIssues = (error: z.ZodError): string =>

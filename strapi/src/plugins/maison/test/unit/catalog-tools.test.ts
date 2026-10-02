@@ -3,6 +3,7 @@ import { browseCollectionsTool } from '../../server/src/mcp/tools/browse-collect
 import { findBoutiquesTool } from '../../server/src/mcp/tools/find-boutiques';
 import { viewProductTool } from '../../server/src/mcp/tools/view-product';
 import { searchProductsTool } from '../../server/src/mcp/tools/search-products';
+import { searchKnowledgeTool } from '../../server/src/mcp/tools/search-knowledge';
 import { fakeStrapi } from './fake-strapi';
 
 const context = { userAbility: {} as any, user: { id: 1 } };
@@ -18,6 +19,7 @@ describe('catalog tool descriptions', () => {
     expect(browseCollectionsTool.description).toMatch(/It doesn't list products or prices\./);
     expect(viewProductTool.description).toMatch(/Never invent details the product doesn't have\./);
     expect(findBoutiquesTool.description).toMatch(/It doesn't book anything\./);
+    expect(searchKnowledgeTool.description).toMatch(/Never make up a policy\./);
   });
 });
 
@@ -109,5 +111,39 @@ describe('find_boutiques', () => {
     const input = findBoutiquesTool.resolveInputSchema!(context);
     expect(input.safeParse({ date: '2026-10-06' }).success).toBe(true);
     expect(input.safeParse({ date: '2026-02-31' }).success, '31 February would answer for 3 March').toBe(false);
+  });
+});
+
+describe('search_knowledge', () => {
+  const entry = { title: 'How do I care for the leather?', answer: 'Wipe it with a dry cloth.', category: 'care', productSlugs: [] };
+
+  it('searches in the default locale and returns schema-valid output', async () => {
+    const searchKnowledge = vi.fn(async () => ({ ok: true, value: { entries: [entry] } }));
+    const result = await run(searchKnowledgeTool, { searchKnowledge }, { query: 'leather care' });
+    expect(searchKnowledge).toHaveBeenCalledWith('ja', { query: 'leather care' });
+    expect(result.structuredContent).toEqual({ locale: 'ja', entries: [entry] });
+    expect(() => matchesOutput(searchKnowledgeTool, result)).not.toThrow();
+  });
+
+  it('passes the products and the locale through', async () => {
+    const searchKnowledge = vi.fn(async () => ({ ok: true, value: { entries: [] } }));
+    await run(searchKnowledgeTool, { searchKnowledge }, { query: 'Will it fit?', productSlugs: ['cabin-case-55'], locale: 'en' });
+    expect(searchKnowledge).toHaveBeenCalledWith('en', { query: 'Will it fit?', productSlugs: ['cabin-case-55'] });
+  });
+
+  it('answers an unknown product with not_found and the search_products hint', async () => {
+    const message = 'No published product "no-such-piece".';
+    const hint = 'Call search_products to find valid product slugs.';
+    const searchKnowledge = vi.fn(async () => ({ ok: false, code: 'not_found', message, hint }));
+    const result = await run(searchKnowledgeTool, { searchKnowledge }, { query: 'Will it fit?', productSlugs: ['no-such-piece'] });
+    expect(result.isError).toBe(true);
+    expect(errorOf(result)).toEqual({ code: 'not_found', message, hint });
+  });
+
+  it('refuses an empty question and one over 300 characters', () => {
+    const input = searchKnowledgeTool.resolveInputSchema!(context);
+    expect(input.safeParse({ query: 'How do I care for the leather?' }).success).toBe(true);
+    expect(input.safeParse({ query: '' }).success).toBe(false);
+    expect(input.safeParse({ query: 'x'.repeat(301) }).success).toBe(false);
   });
 });

@@ -41,7 +41,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | Path | What it is |
 |---|---|
 | `strapi/` | A Strapi 5.55.1 app (TypeScript, SQLite), made with `create-strapi` |
-| `strapi/src/plugins/maison/` | The Maison plugin: content types, ten MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
+| `strapi/src/plugins/maison/` | The Maison plugin: content types, twelve MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
 | `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
@@ -50,6 +50,7 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `liff/scripts/mock-line-verify.mjs` | The local stand-in for LINE's verify endpoint |
 | `scripts/init-env.mjs` | Creates the two `.env` files on `npm install` |
 | `scripts/line-mode.mjs`, `scripts/line-tunnel.mjs` | Option B: `npm run mode:line` and `mode:local` switch both `.env` files, and `npm run tunnel` refuses an unsafe tunnel |
+| `scripts/line-stand-in.mjs` | `npm run line:stand-in`: a local stand-in for LINE's Messaging API, so local checks of the staff follow-up reach no one's phone (see "Production notes") |
 | `liff/scripts/line-qr.mjs` | Option B: `npm run qr`, the app's LINE link as a QR code, saved in `liff/line/qr/` (gitignored: it holds your LIFF ID) |
 | `liff/lib/strapi-proxy.ts` and its routes (`liff/app/mcp`, `liff/app/uploads`, `liff/app/api/strapi-oauth-mcp-manager`) | Option B: Strapi's `/mcp`, token endpoint and `/uploads` on the app's own origin |
 | `liff/line/channel-icon.png` | The channel icon, to LINE's MINI App icon spec |
@@ -71,12 +72,12 @@ Maison's services hold the rules: the catalog, opening hours, who may book what,
 | The homepage widget | Staff | **Maison requests** on the admin's Homepage |
 
 - **The Maison app only uses MCP.** Its **Agent view** shows the tool call behind each screen, and the concierge calls the same tools.
-- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead, and its notice says whether the customer's LINE confirmation was sent. **Send again** appears on a confirmed visit still ahead whose LINE column says "not sent". Under **Demo data**: **Load demo catalog**, and **Reset demo appointments**, which asks first.
+- **The board** shows requests **Waiting for staff** (its default filter), **Confirmed**, or **All requests**, and refreshes every 5 seconds. **Confirm** appears on waiting requests whose visit is still ahead, and its notice says whether the customer's LINE confirmation was sent. **Send again** appears on a confirmed visit still ahead whose LINE column says "not sent". Under **Demo data**: **Load demo catalog**, and **Reset demo appointments and questions**, which asks first.
 - **The widget** counts **Waiting for staff**, **Confirmed, upcoming** and **LINE sent** (among the upcoming confirmed visits), lists the five newest requests, and links to the board with **Open the board**. It refreshes every 5 seconds, and shows only to admins whose role can review appointments. A Homepage whose layout was changed before needs **Add Widget** once.
 
 ### The REST door
 
-**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's four catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne` and `boutiques.find`) and the Home page's `api::home-page.home-page.find`, and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
+**The catalog** is open to read. `npm run setup` grants the Public role exactly Maison's five catalog actions (`plugin::maison.collections.find`, `products.find`, `products.findOne`, `boutiques.find` and `knowledge.find`) and the Home page's `api::home-page.home-page.find`, and checks the role afterwards. Staff see the grant, and can change it, under **Settings → Users & Permissions plugin → Roles → Public**. A read-only, full-access or custom API token works too.
 
 ```bash
 STRAPI=http://localhost:1338
@@ -84,10 +85,11 @@ curl "$STRAPI/api/maison/collections?locale=en"
 curl "$STRAPI/api/maison/products?occasion=travel&maxPriceJpy=400000&inStockAt=ginza&locale=en"
 curl "$STRAPI/api/maison/products/weekender-50?locale=en"
 curl "$STRAPI/api/maison/boutiques?productSlugs=weekender-50&date=<YYYY-MM-DD>&locale=en"
+curl "$STRAPI/api/maison/knowledge?query=How%20do%20I%20care%20for%20the%20leather%3F&locale=en"
 ```
 
-- **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
-- **`locale`** is `ja` (the default) or `en`.
+- **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. Product knowledge takes `query`, `productSlugs` and `locale`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
+- **`locale`** is `ja` (the default) or `en`. Product knowledge is in English only, so the knowledge route answers Japanese, which has no entries, unless you send `locale=en`.
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
 
@@ -128,7 +130,9 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 - **The local model** is Qwen3 14B with a 32k context: `ollama pull qwen3:14b`, then `ollama create qwen3-14b-32k -f Modelfile` with a `Modelfile` of `FROM qwen3:14b` and `PARAMETER num_ctx 32768`. Any Ollama model that calls tools works through `OLLAMA_MODEL`.
 - **Qwen3 is slower:** about 20–60 seconds a turn, where Claude takes seconds.
 - **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its tool line reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
-- **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice.
+- **Product questions go to product knowledge, then to staff.** For care, sizing, delivery, repairs, warranty, gift wrapping and the like, the concierge calls `search_knowledge` and answers only from the entries it returns. When none answers, or the customer asks for a person, it calls `hand_off_to_staff`, a Maison tool that records the question in Strapi for Maison's client advisors. Its line reads `MCP · hand_off_to_staff ✓`, with a note under it that names the question's reference and says who has it: "Your question is with Maison's client advisors (Q-4821). They reply in your LINE chat with Maison, 11:00–20:00 Japan time." **Send it in the LINE chat** under the note opens the chat with Maison with the question already typed in, for the customer to send. When the knowledge search finds nothing, the app's server records the question for staff itself, so it doesn't depend on the model calling the tool: the note then sits under the search's line, `MCP · search_knowledge ✓ 0 results`. A hand-off the model makes that fails has a red line with the error's code. When the app's own hand-off fails, the search's line stays green, and the server's log says why. Either way, when nothing was recorded, the note says only "Our team answers questions like this in Maison's LINE chat." with **Chat with Maison on LINE**, so a customer can always reach a person, and no note says the question is with the advisors.
+- **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice, and neither does a turn whose note is the answer, a recorded hand-off or a search that found nothing. After a hand-off that failed, with no words, it still offers **Try again** under the plain note, unless a search that found nothing came first: the note under that search counts as the answer.
+- **Each finished turn is logged** in Strapi as an inquiry, for the Inquiries tab.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
 - **Strapi runs no model.** The concierge's is the demo's only model.
 
@@ -183,11 +187,12 @@ console.log("Added maison-ops to", file);
 
 ### Before going on stage
 
-- [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits or tokens behind.
+- [ ] The day before: start over with a clean database (above). Then no test customer, smoke-test token or rehearsal visit is left. After it, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits, questions or tokens behind.
+- [ ] On the board, **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key) and the LINE confirmation need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
-- [ ] In the Strapi admin: **Maison** → **Reset demo appointments** (it asks first). Set the board's filter to **All requests**.
+- [ ] In the Strapi admin: **Maison** → **Reset demo appointments and questions** (it asks first). Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
 - [ ] Warm up: walk the whole run once, so every screen is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
 - [ ] With option A: your phone at hand, with LINE's notifications on. The confirmation arrives there.
@@ -199,12 +204,14 @@ console.log("Added maison-ops to", file);
 | Time | Beat | Do |
 |---|---|---|
 | 0:00–0:30 | UX | The app opens signed in with LINE. Browse Voyage, then the Weekender 50. Flip **Agent view**: every screen is an MCP tool call, the same tools an agent uses. |
-| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line under the reply names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
+| 0:30–1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line above the answer names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. |
 | 1:10–1:30 | Booking | Tap **Yes, please.** The request is sent and awaits the boutique. |
 | 1:30–1:50 | The request arrives | On the board, the request appears, created via `concierge`, with the customer masked. |
 | 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
 | 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
+
+**Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi. Ask "Can I pay in bitcoin?" instead: the search finds nothing (`MCP · search_knowledge ✓ 0 results`), the app records the question for staff itself, and the note with the question's `Q-` reference and **Send it in the LINE chat** appear under that line. If recording fails, the note says only where the team answers, with **Chat with Maison on LINE**.
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
 
@@ -212,13 +219,14 @@ console.log("Added maison-ops to", file);
 - **The concierge stalls, or the network drops:** use **Book a visit** on the product page. It calls the same `request_appointment` tool.
 - **The concierge's turn ends with no words** (the local model, now and then): tap **Try again** under it, with a line ready while it answers again.
 - **The app says the limit of visit requests is reached:** the demo customer has 3 requests waiting. Confirm one on the board, or reset demo appointments.
+- **The note under a question has no `Q-` reference:** nothing was recorded. One reason is that the demo customer already has five questions open or taken, the most Strapi allows. **Reset demo appointments and questions**, or answer some under **Customer questions**.
 - **The concierge shows an error:** on stage, a small technical line under the customer's message names the cause and the fix. After `npm run setup` or a clean start, reload the app's page: a session the server has dropped answers 502 until then.
 - **The LINE message doesn't arrive:** show the confirmed row on the board, and the message on the slide. If the row says "not sent", **Send again** retries it.
 - **Any beat stalls for more than 10 seconds:** switch to the backup video.
 
 ### Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo appointments** between runs. Then once more on the local model, and once in Japanese. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo appointments and questions** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each beat works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.
@@ -227,7 +235,7 @@ Expected:
 
 Check these once, in the admin:
 - **The board.** A request made in the app appears within 5 seconds. **All requests** keeps confirmed rows. **Confirm** appears only on waiting requests whose visit is still ahead. With option A, the LINE column says LINE sent once the confirmation has gone out.
-- **The reset.** **Reset demo appointments** asks first, and **Cancel** changes nothing.
+- **The reset.** **Reset demo appointments and questions** asks first, and **Cancel** changes nothing.
 - **The customer stays hidden.** In the Content Manager, Maison's appointment list and edit view have no customer column or field, and searching the list for part of the demo customer's ID (`4af49806`) finds nothing. Saving and publishing there still work.
 
 ### Record the backup video
@@ -271,7 +279,7 @@ Check these once, in the admin:
    - the board shows LINE sent
    - **My visits** shows "Confirmed · LINE sent" (確定 · LINEで送信済み in Japanese)
 6. Let customers add Maison themselves, since a confirmation only reaches a customer who has added the Official Account as a friend:
-   - **In the app:** put the Official Account's basic ID, with its `@`, in `liff/.env` as `NEXT_PUBLIC_LINE_OA_ID`, and rebuild the app. **Chat with Maison on LINE** then appears on **My visits**, on a visit's page and after a booking. It opens `https://line.me/R/ti/p/%40…`: a friend lands in the chat with Maison, anyone else on its add-friend screen. Without the setting there's no button. LINE's links work in LINE on phones, not in LINE for PC.
+   - **In the app:** put the Official Account's basic ID, with its `@`, in `liff/.env` as `NEXT_PUBLIC_LINE_OA_ID`, and rebuild the app. **Chat with Maison on LINE** then appears on **My visits**, on a visit's page, after a booking and, in the concierge, under the note for a question nothing recorded. It opens `https://line.me/R/ti/p/%40…`: a friend lands in the chat with Maison, anyone else on its add-friend screen. Under a hand-off Strapi recorded, **Send it in the LINE chat** opens `https://line.me/R/oaMessage/%40…/?…`, the chat with Maison with the question already typed in. Without the setting there's no button of either kind. LINE's links work in LINE on phones, not in LINE for PC.
    - **At sign-in (option B):** in LINE Developers, open the LINE Login channel's **Basic settings**, set **Linked LINE Official Account** to yours, and turn the LIFF app's **Add friend option** on. LINE then offers to add Maison when a customer first allows the app. With the account linked, the app also asks LINE whether the customer has added Maison, and if not, the button reads **Add Maison on LINE**.
 
 The message's button opens the visit in the app, at `MAISON_LIFF_URL` followed by `/visits/<reference>`. In local mode `MAISON_LIFF_URL` is `http://localhost:3003`, which your phone can't open. With option B it's your LIFF URL, which opens the app inside LINE.
@@ -387,7 +395,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
   - `temporarily_unavailable` (503): try again after `Retry-After` seconds.
   - One LINE client can be active per Strapi.
 - **MCP:** `POST {STRAPI}/mcp` with `Authorization: Bearer <access_token>`.
-  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `request_appointment`, `my_appointments`
+  - Customer tools: `browse_collections`, `search_products`, `view_product`, `find_boutiques`, `search_knowledge`, `request_appointment`, `my_appointments`, `hand_off_to_staff`
   - Staff tools, for staff agents: `appointment_requests` and `confirm_appointment`
   - Errors come back as `isError` results whose text is `{ "error": { "code", "message", "hint" } }`. Arguments the SDK rejects, such as a date that isn't on the calendar, come back as plain text that starts `Input validation error:`.
 - **REST, for websites:** the catalog at `/api/maison/…` with no credentials, and the customer's own bookings with the same session (see "The REST door").
@@ -440,13 +448,13 @@ LINE's pages behind this:
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, and the tests of option B's mode switch, tunnel guard and `npm run qr` | nothing running |
+| `npm test` | The app's unit tests, Maison's unit tests, the `@strapi/utils` check, the tests of `npm run setup` and of the Home page's starting text, the tests of option B's mode switch, tunnel guard and `npm run qr`, and those of the LINE stand-in | nothing running |
 | `npm run test:e2e` | Browser tests: booking and **My visits**, Home's headline from Strapi in English and Japanese, the language a booking sends, Osaka's closed day, a boutique without the piece, a day that has become today, the agent view, an unknown product, two customers, LINE's safe area in portrait and landscape, and **Chat with Maison on LINE** (with `NEXT_PUBLIC_LINE_OA_ID` set or empty: see below). API tests: each customer's visits, the Content Manager's list and search keeping customers out, and the REST door (the public catalog, an unknown slug, and booking only with a customer's session). | Strapi, in local mode (Playwright starts the app if it isn't running) |
-| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for throwaway customers. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
+| `npm run test:live` | The concierge on the local model, against the running Strapi. It books visits for a throwaway customer each run. The bitcoin test asks as one fixed customer, which leaves a question for staff open in the demo database until you reset or answer it, and Strapi allows a customer five questions open or taken: past that nothing is recorded, and the test still passes, on the plain note. Reset between rehearsals. | Strapi, Ollama, and the app's client ID from `npm run setup`. It's skipped when the client ID is missing, or Strapi or Ollama doesn't answer. Run it in local mode: it signs in with the verify mock's ID tokens. |
 
 - **Once, before the first `npm run test:e2e`:** `(cd liff && npx playwright install chromium)`, about 276 MiB.
 - **Chat with Maison on LINE needs two runs,** one per case, because the app is built with the setting: `npm run test:e2e` with `NEXT_PUBLIC_LINE_OA_ID` in `liff/.env`, then `NEXT_PUBLIC_LINE_OA_ID= npm run test:e2e`. Stop any app on :3003 before each, so Playwright starts one with the same setting. Each run tests its case and skips the other.
-- **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Reset demo appointments before going on stage.
+- **`test:e2e` deletes every appointment and notification** in the demo database, the stage's too, before it runs, and leaves a few open requests behind. Its reset now also deletes every customer question, and the product knowledge their answers added. **Reset demo appointments and questions** before going on stage.
 
 Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 - **Integration tests** boot the demo's Strapi in-process, on their own `strapi/.tmp/maison-test-*.db` files, with a local stand-in for LINE's push API, so they never message anyone: `STRAPI_APP_DIR="$(cd ../../.. && pwd)" npm run test:integration`.
@@ -474,13 +482,13 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `adfeb7b`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `ce6917e` (branch `feat/maison-follow-up`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
 ```bash
-SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone
-SHA=$(git -C "$SRC" rev-parse --verify feat/maison-plugin)
+SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone, or its follow-up worktree
+SHA=$(git -C "$SRC" rev-parse --verify feat/maison-follow-up)
 FILES=(admin server test scripts package.json package-lock.json README.md CHANGELOG.md vitest.config.ts .gitignore .editorconfig .prettierrc .prettierignore)
 test -n "$SHA" && rm -rf strapi/src/plugins/maison && mkdir strapi/src/plugins/maison
 git -C "$SRC" archive "$SHA" -- "${FILES[@]}" | tar -x -C strapi/src/plugins/maison
@@ -493,17 +501,19 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 - **The check compares what git tracks,** blob by blob, with the plugin's commit, not the folder. `strapi/.gitignore`'s patterns apply inside the copy too, so a file on disk may not be tracked.
 - **If `SRC` is wrong,** `SHA` stays empty: nothing is deleted, and the check says nothing. Without "The staged copy matches", the copy doesn't match.
+- **On this branch, copy `feat/maison-follow-up`,** the branch of the plugin's follow-up worktree (`strapi-store-demo-mcp-follow-up`), not `feat/maison-plugin`: the customer questions live only on the follow-up branch, so a copy of `feat/maison-plugin` loses them. The worktree and the clone are one repository, so either works as `SRC`.
 - Commit with the SHA in the message, update the commit named above, and start Strapi.
 - To work on the plugin in place, run `npm run watch` in its folder, and restart Strapi to load each rebuild.
 - If you run `npm install` in the plugin's folder, stop Strapi and run `npm install --prefix strapi` afterwards. Until then, `npm run dev:strapi` refuses to start: the `predevelop` check finds Maison's own `@strapi/utils`.
 
 ## Production notes
 
+- **Customer questions** (the staff follow-up proof of concept): the "Maison customer" token needs "MCP: hand questions to staff" (`plugin::maison.questions.ask`). `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand (never run setup against Cloud). Staff need "Read customer questions" to see the section and "Answer customer questions on LINE" for its buttons. `MAISON_LINE_API_BASE_URL` points Strapi at a LINE stand-in for local checks, so nothing reaches a phone. Start the stand-in with `npm run line:stand-in` (on 127.0.0.1:4010, logging what Strapi pushes to `strapi/.tmp/line-stand-in.jsonl`), then Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010 LINE_CHANNEL_ACCESS_TOKEN=stand-in npm run dev:strapi`: Strapi sends and looks up nothing without a token, and the stand-in accepts any. Leave `MAISON_LINE_API_BASE_URL` unset everywhere else.
 - **Staff** get an admin role with the Maison actions they need (`catalog.read`, `appointments.review`, `appointments.confirm`) instead of Super Admin.
 - **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
 - **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.
 - **Bind to 127.0.0.1** unless a proxy in front needs otherwise. The demo does it for Strapi, the app and the verify mock.
-- **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it five actions on every run: the four catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its four away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
+- **The Public role reads the catalog and the Home page over REST,** because `npm run setup` grants it six actions on every run: the five catalog actions and `api::home-page.home-page.find`. If your catalog isn't public, take its five away under Settings → Users & Permissions plugin → Roles → Public, give websites an API token instead, and drop them from `PUBLIC_ACTIONS` in the setup script. Without the Home page's `find`, the app shows its built-in Home text.
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
 - **Staff agents read what customers wrote.** `appointment_requests` gives a staff agent customers' notes, up to 500 characters each, which could try to instruct the model. The tool descriptions tell it to treat notes as information, and to confirm only a reference the staff member asked for. Keep `appointments.confirm` off an agent's token, or add an approval step for tools that write.
 - **One Strapi sends each LINE confirmation once.** A visit's `sent` record stops a second send, and two sends at the same moment share one push, but only within one Strapi process. With more than one, add a claim row, LINE's `X-Line-Retry-Key` or an outbox (the plugin's README, "LINE confirmations").

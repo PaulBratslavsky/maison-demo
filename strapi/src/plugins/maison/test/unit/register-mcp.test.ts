@@ -24,11 +24,40 @@ describe('registerMcp', () => {
     registerMcp(fakeStrapi({ mcp, config: { disabledTools: ['find_boutiques'] } }));
     const names = mcp.registerTool.mock.calls.map(([tool]) => tool.name);
     expect(names).toEqual([
-      'browse_collections', 'search_products', 'view_product',
-      'request_appointment', 'my_appointments', 'appointment_requests', 'confirm_appointment',
+      'browse_collections', 'search_products', 'view_product', 'search_knowledge',
+      'request_appointment', 'my_appointments', 'hand_off_to_staff', 'log_inquiry', 'appointment_requests', 'confirm_appointment',
       'pending_confirmations', 'record_confirmation',
     ]);
     expect(mcp.registerPrompt.mock.calls.map(([prompt]) => prompt.name)).toEqual(['send_pending_confirmations']);
+  });
+
+  it('registers every tool in TOOL_NAMES, in that order, when none is disabled', () => {
+    const mcp = fakeMcp(true);
+    registerMcp(fakeStrapi({ mcp }));
+    expect(mcp.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([...TOOL_NAMES]);
+  });
+
+  it('registers hand_off_to_staff, and leaves it out, with the rest registered, when it is in disabledTools', () => {
+    const on = fakeMcp(true);
+    registerMcp(fakeStrapi({ mcp: on }));
+    expect(on.registerTool.mock.calls.map(([tool]) => tool.name)).toContain('hand_off_to_staff');
+
+    const off = fakeMcp(true);
+    registerMcp(fakeStrapi({ mcp: off, config: { disabledTools: ['hand_off_to_staff'] } }));
+    const names = off.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(names).not.toContain('hand_off_to_staff');
+    expect(names).toEqual(TOOL_NAMES.filter((name) => name !== 'hand_off_to_staff'));
+  });
+
+  it('registers log_inquiry right after hand_off_to_staff, and leaves it out, with the rest registered, when it is in disabledTools', () => {
+    const on = fakeMcp(true);
+    registerMcp(fakeStrapi({ mcp: on }));
+    const names = on.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(names.indexOf('log_inquiry')).toBe(names.indexOf('hand_off_to_staff') + 1);
+
+    const off = fakeMcp(true);
+    registerMcp(fakeStrapi({ mcp: off, config: { disabledTools: ['log_inquiry'] } }));
+    expect(off.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual(TOOL_NAMES.filter((name) => name !== 'log_inquiry'));
   });
 
   it('registers the confirmation prompt only when both tools it drives are enabled', () => {

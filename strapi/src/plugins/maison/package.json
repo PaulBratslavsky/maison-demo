@@ -36,6 +36,7 @@
     "verify": "strapi-plugin verify",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "test:integration": "node --test --test-concurrency=1 \"test/integration/*.test.mjs\"",
     "test:mcp": "node --test --test-concurrency=1 \"test/mcp/*.test.mjs\"",
     "link": "npm run build && npx -y yalc@1.0.0-pre.53 push",
@@ -47,6 +48,9 @@
     "name": "maison",
     "displayName": "Maison",
     "description": "A luxury house's catalog and appointments, as MCP tools for people's apps and agents."
+  },
+  "engines": {
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -80,5 +84,11 @@
     "react-query": "^3.39.3",
     "react-router-dom": "^6.30.6",
     "styled-components": "^6.5.3"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.71",
+    "@ai-sdk/openai": "^4.0.83",
+    "@ai-sdk/openai-compatible": "^3.0.62",
+    "ai": "^7.0.127"
   }
 }

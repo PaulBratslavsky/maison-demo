@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { PLUGIN_ID, UID } from '../constants';
-import type { FlexMessage } from '../domain/flex-message';
+import { pushMessages } from '../domain/line-push';
 import { toZonedIso } from '../domain/time';
 import { CONFIRMATION_POPULATE, confirmationFor, inVisitLanguage, type Outcome } from './confirmations';
 
@@ -37,55 +37,8 @@ export interface SendOutcome {
   message: string;
 }
 
-/**
- * LINE gets this long to answer a push. A publish outside a transaction (Confirm, confirm_appointment) waits for its
- * confirmation this long at most; one inside a transaction (the Content Manager's Publish) doesn't wait, and sends
- * after the commit.
- */
-export const PUSH_TIMEOUT_MS = 8000;
-
 const NO_TOKEN = "LINE_CHANNEL_ACCESS_TOKEN isn't set: confirmations aren't sent from Strapi.";
 const NO_LIFF_URL = "The maison plugin has no liffUrl, so the confirmation link would be broken: confirmations aren't sent from Strapi.";
-
-/** The `message` of LINE's error body, `{ "message": "…", "details": […] }`, or '' when there's none. */
-const lineMessageOf = (body: string): string => {
-  try {
-    const parsed = JSON.parse(body);
-    return typeof parsed?.message === 'string' ? parsed.message : '';
-  } catch {
-    return '';
-  }
-};
-
-/** Why a push got no answer. */
-const unreachable = (error: unknown): string => {
-  if ((error as Error | undefined)?.name === 'TimeoutError') return `LINE didn't answer within ${PUSH_TIMEOUT_MS / 1000} seconds.`;
-  // fetch says only "fetch failed"; its cause says what failed, such as "connect ECONNREFUSED 127.0.0.1:4010".
-  const cause = (error as { cause?: { message?: unknown } } | undefined)?.cause?.message;
-  return `LINE couldn't be reached: ${typeof cause === 'string' ? cause : String((error as Error | undefined)?.message ?? error)}`;
-};
-
-/** One push to the customer through LINE's Messaging API. It never throws: what went wrong becomes the detail. */
-const push = async (
-  { apiBaseUrl, token }: { apiBaseUrl: string; token: string },
-  to: string,
-  message: FlexMessage
-): Promise<{ status: Outcome; detail: string }> => {
-  try {
-    const response = await fetch(`${apiBaseUrl}/v2/bot/message/push`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, messages: [{ type: 'flex', altText: message.altText, contents: message.contents }] }),
-      signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
-    });
-    const body = await response.text().catch(() => '');
-    if (response.ok) return { status: 'sent', detail: body || `LINE answered ${response.status}.` };
-    const lineMessage = lineMessageOf(body);
-    return { status: 'failed', detail: lineMessage ? `LINE answered ${response.status}: ${lineMessage}` : `LINE answered ${response.status}.` };
-  } catch (error) {
-    return { status: 'failed', detail: unreachable(error) };
-  }
-};
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   /** Each missing setting is logged once per process: every publish would repeat it. */
@@ -170,7 +123,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     const [visit] = await inVisitLanguage(strapi, [published]);
     const confirmation = confirmationFor(visit, { liffUrl, timezone, houseName });
     if (!confirmation) return finish(reference, 'failed', "The appointment has no valid LINE customer, so it can't be confirmed over LINE.", token);
-    const { status, detail } = await push({ apiBaseUrl: lineApiBaseUrl, token }, confirmation.lineUserId, confirmation.message);
+    const { status, detail } = await pushMessages({ apiBaseUrl: lineApiBaseUrl, token }, confirmation.lineUserId, [
+      { type: 'flex', altText: confirmation.message.altText, contents: confirmation.message.contents },
+    ]);
     return finish(reference, status, detail, token);
   };
 

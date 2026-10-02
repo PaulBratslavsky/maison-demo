@@ -41,7 +41,7 @@ const fakeStrapi = async () => {
 // The script reads STRAPI_URL when it loads, so the fake Strapi comes first.
 const strapi = await fakeStrapi();
 process.env.STRAPI_URL = strapi.url;
-const { call, grantPublicReads, outputPaths, writeEnv } = await import(SETUP);
+const { call, grantPublicReads, outputPaths, seedLines, writeEnv } = await import(SETUP);
 
 const node = promisify(execFile);
 
@@ -143,7 +143,7 @@ test('without a .env, copies .env.example, then writes the values into it, reada
   assert.equal(readFileSync(join(file, '..', '.env.example'), 'utf8'), example, '.env.example is left as it was');
 });
 
-const CATALOG = ['plugin::maison.collections.find', 'plugin::maison.products.find', 'plugin::maison.products.findOne', 'plugin::maison.boutiques.find'];
+const CATALOG = ['plugin::maison.collections.find', 'plugin::maison.products.find', 'plugin::maison.products.findOne', 'plugin::maison.boutiques.find', 'plugin::maison.knowledge.find'];
 const HOME_PAGE_FIND = 'api::home-page.home-page.find';
 // What a fresh database's Public role allows: users-permissions' own sign-in and sign-up routes.
 const AUTH = ['plugin::users-permissions.auth.callback', 'plugin::users-permissions.auth.connect', 'plugin::users-permissions.auth.register'];
@@ -234,4 +234,17 @@ test("writes the app's settings to liff/.env and the ops token to strapi/.tmp, u
     opsTokenFile: join(ROOT, '.tmp', 'maison-ops-token.cloud'),
   });
   assert.equal(outputPaths({ MAISON_SETUP_LIFF_ENV: '/elsewhere/.env.cloud' }).liffEnv, '/elsewhere/.env.cloud');
+});
+
+test('says what the seed did: the catalog it loaded or found, and the product knowledge it added', () => {
+  const catalog = { collections: 4, products: 12, boutiques: 3, stockLevels: 20 };
+  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 16 }), ['Loaded the demo catalog.', 'Added 16 product knowledge entries.']);
+  // A catalog loaded before gets the knowledge on the next run, and setup says so, not only that the catalog was there.
+  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 16 }), ['Demo catalog already loaded.', 'Added 16 product knowledge entries.']);
+  // Nothing added: nothing to say about it.
+  assert.deepEqual(seedLines({ collections: 0, products: 0, boutiques: 0, stockLevels: 0, created: false, knowledge: 0 }), ['Demo catalog already loaded.']);
+  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 0 }), ['Loaded the demo catalog.']);
+  // A Strapi whose Maison copy predates product knowledge answers no `knowledge` at all.
+  assert.deepEqual(seedLines({ created: false }), ['Demo catalog already loaded.']);
+  assert.deepEqual(seedLines({ created: true }), ['Loaded the demo catalog.']);
 });

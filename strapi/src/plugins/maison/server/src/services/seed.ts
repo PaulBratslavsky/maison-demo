@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Core } from '@strapi/strapi';
 
 import content from '../../seed/content.json';
+import knowledge from '../../seed/knowledge.json';
 import { UID } from '../constants';
 
 type Localized = { ja: string; en: string };
@@ -26,6 +27,16 @@ export const imageMimeType = (fileName: string): string => {
   }
   return mimeType;
 };
+
+/** What Load demo catalog did: the catalog it created (all zeros when it was there already), and the product knowledge it added. */
+export interface SeedResult {
+  created: boolean;
+  collections: number;
+  products: number;
+  boutiques: number;
+  stockLevels: number;
+  knowledge: number;
+}
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const uploadImage = async (fileName: string, alternativeText: string): Promise<number> => {
@@ -55,68 +66,110 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
   const pick = (value: Localized, locale: 'ja' | 'en') => value[locale];
 
-  return {
-    async loadDemoCatalog() {
-      await ensureLocales();
-      const existing = await strapi.documents(UID.collection).findFirst({
-        locale: 'ja',
-        filters: { slug: { $eq: content.collections[0].slug } },
+  const loadCatalog = async (): Promise<Omit<SeedResult, 'knowledge'>> => {
+    const existing = await strapi.documents(UID.collection).findFirst({
+      locale: 'ja',
+      filters: { slug: { $eq: content.collections[0].slug } },
+    });
+    if (existing) return { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
+
+    for (const b of content.boutiques) {
+      const image = await uploadImage(b.image, b.name.en);
+      const version = (locale: 'ja' | 'en') => ({
+        name: pick(b.name, locale), slug: b.slug, city: pick(b.city, locale), address: pick(b.address, locale),
+        openingHours: b.openingHours, image,
       });
-      if (existing) return { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
+      await createLocalized(UID.boutique, version('ja'), version('en'));
+    }
 
-      for (const b of content.boutiques) {
-        const image = await uploadImage(b.image, b.name.en);
-        const version = (locale: 'ja' | 'en') => ({
-          name: pick(b.name, locale), slug: b.slug, city: pick(b.city, locale), address: pick(b.address, locale),
-          openingHours: b.openingHours, image,
-        });
-        await createLocalized(UID.boutique, version('ja'), version('en'));
+    const collectionIds: Record<string, string> = {};
+    for (const c of content.collections) {
+      const heroImage = await uploadImage(c.image, c.name.en);
+      const version = (locale: 'ja' | 'en') => ({ name: pick(c.name, locale), slug: c.slug, story: paragraph(pick(c.story, locale)), heroImage });
+      collectionIds[c.slug] = await createLocalized(UID.collection, version('ja'), version('en'));
+    }
+
+    for (const p of content.products) {
+      const images = [await uploadImage(p.image, p.name.en)];
+      const [widthCm, heightCm, depthCm] = p.dimensionsCm;
+      const version = (locale: 'ja' | 'en') => ({
+        name: pick(p.name, locale), slug: p.slug, sku: p.sku, category: p.category, priceJpy: p.priceJpy, images,
+        widthCm, heightCm, depthCm, personalizable: p.personalizable, personalizationKinds: p.personalizationKinds,
+        personalizationLeadDays: p.personalizationLeadDays, giftOccasions: p.giftOccasions,
+        description: paragraph(pick(p.description, locale)), craftStory: pick(p.craftStory, locale),
+        collection: collectionIds[p.collection],
+      });
+      await createLocalized(UID.product, version('ja'), version('en'));
+    }
+
+    let stockLevels = 0;
+    for (const [productSlug, perBoutique] of Object.entries(content.stock)) {
+      for (const [boutiqueSlug, quantity] of Object.entries(perBoutique)) {
+        await strapi.documents(UID.stockLevel).create({ data: { productSlug, boutiqueSlug, quantity } });
+        stockLevels += 1;
       }
+    }
 
-      const collectionIds: Record<string, string> = {};
-      for (const c of content.collections) {
-        const heroImage = await uploadImage(c.image, c.name.en);
-        const version = (locale: 'ja' | 'en') => ({ name: pick(c.name, locale), slug: c.slug, story: paragraph(pick(c.story, locale)), heroImage });
-        collectionIds[c.slug] = await createLocalized(UID.collection, version('ja'), version('en'));
-      }
+    return {
+      created: true,
+      collections: content.collections.length,
+      products: content.products.length,
+      boutiques: content.boutiques.length,
+      stockLevels,
+    };
+  };
 
-      for (const p of content.products) {
-        const images = [await uploadImage(p.image, p.name.en)];
-        const [widthCm, heightCm, depthCm] = p.dimensionsCm;
-        const version = (locale: 'ja' | 'en') => ({
-          name: pick(p.name, locale), slug: p.slug, sku: p.sku, category: p.category, priceJpy: p.priceJpy, images,
-          widthCm, heightCm, depthCm, personalizable: p.personalizable, personalizationKinds: p.personalizationKinds,
-          personalizationLeadDays: p.personalizationLeadDays, giftOccasions: p.giftOccasions,
-          description: paragraph(pick(p.description, locale)), craftStory: pick(p.craftStory, locale),
-          collection: collectionIds[p.collection],
-        });
-        await createLocalized(UID.product, version('ja'), version('en'));
-      }
+  /**
+   * Maison's product knowledge, in English only for now, as the stage demo is in English: one published en document per
+   * entry. It loads when there's no en entry yet, whether or not the catalog was there before, so a Strapi that loaded
+   * the catalog earlier gets it too.
+   */
+  const loadKnowledge = async (): Promise<number> => {
+    if ((await strapi.documents(UID.knowledge).count({ locale: 'en' })) > 0) return 0;
+    for (const entry of knowledge.entries) {
+      const { documentId } = await strapi.documents(UID.knowledge).create({ locale: 'en', data: entry });
+      await strapi.documents(UID.knowledge).publish({ documentId, locale: 'en' });
+    }
+    return knowledge.entries.length;
+  };
 
-      let stockLevels = 0;
-      for (const [productSlug, perBoutique] of Object.entries(content.stock)) {
-        for (const [boutiqueSlug, quantity] of Object.entries(perBoutique)) {
-          await strapi.documents(UID.stockLevel).create({ data: { productSlug, boutiqueSlug, quantity } });
-          stockLevels += 1;
-        }
-      }
-
-      return {
-        created: true,
-        collections: content.collections.length,
-        products: content.products.length,
-        boutiques: content.boutiques.length,
-        stockLevels,
-      };
+  return {
+    async loadDemoCatalog(): Promise<SeedResult> {
+      await ensureLocales();
+      const catalog = await loadCatalog();
+      return { ...catalog, knowledge: await loadKnowledge() };
     },
 
-    /** Deletes every appointment and notification. The catalog is untouched. */
+    /**
+     * Clears what a rehearsal leaves behind: first the product knowledge entries that answers to customers' questions
+     * added, in every language, then every question and every inquiry (whether it is open, replied to or closed), then
+     * every notification and appointment. The entries go first because a question is where their ids are kept, so a
+     * reset that stops partway can run again and find them. Only entries a question names are deleted: the seeded
+     * product knowledge and the catalog stay.
+     */
     async resetDemoAppointments() {
+      const questions = (await strapi.documents(UID.question).findMany({
+        fields: ['documentId', 'knowledgeDocumentId'],
+        limit: 5000,
+      })) as Array<{ documentId: string; knowledgeDocumentId?: string | null }>;
+      const knowledgeIds = [...new Set(questions.map((q) => q.knowledgeDocumentId).filter((id): id is string => Boolean(id)))];
+      for (const documentId of knowledgeIds) await strapi.documents(UID.knowledge).delete({ documentId, locale: '*' });
+      for (const q of questions) await strapi.documents(UID.question).delete({ documentId: q.documentId });
+
+      const inquiries = await strapi.documents(UID.inquiry).findMany({ fields: ['documentId'], limit: 5000 });
+      for (const i of inquiries) await strapi.documents(UID.inquiry).delete({ documentId: i.documentId });
+
       const notifications = await strapi.documents(UID.notification).findMany({ fields: ['documentId'], limit: 5000 });
       for (const n of notifications) await strapi.documents(UID.notification).delete({ documentId: n.documentId });
       const appointments = await strapi.documents(UID.appointment).findMany({ fields: ['documentId'], limit: 5000 });
       for (const a of appointments) await strapi.documents(UID.appointment).delete({ documentId: a.documentId });
-      return { appointments: appointments.length, notifications: notifications.length };
+      return {
+        appointments: appointments.length,
+        notifications: notifications.length,
+        questions: questions.length,
+        inquiries: inquiries.length,
+        knowledge: knowledgeIds.length,
+      };
     },
   };
 };

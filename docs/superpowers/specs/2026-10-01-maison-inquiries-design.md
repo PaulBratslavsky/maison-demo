@@ -33,7 +33,7 @@
 |---|---|---|
 | Product knowledge, inquiries, labelling, queues, Reply on LINE | The Maison plugin (`strapi-store-demo-mcp`), copied into the demo as before | One service layer: the concierge, the board, and a later LINE webhook all use the same rules |
 | Logging each turn | The app's concierge route (`liff/lib/concierge.ts`), after the turn ends | The server, not the model, decides what's logged |
-| The model that labels | Called from Strapi, Claude Haiku 4.5 by default | Small, fast and cheap, as in Pulse. Strapi needs `ANTHROPIC_API_KEY`, as the staff chat would |
+| The model that labels | Called from Strapi through the AI SDK, with Pulse's provider module; Claude Haiku 4.5 by default | Small, fast and cheap, as in Pulse. Strapi reads Pulse's settings: `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, `AI_BASE_URL` |
 
 ## 1. Product knowledge (content type)
 
@@ -89,7 +89,7 @@ The chat shows that tool call as a short note with **Chat with Maison on LINE** 
 
 | Group | Fields |
 |---|---|
-| Who and what | `customer` (the LINE subject, private, kept out of admin API answers and list search as for appointments), `message`, `reply`, `locale`, `knowledgeFound`, `handedOff`, `productSlug`, `via` (`concierge` now, `line-chat` later) |
+| Who and what | `customer` (the LINE subject, private, kept out of admin API answers and list search as for appointments), `message`, `reply`, `language` (Strapi reserves `locale` for i18n, so it is stored as `language`, as appointments and questions do), `handedOff`, `productSlug`, `via` (`concierge` now, `line-chat` later) |
 | Labels, from the model | `kind` (`question` / `complaint` / `praise` / `other`), `sentimentScore` (−1..1), `sentimentLabel` (`positive` / `neutral` / `negative`), `answered` (bool), `reason` (up to 400 characters), `topic` (one short phrase) |
 | Analysis | `analysisStatus` (`pending` / `analyzed` / `failed` / `skipped`), `analysisAttempts`, `modelVersion`, `promptVersion`, `humanCorrected` |
 | Queue and workflow | `queue` (`needs-answer` / `complaint` / `praise` / `none`), `status` (`open` / `replied` / `closed`), `closeReason` (`answered-elsewhere` / `not-needed` / `spam`) |
@@ -109,7 +109,7 @@ Pulse's pattern, scaled down:
 - **Cadence:** a Strapi cron task every minute takes up to 10 `pending` inquiries, oldest first, plus `failed` ones under 5 attempts. An in-process flag stops two sweeps overlapping.
 - **One call per inquiry, for every label:**
   - It sends the message, the concierge's reply, `knowledgeFound` and `handedOff` to Anthropic's Messages API.
-  - The labels come back through a forced tool whose input schema is the label shape, so the answer is always structured.
+  - The labels come back through the AI SDK's `generateObject` with the label schema, as Pulse's `analyze()` does, so the answer is always structured. The provider handles each model's way of returning structured output (amended 2 Oct 2026: the first version said a forced tool, which current Claude models refuse).
   - Long limits on free text (`reason` up to 400 characters), since Pulse saw failures at 200.
 - **Prompt:**
   - The kinds and the sentiment scale are defined in one typed criteria file, which generates the prompt.
@@ -118,9 +118,9 @@ Pulse's pattern, scaled down:
 - **Outcomes:**
   - **Success:** `analyzed`, the labels and the queue set.
   - **Error:** `failed`, with `analysisAttempts` + 1. At 5 attempts it's parked, and a **Label again** action resets it.
-- **Without `ANTHROPIC_API_KEY`:** nothing is sent. Rows stay `pending`, show under **Not labelled**, and are labelled once a key is set.
+- **Without AI settings** (no `AI_API_KEY`, and no `AI_BASE_URL` for a local model): nothing is sent. As in Pulse, the sweep marks new rows `skipped`. They show under **Not labelled**, and are labelled once AI is on.
 - **Human corrections win:** a person can change the kind or the sentiment on the board. That sets `humanCorrected`, and labelling never overwrites it.
-- **Config:** `classifierModel` (default `claude-haiku-4-5-20251001`), `anthropicApiKey` (from `ANTHROPIC_API_KEY`), and `anthropicApiBaseUrl`, which the tests point at a local stand-in.
+- **Config:** Pulse's: `aiProvider` (`anthropic`, `openai` or `openai-compatible`, from `AI_PROVIDER`), `aiModel` (`AI_MODEL`, default per provider, `claude-haiku-4-5-20251001` for Anthropic), `aiApiKey` (`AI_API_KEY`) and `aiBaseUrl` (`AI_BASE_URL`, for a local model such as Ollama). Tests point `aiBaseUrl` at a local stand-in, and live checks at Ollama.
 
 ## 5. The Inquiries page (Strapi admin)
 

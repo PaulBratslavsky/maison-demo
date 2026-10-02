@@ -1,6 +1,6 @@
 // Sets up the Maison demo on a running Strapi. Safe to run again: it replaces what it made before.
 //   1. on a fresh database, registers the demo admin (DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD) as its first admin
-//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's four catalog actions,
+//   2. loads the demo catalog, and lets websites read it over REST: the Public role gets Maison's five catalog actions,
 //      and the Home page's find, for the text on the app's Home screen
 //   3. (re)creates the admin tokens "Maison customer" and "Maison ops"
 //   4. (re)creates the OAuth client "Maison app" (customer sign-in with LINE, mapped to "Maison customer").
@@ -81,7 +81,7 @@ export const writeEnv = (file, values) => {
 
 /**
  * What anyone may read over REST without credentials:
- * - Maison's catalog, for websites (GET /api/maison/collections, /products, /products/:slug and /boutiques). Booking and
+ * - Maison's catalog, for websites (GET /api/maison/collections, /products, /products/:slug, /boutiques and /knowledge). Booking and
  *   "my visits" there take the customer's LINE session, whatever a role holds.
  * - the Home page's published text (GET /api/home-page), which the app's server reads.
  */
@@ -90,6 +90,7 @@ const PUBLIC_ACTIONS = [
   'plugin::maison.products.find',
   'plugin::maison.products.findOne',
   'plugin::maison.boutiques.find',
+  'plugin::maison.knowledge.find',
   'api::home-page.home-page.find',
 ];
 
@@ -150,6 +151,16 @@ export const grantPublicReads = async (api) => {
   return changed;
 };
 
+/**
+ * What setup says about the seed (POST /maison/demo/seed): whether it loaded the catalog or found it there, and, when
+ * it added any, how many product knowledge entries. A catalog loaded before gets the knowledge on the next run, so
+ * "already loaded" alone would hide that it did something.
+ */
+export const seedLines = (seeded) => [
+  seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.',
+  ...(seeded.knowledge > 0 ? [`Added ${seeded.knowledge} product knowledge entries.`] : []),
+];
+
 const main = async () => {
   if (!email || !password) {
     throw new Error('Set DEMO_ADMIN_EMAIL and DEMO_ADMIN_PASSWORD in strapi/.env. `npm install` at the repo root creates them.');
@@ -178,7 +189,7 @@ const main = async () => {
 
   // 2. The catalog, and reading it and the Home page over REST without credentials.
   const seeded = await api('POST', '/maison/demo/seed', {});
-  console.log(seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.');
+  for (const line of seedLines(seeded)) console.log(line);
   const actions = PUBLIC_ACTIONS.join(', ');
   console.log(
     (await grantPublicReads(api))
@@ -204,7 +215,7 @@ const main = async () => {
     });
   const customer = await mint(
     'Maison customer',
-    ['plugin::maison.catalog.read', 'plugin::maison.appointments.request'],
+    ['plugin::maison.catalog.read', 'plugin::maison.appointments.request', 'plugin::maison.questions.ask', 'plugin::maison.inquiries.log'],
     'Every customer session of the Maison app runs with this token.'
   );
   const ops = await mint('Maison ops', ['plugin::maison.confirmations.send'], 'An ops agent in the Maison demo, which can retry LINE confirmations.');

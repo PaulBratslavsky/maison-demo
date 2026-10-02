@@ -37,13 +37,20 @@ const appDirectory = () => {
 /** Loads a package the way the Strapi app resolves it, e.g. the app's own copy of @strapi/utils. */
 export const requireFromApp = (id) => createRequire(path.join(appDirectory(), 'package.json'))(id);
 
+/** The AI settings an app's .env can hold, which Pulse names and the plugin's `aiProvider`, `aiModel`, `aiApiKey` and `aiBaseUrl` take. */
+const AI_VARIABLES = ['AI_PROVIDER', 'AI_MODEL', 'AI_API_KEY', 'AI_BASE_URL'];
+
 /**
  * Boots the Strapi app (with this plugin yalc-linked) against .tmp/maison-test-<name>.db, then sets `maisonConfig` on
  * the plugin's config.
  *
- * No test reaches LINE. The app's .env can't hand Strapi a channel access token: dotenv never overrides a variable
- * that's already set, even to ''. And once Strapi has loaded, the token is null unless `maisonConfig` gives one, along
- * with a lineApiBaseUrl on this machine.
+ * No test reaches LINE or a model. The app's .env can't hand Strapi a channel access token or an AI setting, a real key
+ * among them: dotenv never overrides a variable that's already set, even to ''. And once Strapi has loaded, the token,
+ * the AI key and the AI base URL are null unless `maisonConfig` gives one, along with a lineApiBaseUrl or an
+ * aiBaseUrl on this machine.
+ *
+ * Strapi's cron is stopped right after the load, for every suite: the plugin's per-minute labelling job, or a job of the
+ * app's own, would race the suite's own calls. A suite that wants a job to run calls it itself.
  */
 export async function bootStrapi(name, { maisonConfig = {} } = {}) {
   const appDir = appDirectory();
@@ -51,12 +58,14 @@ export async function bootStrapi(name, { maisonConfig = {} } = {}) {
   rmSync(path.join(appDir, dbFile), { force: true });
   process.env.DATABASE_FILENAME = dbFile;
   process.env.LINE_CHANNEL_ACCESS_TOKEN = '';
+  for (const variable of AI_VARIABLES) process.env[variable] = '';
   process.chdir(appDir);
   const { createStrapi, compileStrapi } = requireFromApp('@strapi/strapi');
   const appContext = await compileStrapi({ appDir });
   const strapi = createStrapi(appContext);
   await strapi.load();
-  for (const [key, value] of Object.entries({ lineChannelAccessToken: null, ...maisonConfig })) {
+  strapi.cron.stop();
+  for (const [key, value] of Object.entries({ lineChannelAccessToken: null, aiApiKey: null, aiBaseUrl: null, ...maisonConfig })) {
     strapi.config.set(`plugin::maison.${key}`, value);
   }
   return strapi;

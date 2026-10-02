@@ -45,6 +45,8 @@ export const COPY = {
     },
     leadDays: (n: number) => `お届けまで約${n}日`,
     bookVisit: '来店を予約',
+    // Under a product's details list: it opens the concierge with that piece in context (/concierge?product=<slug>).
+    askAboutPiece: 'この商品について質問する',
     boutique: 'ブティック',
     // After a boutique's name in the booking sheet, whose radio is disabled: it doesn't have the piece.
     notInStock: '在庫なし',
@@ -65,9 +67,22 @@ export const COPY = {
     // Beside a confirmed visit's status tag, after a small check (components/status-tag.tsx).
     lineSent: 'LINEで送信済み',
     visitRequested: 'リクエストを送りました。ブティックからLINEで確定のご連絡があります。',
+    // The concierge's hand-off (components/chat-parts.tsx), under the line handOffAt names (lib/tool-view.ts). Under a
+    // hand-off that Strapi recorded (the model's hand_off_to_staff, or the app's own for a knowledge search that found
+    // nothing): `note` says who has the question, by its reference, and where and when they reply, and `send` is the button
+    // that opens Maison's LINE chat with `typed` already in it (lineMessageUrl in lib/line-chat.ts). `fallback` is for a
+    // question nothing recorded, because the hand-off failed: it says only where the team answers, above "Chat with
+    // Maison on LINE", so a customer can always reach a person.
+    handOff: {
+      fallback: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
+      note: (reference: string) => `ご質問（${reference}）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。`,
+      send: 'LINEトークで送る',
+      typed: (reference: string, question: string) => `アドバイザーへの質問（${reference}）：${question}`,
+    },
     // "Chat with Maison on LINE" (components/line-chat.tsx), a link LINE opens as the chat with Maison's Official
-    // Account: on My visits under `line`, on a visit's page, and after a booking. For a customer who hasn't added Maison
-    // yet (liff.getFriendship() in LINE mode), the add-friend words take their place (lineChatWords in lib/line-chat.ts).
+    // Account: on My visits under `line`, on a visit's page, after a booking, and in the concierge under `handOff.fallback`.
+    // For a customer who hasn't added Maison yet (liff.getFriendship() in LINE mode), the add-friend words take their
+    // place (lineChatWords in lib/line-chat.ts).
     lineChat: {
       button: 'LINEでMaisonにメッセージ',
       line: '確定のご連絡はMaisonのLINEトークにお届けします。',
@@ -83,11 +98,14 @@ export const COPY = {
     // The concierge's title bar: the button that lists the screen's MCP tools.
     mcpTools: (n: number) => `${n}つのMCPツール`,
     conciergeIntro: 'ギフト選びやご来店のご予約をお手伝いします。',
+    // With a piece (Ask about this piece): the intro and the suggestions in place of conciergeIntro and suggestions.
+    conciergeIntroPiece: 'この商品について、お手入れ、サイズ、名入れ、配送など、何でもお尋ねください。',
     placeholder: 'メッセージを入力',
     send: '送信',
     // Under a reply that ended with nothing to read, beside `retry`'s button (the concierge page).
     noReply: '返信を受け取れませんでした。',
     suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', 'はい、お願いします。'],
+    pieceSuggestions: ['名入れはできますか？', 'お手入れ方法を教えてください。', 'どのブティックに在庫がありますか？'],
     results: (n: number) => `${n}件`,
     noProducts: 'このコレクションには、まだ商品がありません。',
     // Follows an error's copy when the server named the wait (Retry-After).
@@ -146,6 +164,7 @@ export const COPY = {
     },
     leadDays: (n: number) => `About ${n} days`,
     bookVisit: 'Book a visit',
+    askAboutPiece: 'Ask about this piece',
     boutique: 'Boutique',
     notInStock: 'not in stock',
     date: 'Date',
@@ -162,6 +181,12 @@ export const COPY = {
     confirmationSent: 'Confirmed · LINE sent',
     lineSent: 'LINE sent',
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
+    handOff: {
+      fallback: "Our team answers questions like this in Maison's LINE chat.",
+      note: (reference: string) => `Your question is with Maison's client advisors (${reference}). They reply in your LINE chat with Maison, 11:00–20:00 Japan time.`,
+      send: 'Send it in the LINE chat',
+      typed: (reference: string, question: string) => `Question for a Maison advisor (${reference}): ${question}`,
+    },
     lineChat: {
       button: 'Chat with Maison on LINE',
       line: 'Your confirmation arrives in the Maison chat.',
@@ -175,10 +200,12 @@ export const COPY = {
     concierge: 'Concierge',
     mcpTools: (n: number) => `${n} MCP tools`,
     conciergeIntro: 'I can help you choose a gift and book a boutique visit.',
+    conciergeIntroPiece: 'Ask me anything about this piece: care, sizing, personalization, delivery.',
     placeholder: 'Write a message',
     send: 'Send',
     noReply: 'No reply came back.',
     suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Yes, please.'],
+    pieceSuggestions: ['Can I have it personalized?', 'How do I care for it?', 'Which boutique has it in stock?'],
     results: (n: number) => `${n} result${n === 1 ? '' : 's'}`,
     noProducts: 'Nothing in this collection yet.',
     // Follows an error's copy when the server named the wait (Retry-After).

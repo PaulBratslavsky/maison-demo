@@ -5,6 +5,10 @@ export type ErrorCode =
   | 'boutique_closed'
   | 'in_the_past'
   | 'too_many_open_requests'
+  | 'too_many_open_questions'
+  | 'already_closed'
+  | 'already_replied'
+  | 'not_failed'
   | 'not_published'
   | 'not_configured'
   // Only the REST door answers this one: checking a customer's session failed on the server.

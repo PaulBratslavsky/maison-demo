@@ -4,7 +4,10 @@ import catalog from './catalog';
 import confirmations from './confirmations';
 import errors from './errors';
 import identity from './identity';
+import inquiries from './inquiries';
+import labelling from './labelling';
 import lineConfirmations from './line-confirmations';
+import questions from './questions';
 import seed from './seed';
 
 export default {
@@ -14,6 +17,9 @@ export default {
   confirmations,
   errors,
   identity,
+  inquiries,
+  labelling,
   'line-confirmations': lineConfirmations,
+  questions,
   seed,
 };

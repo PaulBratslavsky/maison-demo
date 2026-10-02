@@ -895,6 +895,209 @@ export interface PluginMaisonCollection extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface PluginMaisonInquiry extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_inquiries';
+  info: {
+    description: 'One concierge turn: what the customer asked, what the concierge answered, and the labels staff work from.';
+    displayName: 'Maison inquiry';
+    pluralName: 'inquiries';
+    singularName: 'inquiry';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    analysisAttempts: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    analysisStatus: Schema.Attribute.Enumeration<
+      ['pending', 'analyzed', 'failed', 'skipped']
+    > &
+      Schema.Attribute.DefaultTo<'pending'>;
+    answered: Schema.Attribute.Boolean;
+    closeReason: Schema.Attribute.Enumeration<
+      ['answered-elsewhere', 'not-needed', 'spam']
+    >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    handedOff: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    humanCorrected: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    kind: Schema.Attribute.Enumeration<
+      ['question', 'complaint', 'praise', 'other']
+    >;
+    knowledgeFound: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    language: Schema.Attribute.Enumeration<['ja', 'en']> &
+      Schema.Attribute.DefaultTo<'ja'>;
+    lineDetail: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.inquiry'
+    > &
+      Schema.Attribute.Private;
+    message: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1000;
+      }>;
+    modelVersion: Schema.Attribute.String;
+    productSlug: Schema.Attribute.String;
+    promptVersion: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    questionReference: Schema.Attribute.String;
+    queue: Schema.Attribute.Enumeration<
+      ['needs-answer', 'complaint', 'praise', 'none']
+    > &
+      Schema.Attribute.DefaultTo<'none'>;
+    reason: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 400;
+      }>;
+    repliedAt: Schema.Attribute.DateTime;
+    repliedBy: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    reply: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    replyText: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    sentimentLabel: Schema.Attribute.Enumeration<
+      ['positive', 'neutral', 'negative']
+    >;
+    sentimentScore: Schema.Attribute.Float;
+    status: Schema.Attribute.Enumeration<['open', 'replied', 'closed']> &
+      Schema.Attribute.DefaultTo<'open'>;
+    topic: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    via: Schema.Attribute.Enumeration<['concierge', 'line-chat']> &
+      Schema.Attribute.DefaultTo<'concierge'>;
+  };
+}
+
+export interface PluginMaisonKnowledge extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_knowledge_entries';
+  info: {
+    description: 'What Maison has written down for customers: care, materials, sizing, delivery, repairs and more. The concierge answers only from published entries.';
+    displayName: 'Maison product knowledge';
+    pluralName: 'knowledge-entries';
+    singularName: 'knowledge';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: true;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    answer: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    category: Schema.Attribute.Enumeration<
+      [
+        'care',
+        'materials',
+        'sizing',
+        'personalization',
+        'delivery',
+        'returns',
+        'repairs',
+        'warranty',
+        'gifting',
+        'store',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    keywords: Schema.Attribute.Text &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.knowledge'
+    >;
+    productSlugs: Schema.Attribute.JSON &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    strapi_assignee: Schema.Attribute.Relation<'oneToOne', 'admin::user'>;
+    strapi_stage: Schema.Attribute.Relation<
+      'oneToOne',
+      'plugin::review-workflows.workflow-stage'
+    >;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface PluginMaisonNotification extends Struct.CollectionTypeSchema {
   collectionName: 'maison_notifications';
   info: {
@@ -1100,6 +1303,78 @@ export interface PluginMaisonProduct extends Struct.CollectionTypeSchema {
           localized: false;
         };
       }>;
+  };
+}
+
+export interface PluginMaisonQuestion extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_questions';
+  info: {
+    description: "A question the concierge handed to Maison's client advisors. Staff see and answer it on the Maison page.";
+    displayName: 'Maison customer question';
+    pluralName: 'questions';
+    singularName: 'question';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    answer: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    answeredAt: Schema.Attribute.DateTime;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    customerName: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    knowledgeDocumentId: Schema.Attribute.String;
+    language: Schema.Attribute.Enumeration<['ja', 'en']> &
+      Schema.Attribute.DefaultTo<'ja'>;
+    lineDetail: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.question'
+    > &
+      Schema.Attribute.Private;
+    productSlug: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    question: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1000;
+      }>;
+    reason: Schema.Attribute.Enumeration<['no_answer', 'asked_for_person']> &
+      Schema.Attribute.DefaultTo<'no_answer'>;
+    reference: Schema.Attribute.String & Schema.Attribute.Required;
+    staffName: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    status: Schema.Attribute.Enumeration<['open', 'taken', 'answered']> &
+      Schema.Attribute.DefaultTo<'open'>;
+    takenAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -1705,8 +1980,11 @@ declare module '@strapi/strapi' {
       'plugin::maison.appointment': PluginMaisonAppointment;
       'plugin::maison.boutique': PluginMaisonBoutique;
       'plugin::maison.collection': PluginMaisonCollection;
+      'plugin::maison.inquiry': PluginMaisonInquiry;
+      'plugin::maison.knowledge': PluginMaisonKnowledge;
       'plugin::maison.notification': PluginMaisonNotification;
       'plugin::maison.product': PluginMaisonProduct;
+      'plugin::maison.question': PluginMaisonQuestion;
       'plugin::maison.stock-level': PluginMaisonStockLevel;
       'plugin::review-workflows.workflow': PluginReviewWorkflowsWorkflow;
       'plugin::review-workflows.workflow-stage': PluginReviewWorkflowsWorkflowStage;

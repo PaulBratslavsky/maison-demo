@@ -2,7 +2,7 @@
 
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { use, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { AssistantParts } from '@/components/chat-parts';
 import { ErrorNote } from '@/components/error-note';
@@ -13,22 +13,32 @@ import { needsRetry } from '@/lib/chat-retry';
 import { config } from '@/lib/config';
 import { COPY } from '@/lib/copy';
 import { getMaison } from '@/lib/maison';
+import { pieceSlugOf } from '@/lib/piece-slug';
 import { errorOf, errorText } from '@/lib/status';
 import { tunnelHeaders } from '@/lib/tunnel';
 
-const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'request_appointment', 'my_appointments'];
+const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments', 'hand_off_to_staff'];
 
 /**
  * The concierge, as in the mockup: a title bar with the "N MCP tools" button (Screen's `title`); the customer's messages
  * as black blocks on the right, the concierge's as plain text, each tool call as one mono line; and an input bar pinned
  * at the bottom, with the suggestions above an underline field and a black Send.
+ *
+ * From a product's "Ask about this piece" (/concierge?product=<slug>) it has that piece in context: the intro and the
+ * suggestions are about the piece, and the slug goes to the server with each turn, which adds one instruction about it.
  */
-export default function ConciergePage() {
+export default function ConciergePage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const { locale } = useMaison();
   const t = COPY[locale];
+  // The piece the customer asked from, or null. A client page gets its searchParams as a promise. The server renders the
+  // page with the request's own, so the first render here is the same one: no mismatch.
+  const piece = pieceSlugOf(use(searchParams).product);
   // The header's language switch can change the language at any time, so the transport reads it when a message is sent.
+  // The piece is read the same way: useChat keeps the transport it first got, and what it sends should follow the page.
   const localeRef = useRef(locale);
   localeRef.current = locale;
+  const pieceRef = useRef(piece);
+  pieceRef.current = piece;
 
   const transport = useMemo(
     () =>
@@ -39,7 +49,7 @@ export default function ConciergePage() {
           Authorization: `Bearer ${await (await getMaison()).session.getToken()}`,
           ...tunnelHeaders(config.strapiUrl),
         }),
-        body: () => ({ locale: localeRef.current }),
+        body: () => ({ locale: localeRef.current, ...(pieceRef.current ? { product: pieceRef.current } : {}) }),
       }),
     []
   );
@@ -82,7 +92,7 @@ export default function ConciergePage() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="flex flex-col gap-3.5 p-5">
-          <p className="text-body text-graphite">{t.conciergeIntro}</p>
+          <p className="text-body text-graphite">{piece ? t.conciergeIntroPiece : t.conciergeIntro}</p>
           {messages.map((message) =>
             message.role === 'user' ? (
               // The customer's words, as typed.
@@ -128,7 +138,7 @@ export default function ConciergePage() {
       <div className="flex shrink-0 flex-col gap-3 border-t border-hairline bg-paper px-5 pb-[calc(0.75rem+var(--line-safe-bottom))] pt-3">
         {/* On a phone in landscape the row goes once the conversation has begun, to leave it room (tailwind.config.ts). A flex gap, not space-y: the hidden row leaves no margin behind. */}
         <div className={`-mx-5 flex gap-2 overflow-x-auto px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${messages.length > 0 ? 'short:hidden' : ''}`}>
-          {t.suggestions.map((suggestion) => (
+          {(piece ? t.pieceSuggestions : t.suggestions).map((suggestion) => (
             <button
               key={suggestion}
               type="button"

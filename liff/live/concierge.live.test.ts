@@ -15,6 +15,7 @@ import { POST } from '@/app/api/concierge/route';
 import { COPY } from '@/lib/copy';
 import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
+import { handOffAt } from '@/lib/tool-view';
 import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, sseEvents, strapiUp, weekdaysIn } from './support';
 
 delete process.env.ANTHROPIC_API_KEY;
@@ -133,6 +134,19 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
   });
   afterAll(() => stopMock());
 
+  /** One English turn through the real route, as the app sends it: the stream's events. */
+  const turn = async (text: string) => {
+    const response = await POST(
+      new Request('http://localhost:3003/api/concierge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ locale: 'en', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] }),
+      })
+    );
+    expect(response.status).toBe(200);
+    return sseEvents(await response.text());
+  };
+
   it('answers the demo question from the catalog tools, and names only products they returned', async () => {
     const response = await POST(
       new Request('http://localhost:3003/api/concierge', {
@@ -175,6 +189,8 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(named.length, `the answer names a product. ${context}`).toBeGreaterThan(0);
     for (const slug of named) expect(returned.has(slug), `${slug} came from a tool call, not from the model. ${context}`).toBe(true);
     expect(named.some((slug) => fits.has(slug)), `a named product fits the question. ${context}`).toBe(true);
+    // A gift is no policy question: the chat shows no hand-off note under the answer.
+    expect(handOffAt((await assistantMessageOf(events)).parts), `a hand-off note shows on a gift question. ${context}`).toBeNull();
   });
 
   /**
@@ -203,7 +219,9 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     };
 
     const firstTurn = await converse([say('u1', ask)]);
-    const secondTurn = await converse([say('u1', ask), await assistantMessageOf(firstTurn), say('u2', yes)]);
+    const firstReply = await assistantMessageOf(firstTurn);
+    const secondTurn = await converse([say('u1', ask), firstReply, say('u2', yes)]);
+    const secondReply = await assistantMessageOf(secondTurn);
     const calls = callsIn([...firstTurn, ...secondTurn]);
     const replies = [textIn(firstTurn), textIn(secondTurn)];
     const trace = `Tools: ${calls.map((call) => `${call.name}(${JSON.stringify(call.input)})`).join(', ')}. Replies: ${JSON.stringify(replies)}`;
@@ -235,5 +253,43 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
       expect(datesIn(reply, year).filter((date) => date !== saturday), `the ${which} reply names another date. ${trace}`).toEqual([]);
       expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the ${which} reply names another weekday. ${trace}`).toEqual([]);
     }
+
+    // The stage beat is a gift and a booking, not a policy question: neither reply shows a hand-off note.
+    for (const [which, reply] of [['first', firstReply], ['second', secondReply]] as const) {
+      expect(handOffAt(reply.parts), `the ${which} reply shows a hand-off note. ${trace}`).toBeNull();
+    }
+  });
+
+  it("answers a care question from Maison's product knowledge", async () => {
+    const events = await turn('How do I care for the leather?');
+    const answer = textIn(events);
+    const called = callsIn(events).map((call) => call.name);
+    const found = events
+      .filter((event) => event.type === 'tool-output-available')
+      .flatMap((event) => (event.output?.structuredContent?.entries as Array<{ title: string }> | undefined) ?? []);
+    expect(called, answer).toContain('search_knowledge');
+    expect(found.map((entry) => entry.title), answer).toContain('How do I care for the leather?');
+    expect(called, answer).not.toContain('hand_off_to_staff');
+    expect(answer, 'the answer uses the entry').toMatch(/cloth|sunlight|balm/i);
+  });
+
+  it("shows the hand-off note for a question Maison hasn't written about, with Strapi's reference only when it recorded the question", async () => {
+    const events = await turn('Can I pay in bitcoin?');
+    const answer = textIn(events);
+    const calls = callsIn(events);
+    const called = calls.map((call) => call.name);
+    expect(called, answer).toContain('search_knowledge');
+    // The chat shows a note after a search that found nothing: the app records the question itself (the search's result carries it), or the plain note when that fails.
+    const note = handOffAt((await assistantMessageOf(events)).parts);
+    expect(note, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
+    // The note says the question is with the advisors, under its reference, only when Strapi recorded it: its own reference, from the app's hand-off on the search or from the model's call, or none.
+    const recorded = calls.find(
+      (call) =>
+        (call.name === 'search_knowledge' && call.output?.structuredContent?.handOff?.reference) || (call.name === 'hand_off_to_staff' && call.output?.structuredContent?.question?.reference)
+    );
+    const reference = recorded?.output?.structuredContent.handOff?.reference ?? recorded?.output?.structuredContent.question?.reference;
+    expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(reference);
+    // With nothing recorded (the hand-off failed), the reply must not promise contact: nobody has the question.
+    if (!note?.recorded) expect(answer, `it promises contact though nothing was recorded. Tools: ${called.join(', ')}`).not.toMatch(/will (contact|reach out|get back)/i);
   });
 });

@@ -60,6 +60,17 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         // Unset: nothing is sent, and the board shows "not sent". In local mode it goes to the mock's customer: you, with
         // option A's NEXT_PUBLIC_DEMO_LINE_USER_ID in liff/.env, and otherwise a made-up user ID that no one receives.
         lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', '') || null,
+        // Where Strapi reaches LINE's Messaging API. Unset everywhere but local checks, which point it at a stand-in on
+        // this machine (http://127.0.0.1:<port>) so nothing reaches a real phone.
+        lineApiBaseUrl: env('MAISON_LINE_API_BASE_URL', '') || null,
+        // The model that labels each customer inquiry, with Pulse's settings. AI_PROVIDER is anthropic (the default),
+        // openai or openai-compatible; AI_MODEL defaults per provider (claude-haiku-4-5-20251001 for Anthropic);
+        // AI_BASE_URL is for a local model, such as Ollama's http://127.0.0.1:11434/v1. Unset, labelling is off, and
+        // new inquiries wait under Not labelled.
+        aiProvider: env('AI_PROVIDER', '') || null,
+        aiModel: env('AI_MODEL', '') || null,
+        aiApiKey: env('AI_API_KEY', '') || null,
+        aiBaseUrl: env('AI_BASE_URL', '') || null,
       },
     },
     'strapi-oauth-mcp-manager': {

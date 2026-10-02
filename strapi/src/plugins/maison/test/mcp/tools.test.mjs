@@ -41,10 +41,11 @@ describe('Maison over /mcp', () => {
 
   it('shows each token only the tools its permissions allow', async () => {
     assert.deepEqual(await toolNames(customer), [
-      'browse_collections', 'find_boutiques', 'my_appointments', 'request_appointment', 'search_products', 'view_product',
+      'browse_collections', 'find_boutiques', 'hand_off_to_staff', 'log_inquiry', 'my_appointments', 'request_appointment',
+      'search_knowledge', 'search_products', 'view_product',
     ]);
     assert.deepEqual(await toolNames(staff), [
-      'appointment_requests', 'browse_collections', 'confirm_appointment', 'find_boutiques', 'search_products', 'view_product',
+      'appointment_requests', 'browse_collections', 'confirm_appointment', 'find_boutiques', 'search_knowledge', 'search_products', 'view_product',
     ]);
     assert.deepEqual(await toolNames(ops), ['pending_confirmations', 'record_confirmation']);
   });
@@ -74,6 +75,15 @@ describe('Maison over /mcp', () => {
     ]);
   });
 
+  it("answers a question about a piece from the product knowledge, with that piece's own entry first", async () => {
+    const result = await customer.callTool({
+      name: 'search_knowledge',
+      arguments: { query: 'Will it fit in the overhead bin?', productSlugs: ['cabin-case-55'], locale: 'en' },
+    });
+    assert.ok(!result.isError, JSON.stringify(result.content));
+    assert.equal(result.structuredContent.entries[0].title, 'Will the Cabin Case 55 fit in an airline overhead bin?');
+  });
+
   it('returns not_found with a hint for an unknown product', async () => {
     const result = await customer.callTool({ name: 'view_product', arguments: { slug: 'no-such-piece' } });
     assert.equal(result.isError, true);
@@ -89,6 +99,13 @@ describe('Maison over /mcp', () => {
     assert.equal(errorOf(booking).code, 'not_signed_in');
     const mine = await customer.callTool({ name: 'my_appointments', arguments: {} });
     assert.equal(errorOf(mine).code, 'not_signed_in');
+    const handedOff = await customer.callTool({ name: 'hand_off_to_staff', arguments: { question: 'Can the coffret hold a watch?' } });
+    assert.equal(errorOf(handedOff).code, 'not_signed_in');
+    const logged = await customer.callTool({
+      name: 'log_inquiry',
+      arguments: { message: 'Can the coffret hold a watch?', knowledgeFound: false, handedOff: true },
+    });
+    assert.equal(errorOf(logged).code, 'not_signed_in');
   });
 
   it('lets the staff token review requests with customers masked, and refuses unknown references', async () => {

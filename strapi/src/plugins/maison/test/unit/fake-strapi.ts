@@ -24,6 +24,7 @@ export const fakeStrapi = ({ services = {}, config = {}, plugins = {}, mcp, docu
     },
     ai: mcp ? { mcp } : undefined,
     documents,
+    cron: { add: vi.fn() },
     log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
   }) as any;
 

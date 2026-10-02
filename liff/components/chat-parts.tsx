@@ -1,13 +1,14 @@
 'use client';
 
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 
 import { parseChatText, type Line } from '@/lib/chat-text';
+import { config } from '@/lib/config';
 import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
-import { toolErrorOf } from '@/lib/mcp';
+import { lineMessageUrl } from '@/lib/line-chat';
+import { handOffAt, toolPartOf, toolView, type RecordedHandOff } from '@/lib/tool-view';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
 import { LineChat } from './line-chat';
 import { ProductImage } from './product-grid';
@@ -62,60 +63,6 @@ export function ChatText({ text }: { text: string }) {
   );
 }
 
-/** What the chat needs from AI SDK 7's dynamic-tool UI part (MCP tools arrive as dynamic tools). */
-export interface ToolPart {
-  toolName: string;
-  state: string;
-  output?: unknown;
-  errorText?: string;
-}
-
-/**
- * A message part as a tool call, or null when it isn't one. MCP tools arrive as `dynamic-tool` parts, which carry their
- * name. The concierge's own tool (resolve_date) arrives as a `tool-<name>` part, with the name in the type.
- */
-export const toolPartOf = (part: { type: string }): ToolPart | null => {
-  if (part.type === 'dynamic-tool') return part as unknown as ToolPart;
-  if (part.type.startsWith('tool-')) return { ...part, toolName: part.type.slice('tool-'.length) } as unknown as ToolPart;
-  return null;
-};
-
-/** The concierge's own tools. They aren't Maison tools, so their lines say "Local", not "MCP". */
-const LOCAL_TOOLS = ['resolve_date'];
-
-/** What `resolve_date` returned, for its line: the weekday and date the model was given. */
-const resolvedDay = (output: unknown): string | null => {
-  const day = output as { date?: unknown; weekday?: unknown } | null;
-  return typeof day?.date === 'string' && typeof day.weekday === 'string' ? `${day.weekday} ${day.date}` : null;
-};
-
-/**
- * What a tool call shows in the chat, built from its structuredContent, never from the model's text: its line ("MCP ·
- * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "… ✕ boutique_closed"), the products a
- * search found, and the appointment a request made.
- */
-export const toolView = (part: ToolPart, locale: Locale) => {
-  const t = COPY[locale];
-  const local = LOCAL_TOOLS.includes(part.toolName);
-  const output = part.state === 'output-available' ? (part.output as CallToolResult) : null;
-  const error = output ? toolErrorOf(output) : null;
-  const failed = part.state === 'output-error' || error !== null;
-  const data = output && !error ? (output.structuredContent as Record<string, unknown> | undefined) : undefined;
-  const list = Object.values(data ?? {}).find(Array.isArray) as unknown[] | undefined;
-  const answer = local && !failed ? resolvedDay(part.output) : null;
-  const status = part.state.startsWith('input')
-    ? '…'
-    : failed
-      ? `✕ ${error?.code ?? 'error'}`
-      : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
-  return {
-    line: `${local ? 'Local' : 'MCP'} · ${part.toolName} ${status}`,
-    failed,
-    products: part.toolName === 'search_products' && Array.isArray(data?.products) ? (data.products as ProductCard[]) : null,
-    appointment: part.toolName === 'request_appointment' ? ((data?.appointment as Appointment | undefined) ?? null) : null,
-  };
-};
-
 /** A tool call: one mono line, mist, or the error red when the call failed. */
 export function ToolLine({ text, failed }: { text: string; failed: boolean }) {
   return (
@@ -158,15 +105,49 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
 }
 
 /**
+ * The hand-off note, which handOffAt places once a message. After a hand-off Strapi recorded (`recorded`): who has the
+ * question, by its reference, and where and when they reply, with "Send it in the LINE chat", a secondary button that
+ * opens the chat with Maison with the question already typed in, for the customer to send (lineMessageUrl). Without
+ * NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the hand-off after a search that found nothing, or the
+ * model's own, failed): where the team answers, and "Chat with Maison on LINE", so a customer can always reach a person.
+ * Only a recorded hand-off says the question is with the advisors.
+ */
+export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | null; locale: Locale }) {
+  const copy = COPY[locale].handOff;
+  if (!recorded) {
+    return (
+      <div data-testid="hand-off" className="flex flex-col gap-2.5">
+        <p className="text-body text-graphite">{copy.fallback}</p>
+        <LineChat />
+      </div>
+    );
+  }
+  const url = lineMessageUrl(config.lineOaId, copy.typed(recorded.reference, recorded.question));
+  return (
+    <div data-testid="hand-off" className="flex flex-col gap-2.5">
+      <p className="text-body text-graphite">{copy.note(recorded.reference)}</p>
+      {url && (
+        <a href={url} data-testid="hand-off-line" className="btn-secondary w-full">
+          {copy.send}
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
- * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, and the pieces a
- * search found under the message's words.
+ * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note,
+ * once, under the line handOffAt names (a hand-off that went through: the model's hand_off_to_staff, or a search that
+ * found nothing and carries the one the app made; otherwise, with the plain note, the last search that found nothing, or
+ * a hand-off that failed), and the pieces a search found under the message's words.
  */
 export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
   const blocks: ReactNode[] = [];
   const found: ReactNode[] = [];
   let lines: ReactNode[] = [];
   let cards: ReactNode[] = [];
+  const note = handOffAt(parts);
   const endRun = () => {
     if (lines.length > 0) {
       blocks.push(
@@ -197,6 +178,9 @@ export function AssistantParts({ parts, locale }: { parts: Array<{ type: string;
           <LineChat />
         </div>
       );
+    }
+    if (note && index === note.index) {
+      cards.push(<HandOffNote key={`hand-off-${index}`} recorded={note.recorded} locale={locale} />);
     }
     if (view.products) found.push(<ProductSuggestions key={`found-${index}`} products={view.products} locale={locale} />);
   });

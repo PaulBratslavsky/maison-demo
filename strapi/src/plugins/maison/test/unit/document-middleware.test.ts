@@ -179,3 +179,20 @@ describe('other Document Service calls', () => {
     expect(sendConfirmation).not.toHaveBeenCalled();
   });
 });
+
+describe('saving a product knowledge entry', () => {
+  const save = (action: 'create' | 'update', productSlugs: unknown) =>
+    registered().call({ uid: UID.knowledge, action, params: { data: { title: 'Leather care', productSlugs } } }, async () => ({ documentId: 'k1' }));
+
+  it.each([[[]], [['weekender-50', 'cabin-case-55']], [null], [undefined]])('accepts productSlugs %j', async (productSlugs) => {
+    await expect(save('create', productSlugs)).resolves.toEqual({ documentId: 'k1' });
+  });
+
+  it.each([
+    ['text', 'weekender-50', 'productSlugs must be an array of product slugs'],
+    ['a name, not a slug', ['Weekender 50'], 'productSlugs contains "Weekender 50"'],
+    ['the same slug twice', ['weekender-50', 'weekender-50'], 'productSlugs lists "weekender-50" more than once'],
+  ])('refuses %s, on create and on update', async (_label, productSlugs, message) => {
+    for (const action of ['create', 'update'] as const) await expect(save(action, productSlugs)).rejects.toThrow(message);
+  });
+});
