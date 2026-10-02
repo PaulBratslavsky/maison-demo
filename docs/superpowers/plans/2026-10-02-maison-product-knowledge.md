@@ -1512,7 +1512,7 @@ In `liff/lib/concierge.ts`:
 - add rule 9 as the last line of the instructions, after rule 8:
 
 ```
-9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, and then say in one sentence that Maison's team answers questions like this in the LINE chat. Never mention the LINE chat unless you called hand_off_to_staff in this reply, and never say the team will contact them.
+9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, and then say in one short sentence that you don't have that information: the app shows the customer where Maison's team answers. Don't mention the LINE chat yourself, and never say the team will contact them.
 ```
 
 - add, after `resolveDateTool`:
