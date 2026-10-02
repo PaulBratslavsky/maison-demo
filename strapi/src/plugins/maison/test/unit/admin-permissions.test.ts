@@ -52,9 +52,9 @@ describe("the admin panel's permissions for customer questions", () => {
     expect(actionsOf(PERMISSIONS.sections)).toEqual(expect.arrayContaining([ACTION.questionsRead, ACTION.questionsAnswer]));
   });
 
-  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead and canAnswer', () => {
+  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView and canReply', () => {
     expect(PERMISSIONS.sections.map(flagOf)).toEqual(
-      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer'])
+      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply'])
     );
   });
 
@@ -63,5 +63,40 @@ describe("the admin panel's permissions for customer questions", () => {
       const flags = permissions.map(flagOf);
       expect(new Set(flags).size, `${name}: ${flags.join(', ')}`).toBe(flags.length);
     }
+  });
+
+  // The page checks every action of `sections` at once, so two that end in one word would give one flag for both.
+  it('make seven flags for the seven actions the page checks, none of them shared', () => {
+    expect(PERMISSIONS.sections).toHaveLength(7);
+    expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(7);
+  });
+});
+
+describe("the admin panel's permissions for customer inquiries", () => {
+  const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
+
+  it('open the page to staff who can review inquiries, as well as to those who review requests, read questions or manage the demo data', () => {
+    expect(actionsOf(PERMISSIONS.page)).toEqual(
+      expect.arrayContaining([ACTION.appointmentsReview, ACTION.demoManage, ACTION.questionsRead, ACTION.inquiriesView])
+    );
+  });
+
+  it("don't open the page for replying alone: the buttons live in the Inquiries tab, which needs the view permission", () => {
+    expect(actionsOf(PERMISSIONS.page)).not.toContain(ACTION.inquiriesReply);
+  });
+
+  it('check viewing and replying to inquiries with useRBAC, for the page to read', () => {
+    expect(actionsOf(PERMISSIONS.sections)).toEqual(expect.arrayContaining([ACTION.inquiriesView, ACTION.inquiriesReply]));
+  });
+
+  it("gate the inquiries' Homepage widget on the server's view action, the one its summary route checks", () => {
+    expect(PERMISSIONS.inquiriesWidget).toHaveLength(1);
+    expect(PERMISSIONS.inquiriesWidget[0].action).toBe(ACTION.inquiriesView);
+    expect(PERMISSIONS.inquiriesWidget[0].subject).toBeNull();
+  });
+
+  it('keep the requests widget on the review action: the inquiries have a widget of their own, not a line in it', () => {
+    expect(actionsOf(PERMISSIONS.widget)).toEqual([ACTION.appointmentsReview]);
+    expect(actionsOf(PERMISSIONS.widget)).not.toContain(ACTION.inquiriesView);
   });
 });

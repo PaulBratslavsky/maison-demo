@@ -2,11 +2,12 @@
 
 A Strapi 5 plugin that shows one content model serving people and AI agents. It adds a fictional luxury house, "Maison": collections, products, boutiques and stock. Signed-in customers can request boutique visits, and staff review and confirm them.
 
-- **Twelve MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
+- **Thirteen MCP tools and one MCP prompt** on Strapi's `/mcp`, each gated by a permission you grant per token
 - **REST routes at `/api/maison`** for websites: the catalog under Strapi's role permissions, and bookings for the signed-in LINE customer, on the same services, input checks and sign-in as the tools
 - **Six of the tools in the admin's AI chat**, through [strapi-plugin-tanstack-ai](https://github.com/PaulBratslavsky/strapi-plugin-tanstack-ai) 1.6
 - **A human gate:** agents can request appointments, but only staff confirm them
 - **Customer questions for staff:** when the concierge can't answer, Strapi records the question, staff let the customer know or answer on LINE in their own name, and an answer can become product knowledge ([Customer questions](#customer-questions))
+- **Customer inquiries:** every concierge turn is recorded, a model labels it in the background, and staff work the queues on the Maison page and reply on LINE ([Customer inquiries](#customer-inquiries))
 - **Customer identity comes from sign-in, never from the model**, through [strapi-oauth-mcp-manager](https://github.com/PaulBratslavsky/strapi-oauth-mcp-manager) 1.1 and LINE
 - **A live requests board and demo data** in the admin panel, with content in Japanese and English
 
@@ -30,6 +31,7 @@ Confirming a request is one act wherever it happens: the `confirm_appointment` t
 
 - Strapi `^5.55.1`, with the MCP server enabled: `mcp: { enabled: true }` in `config/server.ts`
 - The i18n plugin, which is on by default
+- Node 22.12 or later: the AI SDK that labels inquiries is an ES module, which Strapi loads with `require()`
 - For the customer tools and the customer routes, strapi-oauth-mcp-manager 1.1 with LINE sign-in configured. Without it, those tools answer `not_signed_in` and those routes answer 503.
 - For the admin chat, strapi-plugin-tanstack-ai 1.6 with its chat configured. Maison needs no setup for it: the chat finds Maison's tools by itself.
 
@@ -57,6 +59,8 @@ export default ({ env }) => ({
     config: {
       liffUrl: env('MAISON_LIFF_URL', null),
       lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', null),
+      // The model that labels inquiries. Without a key, nothing is sent to a model.
+      aiApiKey: env('AI_API_KEY', ''),
     },
   },
 });
@@ -76,6 +80,10 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
 | `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations and staff's answers to customer questions with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
 | `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
+| `aiProvider` | `anthropic` | The provider of the model that labels inquiries: `anthropic`, `openai` or `openai-compatible`, which is any server that speaks OpenAI's format, such as Ollama, vLLM or LM Studio: `env('AI_PROVIDER', '')`. An empty value counts as not set. |
+| `aiModel` | the provider's own | A model ID: `env('AI_MODEL', '')`. Without one, it's `claude-haiku-4-5-20251001` for `anthropic`, `gpt-5-mini` for `openai` and `llama3.1` for `openai-compatible`. |
+| `aiApiKey` | `null` | The provider's API key: `env('AI_API_KEY', '')`. Without it, and for `openai-compatible` without `aiBaseUrl`, labelling is off ([Labelling](#labelling)). |
+| `aiBaseUrl` | `null` | Where an `openai-compatible` server answers, such as `http://127.0.0.1:11434/v1` for Ollama: `env('AI_BASE_URL', '')`. An http or https URL, with no trailing slash. |
 
 ## Tools
 
@@ -89,6 +97,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale`, which the visit keeps for its LINE confirmation |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
 | `hand_off_to_staff` | MCP: hand questions to staff | Hands the signed-in customer's question to Maison's client advisors, with the piece it is about when it is about one, and answers a reference like `Q-4821`. Strapi sends the customer nothing: staff reply in the LINE chat ([Customer questions](#customer-questions)). Five questions can wait for one customer at a time, and asking one again that is still waiting answers its reference |
+| `log_inquiry` | MCP: log customer inquiries | Records one concierge turn for staff: the customer's message and the concierge's reply, and whether knowledge was found or the turn handed the question off. The customer app's server calls it after each turn, with the customer's session. It isn't for the concierge to call, and the admin chat doesn't offer it ([Customer inquiries](#customer-inquiries)) |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
 | `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
@@ -209,16 +218,17 @@ strapi-plugin-tanstack-ai 1.6 finds Maison's `ai-tools` service and offers six o
 - `browse_collections`, `search_products`, `view_product` and `find_boutiques`
 - `appointment_requests` and `confirm_appointment`
 
-Each tool is offered only to admins whose role holds its permission. `search_knowledge`, the fifth catalog tool, isn't offered in the admin chat. The customer tools (`request_appointment`, `my_appointments` and `hand_off_to_staff`) are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
+Each tool is offered only to admins whose role holds its permission. `search_knowledge`, the fifth catalog tool, isn't offered in the admin chat. The customer tools (`request_appointment`, `my_appointments`, `hand_off_to_staff` and `log_inquiry`) are left out, because a chat has an admin rather than a LINE customer. `record_confirmation` is left out because it only follows a LINE push, and `pending_confirmations` because its result carries customers' full LINE user ids.
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions" or "Load and reset demo data":
-- **Appointment requests:** the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
-- **Customer questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
-- **Demo data:** **Load demo catalog** and **Reset demo appointments and questions**, which also deletes the questions and the product knowledge their answers added.
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them:
+- **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
+- **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
+- **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
+- **Demo data:** **Load demo catalog** and **Reset demo appointments and questions**, which also deletes the questions, the inquiries, and the product knowledge the answers added.
 
-## The Homepage widget
+## The Homepage widgets
 
 **Maison requests** on the admin's Homepage is shown to admins with "MCP: review appointment requests":
 - Three cards count one pipeline of visits still ahead: **Waiting for staff**, **Confirmed, upcoming**, and **LINE sent**, the confirmed visits whose LINE confirmation has been sent. They wrap when the widget is narrow.
@@ -233,14 +243,16 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 Its numbers and rows come from `GET /maison/appointments/summary`, which calls `appointments.summarizeRequests()` and follows the board's own definitions. Each row is a row of the board's "All requests" view, without the products and `createdVia`: its `createdAt` is when the request came in, and its `note` is what the customer wrote. Strapi keeps each admin's Homepage layout once they've changed it, so an admin who has moved or removed widgets adds this one with **Add Widget**.
 
+**Maison inquiries**, a second widget, is shown to admins with "Review customer inquiries". It shows the four open counts of the Inquiries tab as cards, **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, which wrap when the widget is narrow. It refreshes every 5 seconds, and if a refresh fails it keeps the last result on screen with a note. **Open the inquiries** goes to the Maison page. It's a widget of its own because the requests widget's body is laid out for a fixed height. Its numbers come from `GET /maison/inquiries/summary`, the same route as the cards on the tab.
+
 ## Tokens
 
 Strapi's `/mcp` only accepts **admin** API tokens. Create them under **Settings → Administration Panel → Admin Tokens** and grant only the Maison permissions a caller needs:
-- **Customer token:** "MCP: browse the catalog", "MCP: request and view own appointments" and "MCP: hand questions to staff". Map it to the LINE client in oauth-mcp-manager. Every customer session runs with this token's permissions, so keep it narrow.
+- **Customer token:** "MCP: browse the catalog", "MCP: request and view own appointments", "MCP: hand questions to staff" and "MCP: log customer inquiries". Map it to the LINE client in oauth-mcp-manager. Every customer session runs with this token's permissions, so keep it narrow.
 - **Staff token:** "MCP: browse the catalog", "MCP: review appointment requests" and "MCP: confirm appointment requests", for an agent that works for staff.
 - **Ops token:** only "MCP: send appointment confirmations".
 
-The same permissions on an **admin role** decide what staff see in the chat and on the Maison page. "Load and reset demo data", "Read customer questions" and "Answer customer questions on LINE" are ordinary admin role permissions.
+The same permissions on an **admin role** decide what staff see in the chat and on the Maison page. "Load and reset demo data", "Read customer questions", "Answer customer questions on LINE", "Review customer inquiries" and "Reply to customer inquiries on LINE" are ordinary admin role permissions.
 
 ## Customer identity
 
@@ -357,7 +369,137 @@ And an answer:
 
 A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, or with the house's own as the first name ("Maison", in any case, or either `houseName` in the config), the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
 
-**Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, knowledge }`, what it deleted, and the page says so.
+**Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
+
+## Customer inquiries
+
+Every message a customer sends the concierge is an **inquiry**. The customer app's server records each finished turn with `log_inquiry`, a model labels it in the background, and staff work the queues under **Inquiries** on the Maison page. Nothing is sent to a customer about an inquiry unless a person replies on LINE.
+
+### Recording a turn
+
+The app's server calls `log_inquiry` after each turn, so logging never depends on the model remembering to. It takes:
+- `message`, the customer's last message, and `reply`, the concierge's final text for the turn
+- `knowledgeFound`, whether any `search_knowledge` call in the turn found an entry, and `handedOff`, whether the turn handed the question to staff
+- optionally `questionReference`, the question the hand-off recorded, `productSlug`, the page the customer was on, and `locale`, the chat's language, which defaults to `defaultLocale`
+
+It answers `{ logged: true }` at once: labelling comes later.
+- **The customer comes from their LINE sign-in**, never from an argument. Staff see them masked, and the model never sees a LINE ID.
+- **The text is kept as written, line breaks included.** The tool takes a message of up to 4,000 characters and a reply of up to 8,000, and the inquiry keeps the first 1,000 and 2,000 of them.
+- **A piece and a question are stored only when they are real:** a published piece, and a question that belongs to this customer. Anything else is dropped, and the turn is still logged.
+- **A failed log never fails the customer's turn.** The app logs a warning and moves on.
+
+The tool needs "MCP: log customer inquiries", which belongs on the customer token. There is no REST route for it, and the admin chat doesn't offer it.
+
+### Labelling
+
+A cron job, `maison-label-inquiries`, runs every minute. The plugin adds it itself, so it doesn't need `cron.enabled` in `config/server.ts`, which only gates the jobs listed in that file. Each run labels up to 10 inquiries, oldest first: new ones, ones skipped while labelling was off, and ones that have failed fewer than 5 times. It never picks one a person has labelled. It makes one model call per inquiry, through the AI SDK, and the answer has to fit this schema:
+
+| Label | Values |
+|---|---|
+| `kind` | `question`, `complaint`, `praise` or `other` |
+| `sentimentScore` and `sentimentLabel` | a score from -1 to 1, and `negative`, `neutral` or `positive` |
+| `answered` | whether the concierge's reply answers what the customer asked |
+| `reason` and `topic` | why, in up to 400 characters, and a short phrase for what it's about, both in English |
+
+- The prompt tells the model that the customer's text is evidence to label, never instructions to follow, and a hand-off stays in Needs an answer whatever the labels say.
+- Each labelled inquiry records the `modelVersion` and `promptVersion` that labelled it.
+- **A model that answers in the wrong shape** (a missing field, a sentiment of 3, a kind of "angry") fails that inquiry: it becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**. One failing inquiry never stops the ones behind it.
+- A sweep that starts while another is still running does nothing.
+- **A person's label wins.** **Change label** marks the inquiry as corrected, and the sweep reads each inquiry again right before it writes, so a label changed during the model's call isn't overwritten.
+
+**The settings** are `aiProvider`, `aiModel`, `aiApiKey` and `aiBaseUrl` ([Configuration](#configuration)), which `config/plugins.ts` reads from `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` and `AI_BASE_URL`. The default is Anthropic's Claude Haiku 4.5. `openai-compatible` takes any server that speaks OpenAI's format, such as Ollama, with an `aiBaseUrl` and usually no key.
+
+**Without a key, the plugin still runs, with rows waiting.** With no `aiApiKey` (and, for `openai-compatible`, no `aiBaseUrl`), nothing is sent to a model. The sweep marks new inquiries `skipped`, and they wait under **Not labelled**. A hand-off is in **Needs an answer** from the start, and staff can label any inquiry by hand with **Change label**. Once a key is set and Strapi has restarted, the next sweep labels the waiting ones too.
+
+### The queues
+
+The queue is decided by code, from the labels and the hand-off, never by the model alone:
+
+| Queue | An inquiry is in it when |
+|---|---|
+| **Needs an answer** | the turn handed the question to staff, whatever the labels say, or the model labelled it a question the concierge didn't answer |
+| **Complaints** | the model labelled it a complaint |
+| **Praise** | the model labelled it praise |
+| none | anything else, such as small talk or a question the concierge answered. **All** still shows it |
+
+**Not labelled** isn't a queue. It holds the open inquiries nobody has labelled yet, because they're waiting, were skipped, or failed, so when in doubt a person sees them. A replied or closed inquiry is in no queue and shows only under **All**.
+
+### The tab
+
+**Inquiries** opens on **Needs an answer**, and refreshes every 5 seconds, newest first, up to 50 rows. Four cards count the open inquiries in **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, and five buttons filter the list to those, or to **All**. Above the table, a line gives the month's LINE messages, like "LINE messages this month: 12 of 200": replies count toward the channel's quota, as confirmations do. Strapi asks LINE for it when the tab opens and after a reply, not on the refresh, because each ask makes two calls to LINE. The line is left out without a channel access token, and when LINE gives no answer.
+
+Each row shows:
+- when the customer wrote (Tokyo time), and the customer, masked
+- their message, which keeps its line breaks and scrolls in its box when it's long, and the piece it's about
+- the kind and the sentiment, like "negative (-0.6)". A label a person gave has no score, so it shows alone. A note under the kind says why an inquiry has none yet (waiting for the next sweep, skipped while labelling was off, or failed), or that a person changed its labels
+- the status: **Open**, **Replied by Jane**, or **Closed** with the reason written out, like "Closed: spam". A failed LINE message shows under it, in LINE's words
+- **What the concierge said**, which shows the concierge's reply, and the model's topic and reason, labelled as the model's own words
+
+**A hand-off isn't answered here.** Its row shows its question, like `Q-4821 · answer it under Questions`, and has no Reply on LINE: a hand-off is answered under **Questions**, where the question's own flow and the product knowledge loop stay the one way to answer it. Answering the question marks its inquiries replied. One logged after its question was answered stays open and says `Q-4821 · answered under Questions`: close it.
+
+Admins with "Reply to customer inquiries on LINE" get these buttons, which are disabled while a request runs:
+- **Reply on LINE**, on an open inquiry that isn't a hand-off, opens a dialog with the customer's message and a box for the reply, which is never pre-filled. **Use the suggested text** puts in the text for a complaint or for praise, in the chat's language, after anything already typed. Staff edit it, and **Send on LINE** is enabled for a reply of 1 to 2,000 characters. It pushes one LINE text message from Maison's channel, in the inquiry's language, and marks the inquiry replied, with the text, when, and by whom. The message quotes the customer's first 80 characters, and is signed by Maison. The admin's first name is saved on the inquiry, and never sent:
+  > About your question: "The clasp of my coffret broke after a week."
+  >
+  > We're sorry about this, and thank you for telling us. A member of our team will look into it and reply in this chat with the next step.
+  >
+  > Maison
+
+  A Japanese chat gets `「…」についてのお問い合わせへのご返信です。` in place of the first line. A message LINE refuses is recorded as failed, with LINE's answer, and the inquiry stays open. Nothing guards two admins replying to the same inquiry at the same moment: both messages could go out.
+- **Close**, on an open inquiry, with a reason: **Answered elsewhere**, **Not needed** or **Spam**. It isn't offered for a replied inquiry, which keeps its reply.
+- **Change label** sets the kind, the sentiment, or both, and sends only what the admin changed. The inquiry is then the person's: the sweep never labels it again, **Not labelled** no longer lists it, and its queue follows the new kind by the same rule as before. A new sentiment drops the model's score, and the model's reason and topic stay as the model wrote them.
+- **Label again**, on an inquiry the model failed on, puts it back for the next sweep with its attempts reset. It isn't offered for one a person has labelled.
+
+### The suggested texts
+
+For a complaint:
+
+> We're sorry about this, and thank you for telling us. A member of our team will look into it and reply in this chat with the next step.
+
+For praise:
+
+> Thank you so much for your kind words. If you have a moment, a review or a word to a friend would mean a great deal to us.
+
+A chat in Japanese gets the Japanese texts, which are in `server/src/domain/inquiry-replies.ts`. The admin bundles the same words in `admin/src/inquiries.ts`, and a test holds the two equal. A question, and an inquiry in no queue, has no suggested text: a question needs an answer written for it.
+
+### The routes and their codes
+
+The routes are admin routes, so each takes an admin session that holds its permission:
+
+| Route | Permission | Body | Answers |
+|---|---|---|---|
+| `GET /maison/inquiries?filter=…&limit=…` | Review customer inquiries | None. `filter` is `needs-answer` (the default), `complaint`, `praise`, `not-labelled` or `all`, and `limit` is 1 to 100 (50 by default) | `{ inquiries }`, newest first |
+| `GET /maison/inquiries/summary` | Review customer inquiries | None | `{ needsAnswer, complaint, praise, notLabelled }`, the open counts |
+| `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ used, limit }`, both null without a channel access token and when LINE gives no answer, and `limit` null for a channel with none |
+| `POST /maison/inquiries/:documentId/reply` | Reply to customer inquiries on LINE | `{ text }` | `{ documentId, status: "sent", message, warning? }` |
+| `POST /maison/inquiries/:documentId/close` | Reply to customer inquiries on LINE | `{ reason }`: `answered-elsewhere`, `not-needed` or `spam` | `{ inquiry, message }` |
+| `POST /maison/inquiries/:documentId/label` | Reply to customer inquiries on LINE | `{ kind, sentimentLabel }`, one or both | `{ inquiry, message }` |
+| `POST /maison/inquiries/:documentId/label-again` | Reply to customer inquiries on LINE | None | `{ inquiry, message }` |
+
+The staff name for a reply comes from the signed-in admin's account, never from the request. `message` is in words staff can read: "Sent the reply on LINE.", "Closed the inquiry.", "Changed the label." or "It will be labelled again within a minute." A 200 from Reply with `warning: true` means LINE took the message but recording it failed: its `message` says so, and the page shows it as a warning. The errors:
+
+| Status | When |
+|---|---|
+| 400 (`invalid_input`) | The filter isn't one of the five, `limit` is out of range, the reply text is empty or over 2,000 characters, the reason isn't one of the three, or Change label has neither a kind nor a sentiment, or one that isn't a label |
+| 404 (`not_found`) | No inquiry has that `documentId` |
+| 409 (`already_closed`) | Reply or Close, for a closed inquiry |
+| 409 (`already_replied`) | Reply or Close, for a replied inquiry |
+| 409 (`use_question`) | Reply, for a hand-off: "Answer it under Questions (Q-4821)." Nothing is sent |
+| 409 (`not_failed`) | Label again, for an inquiry the model didn't fail on, or one a person labelled |
+| 502 (`failed`) | Reply, when LINE refused the message or couldn't be reached. The inquiry records why and stays open |
+| 503 (`not_configured`) | Reply, when there's no `lineChannelAccessToken`. Nothing is sent or recorded |
+
+Every error says why in its message, which is what the page shows.
+
+### The permissions
+
+| Permission | What it gives |
+|---|---|
+| MCP: log customer inquiries (`plugin::maison.inquiries.log`) | `log_inquiry`, for the customer token |
+| Review customer inquiries (`plugin::maison.inquiries.view`) | The Inquiries tab, the Maison inquiries widget, the three GET routes, and a way into the Maison page |
+| Reply to customer inquiries on LINE (`plugin::maison.inquiries.reply`) | The four buttons above. It needs Review customer inquiries too, because the buttons live in the tab |
+
+**Reset demo appointments and questions** also deletes every inquiry, whether it's open, replied to or closed.
 
 ## Run the ops agent
 
@@ -398,6 +540,7 @@ Point Claude Desktop at Strapi with the ops token and at LINE Bot MCP with a Mes
 npm test                    # unit tests (vitest)
 npm run test:ts:back        # type-check the server
 npm run test:ts:front       # type-check the admin
+npm run test:live           # labelling with a real model, skipped without AI_API_KEY (or, for openai-compatible, AI_BASE_URL)
 STRAPI_APP_DIR=/path/to/strapi-app npm run test:integration   # boots that app against throwaway SQLite files
 node --env-file=/path/to/strapi-app/.env scripts/mcp-dev-tokens.mjs && npm run test:mcp   # against a running app
 ```
@@ -409,6 +552,8 @@ The MCP smoke tests (the last line) need:
 
 The token script also loads the demo catalog, then saves a customer, a staff and an ops token to `test/mcp/.tokens.json`, readable by you only.
 
-The integration tests never reach LINE. The harness keeps the app's `LINE_CHANNEL_ACCESS_TOKEN` out of Strapi, and the LINE confirmation suite points `lineApiBaseUrl` at a stand-in on a free local port.
+The integration tests never reach LINE or a model. The harness keeps the app's `LINE_CHANNEL_ACCESS_TOKEN` and its `AI_*` settings out of Strapi, and stops Strapi's cron so the labelling job doesn't race a suite's own calls. The LINE confirmation suite points `lineApiBaseUrl` at a stand-in on a free local port.
+
+`npm test` leaves the live test out. `npm run test:live` sends sample exchanges to the model the `AI_*` environment variables name, through the same code as the sweep, and never prints the key: `AI_API_KEY=… npm run test:live`, or `AI_PROVIDER=openai-compatible AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=<a pulled model> npm run test:live` for Ollama.
 
 The plugin runs from `dist/`, so rebuild (`npm run link`) and restart Strapi after changing it.

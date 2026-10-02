@@ -40,12 +40,14 @@ describe('seed service', () => {
     assert.equal(await strapi.documents('plugin::maison.product').count({ locale: 'ja', status: 'published' }), 12);
   });
 
-  it('reset removes appointments and notifications and keeps the catalog', async () => {
+  it('reset removes appointments, notifications and inquiries and keeps the catalog', async () => {
     const boutique = await strapi.documents('plugin::maison.boutique').findFirst({ locale: 'ja', status: 'published', filters: { slug: 'ginza' } });
     await strapi.documents('plugin::maison.appointment').create({
       data: { reference: 'APT-9001', customer: SUBJECT_A, requestedFor: '2026-10-10T05:00:00.000Z', boutique: { documentId: boutique.documentId, locale: 'ja' } },
     });
-    assert.deepEqual(await seed.resetDemoAppointments(), { appointments: 1, notifications: 0, questions: 0, knowledge: 0 });
+    await strapi.documents('plugin::maison.inquiry').create({ data: { customer: SUBJECT_A, message: 'Can the coffret hold a watch?' } });
+    assert.deepEqual(await seed.resetDemoAppointments(), { appointments: 1, notifications: 0, questions: 0, inquiries: 1, knowledge: 0 });
+    assert.equal(await strapi.documents('plugin::maison.inquiry').count(), 0);
     assert.equal(await strapi.documents('plugin::maison.product').count({ locale: 'ja', status: 'published' }), 12);
   });
 });

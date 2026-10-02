@@ -21,7 +21,10 @@ export type LineMessage = { type: 'flex'; altText: string; contents: unknown } |
 export const PUSH_TIMEOUT_MS = 8000;
 /** LINE gets this long to give a customer's display name. A hand-off never waits longer for it. */
 export const PROFILE_TIMEOUT_MS = 3000;
-/** LINE gets this long for each of the two answers about this month's usage. The page asks for them as it polls. */
+/**
+ * LINE gets this long for each of the two answers about this month's usage. The Inquiries tab asks for them when it
+ * opens and after a reply, not as it polls: each ask makes both calls.
+ */
 export const USAGE_TIMEOUT_MS = 3000;
 
 /** The `message` of LINE's error body, `{ "message": "…", "details": […] }`, or '' when there's none. */

@@ -120,6 +120,7 @@ describe('loadDemoCatalog and the product knowledge', () => {
 describe('resetDemoAppointments', () => {
   const KNOWLEDGE = 'plugin::maison.knowledge';
   const QUESTION = 'plugin::maison.question';
+  const INQUIRY = 'plugin::maison.inquiry';
   const NOTIFICATION = 'plugin::maison.notification';
   const APPOINTMENT = 'plugin::maison.appointment';
 
@@ -145,7 +146,10 @@ describe('resetDemoAppointments', () => {
     return { strapi: { documents } as any, calls };
   };
 
-  /** Three appointments and two notifications. Of three questions, two have answers that became knowledge entries. */
+  /**
+   * Three appointments and two notifications. Of three questions, two have answers that became knowledge entries. Three
+   * inquiries, whatever became of them: one is open, one was replied to and one was closed.
+   */
   const REHEARSAL = {
     [APPOINTMENT]: [{ documentId: 'a1' }, { documentId: 'a2' }, { documentId: 'a3' }],
     [NOTIFICATION]: [{ documentId: 'n1' }, { documentId: 'n2' }],
@@ -155,16 +159,23 @@ describe('resetDemoAppointments', () => {
       // Still open, or answered with Add to product knowledge unticked.
       { documentId: 'q3', knowledgeDocumentId: null },
     ],
+    [INQUIRY]: [{ documentId: 'i1' }, { documentId: 'i2' }, { documentId: 'i3' }],
   };
 
   const deletions = (calls: Call[]) => calls.filter(({ method }) => method === 'delete').map(({ uid, params }) => [uid, params]);
 
-  it('answers what it deleted: appointments, notifications, questions, and the knowledge entries their answers added', async () => {
+  it('answers what it deleted: appointments, notifications, questions, inquiries, and the knowledge entries the answers added', async () => {
     const { strapi } = strapiHolding(REHEARSAL);
-    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({ appointments: 3, notifications: 2, questions: 3, knowledge: 2 });
+    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({
+      appointments: 3,
+      notifications: 2,
+      questions: 3,
+      inquiries: 3,
+      knowledge: 2,
+    });
   });
 
-  it('deletes the knowledge entries in every language first, then the questions, then the notifications and appointments', async () => {
+  it('deletes the knowledge entries in every language first, then the questions and the inquiries, then the notifications and appointments', async () => {
     const { strapi, calls } = strapiHolding(REHEARSAL);
     await seedService({ strapi }).resetDemoAppointments();
     expect(deletions(calls)).toEqual([
@@ -173,12 +184,23 @@ describe('resetDemoAppointments', () => {
       [QUESTION, { documentId: 'q1' }],
       [QUESTION, { documentId: 'q2' }],
       [QUESTION, { documentId: 'q3' }],
+      [INQUIRY, { documentId: 'i1' }],
+      [INQUIRY, { documentId: 'i2' }],
+      [INQUIRY, { documentId: 'i3' }],
       [NOTIFICATION, { documentId: 'n1' }],
       [NOTIFICATION, { documentId: 'n2' }],
       [APPOINTMENT, { documentId: 'a1' }],
       [APPOINTMENT, { documentId: 'a2' }],
       [APPOINTMENT, { documentId: 'a3' }],
     ]);
+  });
+
+  it('deletes every inquiry, whether it is open, replied to or closed: it reads them with no filter, as many as the other content types', async () => {
+    const { strapi, calls } = strapiHolding(REHEARSAL);
+    await seedService({ strapi }).resetDemoAppointments();
+    const read = calls.find(({ uid, method }) => uid === INQUIRY && method === 'findMany');
+    expect(read?.params).toEqual({ fields: ['documentId'], limit: 5000 });
+    expect(read?.params).not.toHaveProperty('filters');
   });
 
   it("asks Strapi for each question's knowledgeDocumentId, which it leaves out of a row unless the fields name it", async () => {
@@ -199,12 +221,34 @@ describe('resetDemoAppointments', () => {
 
   it('deletes no knowledge when no question has an entry, or when there are no questions', async () => {
     const { strapi, calls } = strapiHolding({ ...REHEARSAL, [QUESTION]: [{ documentId: 'q1' }, { documentId: 'q2', knowledgeDocumentId: '' }] });
-    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({ appointments: 3, notifications: 2, questions: 2, knowledge: 0 });
+    expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({
+      appointments: 3,
+      notifications: 2,
+      questions: 2,
+      inquiries: 3,
+      knowledge: 0,
+    });
     expect(calls.filter(({ uid }) => uid === KNOWLEDGE)).toEqual([]);
 
     const empty = strapiHolding({});
-    expect(await seedService({ strapi: empty.strapi }).resetDemoAppointments()).toEqual({ appointments: 0, notifications: 0, questions: 0, knowledge: 0 });
+    expect(await seedService({ strapi: empty.strapi }).resetDemoAppointments()).toEqual({
+      appointments: 0,
+      notifications: 0,
+      questions: 0,
+      inquiries: 0,
+      knowledge: 0,
+    });
     expect(deletions(empty.calls)).toEqual([]);
+  });
+
+  it('deletes the inquiries when there are no questions, and the questions when there are no inquiries', async () => {
+    const noQuestions = strapiHolding({ ...REHEARSAL, [QUESTION]: [] });
+    expect((await seedService({ strapi: noQuestions.strapi }).resetDemoAppointments()).inquiries).toBe(3);
+    expect(deletions(noQuestions.calls).filter(([uid]) => uid === INQUIRY)).toHaveLength(3);
+
+    const noInquiries = strapiHolding({ ...REHEARSAL, [INQUIRY]: [] });
+    expect((await seedService({ strapi: noInquiries.strapi }).resetDemoAppointments()).questions).toBe(3);
+    expect(deletions(noInquiries.calls).filter(([uid]) => uid === QUESTION)).toHaveLength(3);
   });
 
   it('stops before it deletes any question when an entry will not delete, so running the reset again finds the same entries', async () => {

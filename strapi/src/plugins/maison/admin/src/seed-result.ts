@@ -17,16 +17,17 @@ export const describeSeed = (result: SeedResult): string => {
 };
 
 /** What POST /maison/demo/reset answers (the seed service's resetDemoAppointments): what it deleted. */
-export type ResetResult = { appointments: number; notifications: number; questions: number; knowledge: number };
+export type ResetResult = { appointments: number; notifications: number; questions: number; inquiries: number; knowledge: number };
 
 /** "1 question", "0 questions": the singular for exactly one. */
 const counted = (count: number, singular: string, plural: string): string => `${count} ${count === 1 ? singular : plural}`;
 
-/** The notice after Reset demo appointments and questions. */
+/** The notice after Reset demo appointments and questions, which also deletes the inquiries. */
 export const describeReset = (result: ResetResult): string =>
   `Deleted ${andList([
     counted(result.appointments, 'appointment', 'appointments'),
     counted(result.notifications, 'notification', 'notifications'),
     counted(result.questions, 'question', 'questions'),
+    counted(result.inquiries, 'inquiry', 'inquiries'),
     counted(result.knowledge, 'product knowledge entry', 'product knowledge entries'),
   ])}.`;

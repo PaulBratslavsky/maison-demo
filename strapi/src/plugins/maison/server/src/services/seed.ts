@@ -142,9 +142,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * Clears what a rehearsal leaves behind: first the product knowledge entries that answers to customers' questions
-     * added, in every language, then every question, notification and appointment. The entries go first because a
-     * question is where their ids are kept, so a reset that stops partway can run again and find them. Only entries a
-     * question names are deleted: the seeded product knowledge and the catalog stay.
+     * added, in every language, then every question and every inquiry (whether it is open, replied to or closed), then
+     * every notification and appointment. The entries go first because a question is where their ids are kept, so a
+     * reset that stops partway can run again and find them. Only entries a question names are deleted: the seeded
+     * product knowledge and the catalog stay.
      */
     async resetDemoAppointments() {
       const questions = (await strapi.documents(UID.question).findMany({
@@ -155,6 +156,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       for (const documentId of knowledgeIds) await strapi.documents(UID.knowledge).delete({ documentId, locale: '*' });
       for (const q of questions) await strapi.documents(UID.question).delete({ documentId: q.documentId });
 
+      const inquiries = await strapi.documents(UID.inquiry).findMany({ fields: ['documentId'], limit: 5000 });
+      for (const i of inquiries) await strapi.documents(UID.inquiry).delete({ documentId: i.documentId });
+
       const notifications = await strapi.documents(UID.notification).findMany({ fields: ['documentId'], limit: 5000 });
       for (const n of notifications) await strapi.documents(UID.notification).delete({ documentId: n.documentId });
       const appointments = await strapi.documents(UID.appointment).findMany({ fields: ['documentId'], limit: 5000 });
@@ -163,6 +167,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         appointments: appointments.length,
         notifications: notifications.length,
         questions: questions.length,
+        inquiries: inquiries.length,
         knowledge: knowledgeIds.length,
       };
     },
