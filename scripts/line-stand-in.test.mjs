@@ -57,6 +57,21 @@ test('answers a profile lookup with a made-up display name, for the user ID in t
   assert.equal((await withQuery.json()).userId, USER);
 });
 
+test("answers the month's quota as the free plan's 200, and the month's usage as the pushes it has answered, and logs neither", async () => {
+  const { entries, url } = await standIn();
+  const quota = await send(`${url}/v2/bot/message/quota`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+  assert.equal(quota.status, 200);
+  assert.deepEqual(await quota.json(), { type: 'limited', value: 200 });
+  const usage = async () => (await (await send(`${url}/v2/bot/message/quota/consumption`)).json()).totalUsage;
+  assert.equal(await usage(), 0);
+  const push = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: USER, messages: [{ type: 'text', text: 'One' }, { type: 'text', text: 'Two' }] }) };
+  await send(`${url}/v2/bot/message/push`, push);
+  await send(`${url}/v2/bot/message/push`, push);
+  assert.equal(await usage(), 2); // LINE counts a push to one person once, however many messages it has
+  assert.deepEqual(entries.map((entry) => entry.kind), ['push', 'push']);
+  assert.equal((await send(`${url}/v2/bot/message/quota`, { method: 'POST' })).status, 404);
+});
+
 test("answers every other route 404 and a push that isn't JSON 400, and logs neither", async () => {
   const { entries, url } = await standIn();
   assert.equal((await send(`${url}/`)).status, 404);

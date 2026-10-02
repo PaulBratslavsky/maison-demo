@@ -2,6 +2,8 @@
 // nothing reaches a phone. Strapi calls it when MAISON_LINE_API_BASE_URL points here (README, "Production notes").
 //   POST /v2/bot/message/push        answers 200 and logs the push (what Strapi sends for Let them know and Answer)
 //   GET  /v2/bot/profile/<user ID>   answers a made-up display name (what Strapi asks for when a question comes in)
+//   GET  /v2/bot/message/quota       answers the free plan's 200 messages a month (the Inquiries tab shows the month's quota)
+//   GET  /v2/bot/message/quota/consumption   answers the pushes this stand-in has answered since it started, as the usage
 // Every other route answers 404. Pushes and lookups are logged to strapi/.tmp/line-stand-in.jsonl, one JSON line each,
 // without any header of the request: never Strapi's channel access token. From the repo root: npm run line:stand-in.
 // Env: LINE_STAND_IN_PORT (4010).
@@ -23,10 +25,13 @@ export const fileLog = (file) => (entry) => {
 
 /**
  * The stand-in, as a server that isn't listening yet. `log` gets an entry for each push, `{ at, kind: 'push', body }`,
- * and each profile lookup, `{ at, kind: 'profile', userId }`: what came in, and when, and none of its headers.
+ * and each profile lookup, `{ at, kind: 'profile', userId }`: what came in, and when, and none of its headers. The
+ * quota lookups aren't logged: the Inquiries tab asks for them each time it refreshes.
  */
-export const createStandIn = ({ log }) =>
-  createServer((request, response) => {
+export const createStandIn = ({ log }) => {
+  /** The pushes answered since the stand-in started: LINE counts a push to one person once, however many messages it has. */
+  let pushes = 0;
+  return createServer((request, response) => {
     const answer = (status, body) => {
       response.writeHead(status, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify(body));
@@ -49,6 +54,9 @@ export const createStandIn = ({ log }) =>
       return answer(200, { userId, displayName: DISPLAY_NAME });
     }
 
+    if (request.method === 'GET' && pathname === '/v2/bot/message/quota') return answer(200, { type: 'limited', value: 200 });
+    if (request.method === 'GET' && pathname === '/v2/bot/message/quota/consumption') return answer(200, { totalUsage: pushes });
+
     if (request.method === 'POST' && pathname === '/v2/bot/message/push') {
       let raw = '';
       request.setEncoding('utf8');
@@ -60,6 +68,7 @@ export const createStandIn = ({ log }) =>
         } catch {
           return answer(400, { message: 'The request body is not JSON.' });
         }
+        pushes += 1;
         log({ at: new Date().toISOString(), kind: 'push', body });
         answer(200, { sentMessages: [{ id: String(Date.now()), quoteToken: 'stand-in' }] });
       });
@@ -68,6 +77,7 @@ export const createStandIn = ({ log }) =>
 
     notFound();
   });
+};
 
 /** One line for the terminal: who a push is for, and what kinds of message; or whose profile was asked for. */
 const describe = (entry) =>
