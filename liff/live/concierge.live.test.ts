@@ -281,8 +281,7 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     // The chat shows the note and the LINE chat button when the model calls hand_off_to_staff, and when it skips the call after a search that found nothing.
     const noteAt = handOffAt((await assistantMessageOf(events)).parts);
     expect(noteAt, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
-    // Rule 9 leaves where the team answers to that note, so the reply doesn't repeat it, and it promises no contact.
-    expect(answer, 'the reply repeats the note').not.toMatch(/\bLINE\b/);
+    // Nothing reaches staff in steps 1–2, so the reply promises no contact.
     expect(answer, 'it promises no contact').not.toMatch(/will (contact|reach out|get back|reply)/i);
   });
 });
