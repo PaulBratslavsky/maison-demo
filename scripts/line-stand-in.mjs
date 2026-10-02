@@ -26,7 +26,7 @@ export const fileLog = (file) => (entry) => {
 /**
  * The stand-in, as a server that isn't listening yet. `log` gets an entry for each push, `{ at, kind: 'push', body }`,
  * and each profile lookup, `{ at, kind: 'profile', userId }`: what came in, and when, and none of its headers. The
- * quota lookups aren't logged: the Inquiries tab asks for them each time it refreshes.
+ * quota lookups aren't logged: the Inquiries tab asks for them when it opens and after a reply, not on every refresh.
  */
 export const createStandIn = ({ log }) => {
   /** The pushes answered since the stand-in started: LINE counts a push to one person once, however many messages it has. */
