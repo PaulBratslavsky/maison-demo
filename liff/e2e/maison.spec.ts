@@ -5,6 +5,7 @@ import { nextWeekday } from './support';
 
 const SECOND_CUSTOMER = `U${'b'.repeat(32)}`;
 const JAPANESE_CUSTOMER = `U${'c'.repeat(32)}`;
+const LINE_CHAT_CUSTOMER = `U${'d'.repeat(32)}`;
 
 const WEEKENDER = /Weekender|ウィークエンダー/;
 
@@ -220,6 +221,70 @@ test("a second customer doesn't see the first customer's visits", async ({ conte
   // Signing the second customer in changed nothing for the first: looking again, they still have their visit.
   await first.reload();
   await expect(firstVisit).toBeVisible();
+});
+
+/**
+ * NEXT_PUBLIC_LINE_OA_ID, as these tests see it. Next.js builds it into the app, so it has to be the app's too: `npm run
+ * test:e2e` reads liff/.env, as the app does, and the app Playwright starts runs with the tests' environment. For the
+ * other case, stop the app on :3003 and put the setting before the command, as `NEXT_PUBLIC_LINE_OA_ID= npm run
+ * test:e2e` for unset: a value set there, empty too, wins over liff/.env for Node and for Next. The tests never print it.
+ */
+const LINE_OA_ID = (process.env.NEXT_PUBLIC_LINE_OA_ID ?? '').trim();
+
+/** The screen's one "Chat with Maison on LINE", linking to LINE's chat with the basic ID, checked without printing it. */
+const expectLineChat = async (page: Page) => {
+  const button = page.getByTestId('line-chat');
+  await expect(button).toHaveCount(1);
+  // The plain words: the LIFF mock doesn't answer liff.getFriendship() without liff.login(), which mock mode never calls.
+  await expect(button).toHaveText(/^(Chat with Maison on LINE|LINEでメゾンにメッセージ)$/);
+  const href = `https://line.me/R/ti/p/%40${LINE_OA_ID.slice(1)}`;
+  expect((await button.getAttribute('href')) === href, 'the button links to https://line.me/R/ti/p/ and the encoded basic ID').toBe(true);
+};
+
+/** No button on the screen, no link to LINE's chat or add-friend screens, and none of the button's words. */
+const expectNoLineChat = async (page: Page) => {
+  await expect(page.getByTestId('line-chat')).toHaveCount(0);
+  await expect(page.locator('a[href^="https://line.me/"]')).toHaveCount(0);
+  await expect(page.getByText(/Maison chat|Add Maison on LINE|メゾンのLINEトーク|メゾンを友だち追加/)).toHaveCount(0);
+};
+
+test.describe('Chat with Maison on LINE', () => {
+  test("a new booking, My visits and a visit's page link to the chat with Maison", async ({ page }) => {
+    test.skip(!LINE_OA_ID, 'NEXT_PUBLIC_LINE_OA_ID is unset: the next test is the one for that');
+    expect(LINE_OA_ID.startsWith('@'), 'NEXT_PUBLIC_LINE_OA_ID is a basic ID, with its @').toBe(true);
+    // A customer of their own: the default one has the other tests' open requests.
+    await page.goto(`/?demoUser=${LINE_CHAT_CUSTOMER}`);
+    const reference = await bookWeekender(page);
+    // Right after the booking, next to "Request sent": the screen's one button.
+    await expect(page.getByText(/^(Request sent\. The boutique will confirm on LINE\.|リクエストを送りました。ブティックからLINEで確定のご連絡があります。)$/)).toBeVisible();
+    await expectLineChat(page);
+    // My visits, later: under the list, after its line.
+    await page.goto('/visits');
+    const visit = page.getByTestId('visit').filter({ hasText: reference });
+    await expect(visit).toBeVisible();
+    await expect(page.getByText(/^(Your confirmation arrives in the Maison chat\.|確定のご連絡はメゾンのLINEトークにお届けします。)$/)).toBeVisible();
+    await expectLineChat(page);
+    // The visit's page.
+    await visit.click();
+    await expect(page).toHaveURL(new RegExp(`/visits/${reference}$`));
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(/Ginza|銀座/);
+    await expectLineChat(page);
+  });
+
+  test("without NEXT_PUBLIC_LINE_OA_ID there's no button, after a booking, on My visits or on a visit's page", async ({ page }) => {
+    test.skip(Boolean(LINE_OA_ID), 'NEXT_PUBLIC_LINE_OA_ID is set: the test before is the one for that');
+    await page.goto(`/?demoUser=${LINE_CHAT_CUSTOMER}`);
+    const reference = await bookWeekender(page);
+    await expect(page.getByText(/Request sent|リクエストを送りました/)).toBeVisible();
+    await expectNoLineChat(page);
+    await page.goto('/visits');
+    const visit = page.getByTestId('visit').filter({ hasText: reference });
+    await expect(visit).toBeVisible();
+    await expectNoLineChat(page);
+    await visit.click();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(/Ginza|銀座/);
+    await expectNoLineChat(page);
+  });
 });
 
 // LINE's MINI App safe area. On a phone the app fills the screen, without the phone-sized frame it draws on a laptop:
