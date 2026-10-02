@@ -20,3 +20,36 @@ export const visibleTabs = ({ canReview, canRead, canView }: TabAccess): MaisonT
   ...(canRead ? (['questions'] as const) : []),
   ...(canView ? (['inquiries'] as const) : []),
 ];
+
+/**
+ * A tab's label: its name, and after it how many are waiting in it, like "Questions 2". No number when nothing is
+ * waiting, or before the number has loaded, so a tab with nothing to do looks as it always did.
+ */
+export const tabLabel = (tab: MaisonTab, waiting: number | null | undefined): string =>
+  typeof waiting === 'number' && Number.isInteger(waiting) && waiting > 0 ? `${TAB_LABELS[tab]} ${waiting.toLocaleString('en-US')}` : TAB_LABELS[tab];
+
+/** What each tab's number is counted from: the answer of its own route, null until it has loaded. */
+export interface TabSources {
+  requests: { counts: { waitingForStaff: number } } | null;
+  /** How many questions the Open filter lists. */
+  questions: number | null;
+  inquiries: { needsAnswer: number } | null;
+}
+
+/**
+ * The number on each tab, which is what asks something of staff: the requests waiting for staff, the questions that are
+ * open or taken, and the inquiries in Needs an answer. The Complaints, Praise and Not labelled counts stay on the
+ * Inquiries tab's own cards.
+ */
+export const tabCounts = ({ requests, questions, inquiries }: TabSources): Record<MaisonTab, number | null> => ({
+  requests: requests?.counts.waitingForStaff ?? null,
+  questions,
+  inquiries: inquiries?.needsAnswer ?? null,
+});
+
+/**
+ * The tab the page opens on: the one the address names (`?tab=inquiries`) when the admin may see it, else the first of
+ * their tabs, and nothing for an admin with none. A name that isn't a tab, or is spelt in another case, is not one.
+ */
+export const selectTab = (tabs: readonly MaisonTab[], requested: string | null | undefined): MaisonTab | undefined =>
+  tabs.find((tab) => tab === requested) ?? tabs[0];

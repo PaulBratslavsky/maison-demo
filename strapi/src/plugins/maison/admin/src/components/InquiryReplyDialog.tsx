@@ -12,12 +12,11 @@ import {
   type ReplyBody,
   type StaffInquiry,
 } from '../inquiries';
+import { CLAMPED_TEXT_STYLE } from './clampedText';
 
 const HINT = "It's sent on LINE as Maison, with the customer's message quoted above it. Your name is saved on the inquiry, not sent.";
 // Sending is refused over the limit, so the dialog says why instead of only disabling Send on LINE.
 const TOO_LONG = `A reply can have up to ${REPLY_LIMIT.toLocaleString('en-US')} characters.`;
-/** The customer's words keep their line breaks, and a long message scrolls in its box instead of stretching the dialog. */
-const QUOTE_STYLE = { whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: '12rem', overflowY: 'auto' } as const;
 
 /**
  * Reply on LINE: the customer's message, a box for the reply, and a button that puts in the suggested text when there is
@@ -65,7 +64,7 @@ export const InquiryReplyDialog = ({
             {/* The customer's own words, as plain text. */}
             <Box background="neutral100" padding={4} hasRadius>
               <Flex direction="column" alignItems="stretch" gap={1}>
-                <Typography display="block" style={QUOTE_STYLE}>
+                <Typography display="block" style={CLAMPED_TEXT_STYLE}>
                   &ldquo;{inquiry.message}&rdquo;
                 </Typography>
                 {inquiry.product && (

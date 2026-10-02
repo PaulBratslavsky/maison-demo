@@ -485,14 +485,14 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `ce6917e` (branch `feat/maison-follow-up`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `7ac5dbd` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
 ```bash
-SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone, or its follow-up worktree
-SHA=$(git -C "$SRC" rev-parse --verify feat/maison-follow-up)
-FILES=(admin server test scripts package.json package-lock.json README.md CHANGELOG.md vitest.config.ts .gitignore .editorconfig .prettierrc .prettierignore)
+SRC=../plugin-dev/plugins/strapi-store-demo-mcp   # your clone, or its inquiries worktree
+SHA=$(git -C "$SRC" rev-parse --verify feat/maison-inquiries)
+FILES=(admin server test scripts package.json package-lock.json README.md CHANGELOG.md vitest.config.ts vitest.live.config.ts .gitignore .editorconfig .prettierrc .prettierignore)
 test -n "$SHA" && rm -rf strapi/src/plugins/maison && mkdir strapi/src/plugins/maison
 git -C "$SRC" archive "$SHA" -- "${FILES[@]}" | tar -x -C strapi/src/plugins/maison
 npm install --prefix strapi   # installs and builds it, and shares @strapi/utils
@@ -504,7 +504,7 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 - **The check compares what git tracks,** blob by blob, with the plugin's commit, not the folder. `strapi/.gitignore`'s patterns apply inside the copy too, so a file on disk may not be tracked.
 - **If `SRC` is wrong,** `SHA` stays empty: nothing is deleted, and the check says nothing. Without "The staged copy matches", the copy doesn't match.
-- **On this branch, copy `feat/maison-follow-up`,** the branch of the plugin's follow-up worktree (`strapi-store-demo-mcp-follow-up`), not `feat/maison-plugin`: the customer questions live only on the follow-up branch, so a copy of `feat/maison-plugin` loses them. The worktree and the clone are one repository, so either works as `SRC`.
+- **Copy `feat/maison-inquiries`,** the branch of the plugin's inquiries worktree (`strapi-store-demo-mcp-inquiries`). It holds product knowledge, customer questions and inquiries; `feat/maison-plugin` and `feat/maison-follow-up` are older, and a copy of either loses features. The worktree and the clone are one repository, so either works as `SRC`.
 - Commit with the SHA in the message, update the commit named above, and start Strapi.
 - To work on the plugin in place, run `npm run watch` in its folder, and restart Strapi to load each rebuild.
 - If you run `npm install` in the plugin's folder, stop Strapi and run `npm install --prefix strapi` afterwards. Until then, `npm run dev:strapi` refuses to start: the `predevelop` check finds Maison's own `@strapi/utils`.
@@ -513,6 +513,7 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 
 - **Customer questions** (the staff follow-up proof of concept): the "Maison customer" token needs "MCP: hand questions to staff" (`plugin::maison.questions.ask`). `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand (never run setup against Cloud). Staff need "Read customer questions" to see the section and "Answer customer questions on LINE" for its buttons. `MAISON_LINE_API_BASE_URL` points Strapi at a LINE stand-in for local checks, so nothing reaches a phone. Start the stand-in with `npm run line:stand-in` (on 127.0.0.1:4010, logging what Strapi pushes to `strapi/.tmp/line-stand-in.jsonl`), then Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010 LINE_CHANNEL_ACCESS_TOKEN=stand-in npm run dev:strapi`: Strapi sends and looks up nothing without a token, and the stand-in accepts any. Leave `MAISON_LINE_API_BASE_URL` unset everywhere else.
 - **Inquiries:** the "Maison customer" token needs "MCP: log customer inquiries" (`plugin::maison.inquiries.log`), or the app logs nothing. `npm run setup` adds it locally; on Strapi Cloud, tick it on that token by hand. Staff need "Review customer inquiries" to see the Inquiries tab and widget, and "Reply to customer inquiries on LINE" for its buttons. To label, set `AI_API_KEY` (an Anthropic key) under the project's **Variables** on Strapi Cloud and redeploy; leave `AI_BASE_URL` unset there. The AI SDK needs Node 22.12 or later: Strapi Cloud's Node version is set by hand under **Configuration** → **Basic information**. The LINE stand-in also answers the month's quota (200 messages, and the pushes it took since it started).
+- **Product knowledge over REST** (`/api/maison/knowledge`) needs the Public role's Maison `knowledge.find`. `npm run setup` grants it locally; on Strapi Cloud, a setup run from before product knowledge doesn't have it, so tick it under **Settings → Users & Permissions plugin → Roles → Public**. The concierge doesn't need it: it searches through MCP. On a new Cloud database, press **Load demo catalog** once to add the knowledge entries.
 - **Staff** get an admin role with the Maison actions they need (`catalog.read`, `appointments.review`, `appointments.confirm`) instead of Super Admin.
 - **The customer token** belongs to a dedicated service admin with a narrow role. A token's permissions are clamped to its owner's, so a narrow owner can't be widened by mistake.
 - **Never set `LINE_VERIFY_URL`** in production. Serve everything over https, with `PUBLIC_URL` set to the public origin: the app's, when it passes Strapi's paths on as in option B. `MAISON_APP_ORIGIN` is only for a website on another origin that calls Strapi directly, from the browser: it adds that origin to Strapi's CORS.

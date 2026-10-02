@@ -28,13 +28,14 @@ export default {
     });
 
     // The second Homepage widget (plugin::maison.inquiries), shown to admins who can review inquiries. It is a widget of
-    // its own, not a line in the requests widget: that one's body is laid out for a fixed height. It links to the same page.
+    // its own, not a line in the requests widget: that one's body is laid out for a fixed height. Its link opens the
+    // Maison page on the Inquiries tab, which the page picks from `?tab=` (test/unit/admin-widgets.test.ts).
     app.widgets.register({
       id: 'inquiries',
       pluginId: PLUGIN_ID,
       icon: Crown,
       title: { id: `${PLUGIN_ID}.widget.inquiries.title`, defaultMessage: 'Maison inquiries' },
-      link: { label: { id: `${PLUGIN_ID}.widget.inquiries.link`, defaultMessage: 'Open the inquiries' }, href: `/plugins/${PLUGIN_ID}` },
+      link: { label: { id: `${PLUGIN_ID}.widget.inquiries.link`, defaultMessage: 'Open the inquiries' }, href: `/plugins/${PLUGIN_ID}?tab=inquiries` },
       permissions: PERMISSIONS.inquiriesWidget,
       component: async () => (await import('./components/InquiriesWidget')).default,
     });

@@ -222,11 +222,11 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them:
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
 - **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
-- **Demo data:** **Load demo catalog** and **Reset demo appointments and questions**, which also deletes the questions, the inquiries, and the product knowledge the answers added.
+- **Demo data:** **Load demo catalog** and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
 
 ## The Homepage widgets
 
@@ -243,7 +243,7 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 Its numbers and rows come from `GET /maison/appointments/summary`, which calls `appointments.summarizeRequests()` and follows the board's own definitions. Each row is a row of the board's "All requests" view, without the products and `createdVia`: its `createdAt` is when the request came in, and its `note` is what the customer wrote. Strapi keeps each admin's Homepage layout once they've changed it, so an admin who has moved or removed widgets adds this one with **Add Widget**.
 
-**Maison inquiries**, a second widget, is shown to admins with "Review customer inquiries". It shows the four open counts of the Inquiries tab as cards, **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, which wrap when the widget is narrow. It refreshes every 5 seconds, and if a refresh fails it keeps the last result on screen with a note. **Open the inquiries** goes to the Maison page. It's a widget of its own because the requests widget's body is laid out for a fixed height. Its numbers come from `GET /maison/inquiries/summary`, the same route as the cards on the tab.
+**Maison inquiries**, a second widget, is shown to admins with "Review customer inquiries". It shows the four open counts of the Inquiries tab as cards, **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, which wrap when the widget is narrow. It refreshes every 5 seconds, and if a refresh fails it keeps the last result on screen with a note. **Open the inquiries** goes to the Inquiries tab of the Maison page. It's a widget of its own because the requests widget's body is laid out for a fixed height. Its numbers come from `GET /maison/inquiries/summary`, the same route as the cards on the tab.
 
 ## Tokens
 
@@ -351,7 +351,7 @@ The two POSTs answer:
 | 502 (`failed`) | LINE refused the message or couldn't be reached. The question stays as it was, apart from recording why, which its row shows, and nothing is saved as knowledge |
 | 503 (`not_configured`) | There's no `lineChannelAccessToken`. Nothing is sent |
 
-Every error says why in its message, which is what the page shows. A 200 with `warning: true` has the customer's message out, and its `message` says what went wrong after: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The page shows that `message` as a warning, and any other 200's as a success.
+Every error says why in its message, which is what the page shows. A 200 with `warning: true` has the customer's message out, and its `message` says what went wrong after: "…, but recording it failed (…). Don't send it again." when LINE took the message but the question couldn't be updated, and "…It couldn't be added to product knowledge: …" when the answer went out but its entry wasn't made. The page shows that `message` as a warning that stays until it is dismissed, and any other 200's as a success, which fades.
 
 **What the customer gets** is a LINE text message from Maison's channel, in the question's language, written in the admin's first name and quoting the question cut to 80 characters. Let them know, in English:
 
@@ -369,7 +369,7 @@ And an answer:
 
 A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, or with the house's own as the first name ("Maison", in any case, or either `houseName` in the config), the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
 
-**Reset demo appointments and questions**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
+**Reset demo activity**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
 
 ## Customer inquiries
 
@@ -401,7 +401,7 @@ A cron job, `maison-label-inquiries`, runs every minute. The plugin adds it itse
 | `answered` | whether the concierge's reply answers what the customer asked |
 | `reason` and `topic` | why, in up to 400 characters, and a short phrase for what it's about, both in English |
 
-- The prompt tells the model that the customer's text is evidence to label, never instructions to follow, and a hand-off stays in Needs an answer whatever the labels say.
+- The prompt tells the model that the customer's text is evidence to label, never instructions to follow. The queue rule is code, not the model: it keeps a hand-off in Needs an answer whatever the labels say.
 - Each labelled inquiry records the `modelVersion` and `promptVersion` that labelled it.
 - **A model that answers in the wrong shape** (a missing field, a sentiment of 3, a kind of "angry") fails that inquiry: it becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**. One failing inquiry never stops the ones behind it.
 - A sweep that starts while another is still running does nothing.
@@ -476,7 +476,7 @@ The routes are admin routes, so each takes an admin session that holds its permi
 | `POST /maison/inquiries/:documentId/label` | Reply to customer inquiries on LINE | `{ kind, sentimentLabel }`, one or both | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label-again` | Reply to customer inquiries on LINE | None | `{ inquiry, message }` |
 
-The staff name for a reply comes from the signed-in admin's account, never from the request. `message` is in words staff can read: "Sent the reply on LINE.", "Closed the inquiry.", "Changed the label." or "It will be labelled again within a minute." A 200 from Reply with `warning: true` means LINE took the message but recording it failed: its `message` says so, and the page shows it as a warning. The errors:
+The staff name for a reply comes from the signed-in admin's account, never from the request. `message` is in words staff can read: "Sent the reply on LINE.", "Closed the inquiry.", "Changed the label." or "It will be labelled again within a minute." A 200 from Reply with `warning: true` means LINE took the message but recording it failed: its `message` says so, and the page shows it as a warning that stays until it is dismissed. The errors:
 
 | Status | When |
 |---|---|
@@ -499,7 +499,7 @@ Every error says why in its message, which is what the page shows.
 | Review customer inquiries (`plugin::maison.inquiries.view`) | The Inquiries tab, the Maison inquiries widget, the three GET routes, and a way into the Maison page |
 | Reply to customer inquiries on LINE (`plugin::maison.inquiries.reply`) | The four buttons above. It needs Review customer inquiries too, because the buttons live in the tab |
 
-**Reset demo appointments and questions** also deletes every inquiry, whether it's open, replied to or closed.
+**Reset demo activity** also deletes every inquiry, however many there are, whether each is open, replied to or closed.
 
 ## Run the ops agent
 

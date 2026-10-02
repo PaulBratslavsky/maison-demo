@@ -9,13 +9,15 @@ import {
   canAnswer,
   canLetThemKnow,
   canSendAnswer,
+  OPEN_QUESTIONS,
+  countOfQuestions,
   defaultTitle,
   replyNotice,
   statusLabel,
 } from '../../admin/src/questions';
 import { KNOWLEDGE_CATEGORIES, QUESTION_REASONS } from '../../server/src/constants';
 import { knowledgeTitleOf } from '../../server/src/domain/question-messages';
-import { answerInput } from '../../server/src/mcp/schemas';
+import { answerInput, questionsListInput } from '../../server/src/mcp/schemas';
 
 describe('statusLabel', () => {
   it('says Open for a question nobody has taken', () => {
@@ -275,11 +277,40 @@ describe("the notice a sent answer or Let them know shows", () => {
 
   it('is a warning, with the server’s own words, when the server says so: the customer has the message, but something went wrong after it', () => {
     const message = "Sent the LINE message for Q-4821, but recording it failed (database is locked). Don't send it again.";
-    expect(replyNotice({ message, warning: true })).toEqual({ type: 'warning', message });
+    expect(replyNotice({ message, warning: true })).toEqual({ type: 'warning', message, blockTransition: true });
+  });
+
+  // "Don't send it again" has to be read. A notice that fades after a few seconds can be missed, and the message sent twice.
+  it('stays on screen until it is dismissed, for a warning', () => {
+    expect(replyNotice({ message: 'Sent it, but recording it failed. Don\'t send it again.', warning: true }).blockTransition).toBe(true);
+  });
+
+  it('fades as any notice does, for a success', () => {
+    expect(replyNotice({ message: MESSAGE })).not.toHaveProperty('blockTransition');
+    expect(replyNotice({ message: MESSAGE, warning: false })).not.toHaveProperty('blockTransition');
   });
 
   it('is a success when warning is false or is not the true the server sends', () => {
     expect(replyNotice({ message: MESSAGE, warning: false })).toEqual({ type: 'success', message: MESSAGE });
     expect(replyNotice({ message: MESSAGE, warning: 'true' as unknown as boolean })).toEqual({ type: 'success', message: MESSAGE });
+  });
+});
+
+describe('the number of questions on the Questions tab', () => {
+  it('counts the rows of the list the route answers', () => {
+    expect(countOfQuestions({ questions: [{ reference: 'Q-4821' }, { reference: 'Q-4822' }] })).toBe(2);
+    expect(countOfQuestions({ questions: [] })).toBe(0);
+  });
+
+  it('is nothing for an answer that is not a list of questions, so the tab shows no number', () => {
+    for (const answer of [undefined, null, 'oops', 3, [], {}, { questions: 'many' }, { questions: null }, { error: { message: 'Forbidden' } }]) {
+      expect(countOfQuestions(answer), JSON.stringify(answer)).toBeNull();
+    }
+  });
+
+  // The Open filter lists the open and the taken questions (questions-ask.test.ts pins it): what staff still have to answer.
+  it('asks the route for the Open filter, which it takes', () => {
+    expect(OPEN_QUESTIONS).toEqual({ status: 'open' });
+    expect(questionsListInput.safeParse(OPEN_QUESTIONS).success).toBe(true);
   });
 });

@@ -11,10 +11,9 @@ import {
   type LabelBody,
   type StaffInquiry,
 } from '../inquiries';
+import { CLAMPED_TEXT_STYLE } from './clampedText';
 
 const HINT = "Your label replaces the model's, and the model won't label this inquiry again.";
-/** The customer's words keep their line breaks, and a long message scrolls in its box instead of stretching the dialog. */
-const QUOTE_STYLE = { whiteSpace: 'pre-wrap', overflowWrap: 'break-word', maxHeight: '12rem', overflowY: 'auto' } as const;
 
 /**
  * Change label: the customer's message, and a select each for the kind and the sentiment, which start at the
@@ -51,7 +50,7 @@ export const ChangeLabelDialog = ({
           <Flex direction="column" alignItems="stretch" gap={6}>
             {/* The customer's own words, as plain text. */}
             <Box background="neutral100" padding={4} hasRadius>
-              <Typography display="block" style={QUOTE_STYLE}>
+              <Typography display="block" style={CLAMPED_TEXT_STYLE}>
                 &ldquo;{inquiry.message}&rdquo;
               </Typography>
             </Box>
