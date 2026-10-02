@@ -23,7 +23,7 @@ Maison is fictional. The plugin uses no real brand's names, products or images.
 
 The tools, the REST routes, the chat, the board and the Homepage widget call the same services, so they give the same answers. The Content Manager goes through the Document Service instead, with the same validation on create and update.
 
-Confirming a request is one act wherever it happens: the `confirm_appointment` tool, the board's **Confirm** button and **Publish** in the Content Manager all publish the appointment. None of them messages the customer. An ops agent sends the LINE confirmation afterwards. One difference: **Publish** in the Content Manager doesn't check the visit time, so it can confirm a visit that has already passed.
+Confirming a request is one act wherever it happens: the `confirm_appointment` tool, the board's **Confirm** button and **Publish** in the Content Manager all publish the appointment, and Strapi then sends the customer the LINE confirmation ([LINE confirmations](#line-confirmations)). One difference: **Publish** in the Content Manager doesn't check the visit time, so it can confirm a visit that has already passed.
 
 ## Requirements
 
@@ -55,6 +55,7 @@ export default ({ env }) => ({
     enabled: true,
     config: {
       liffUrl: env('MAISON_LIFF_URL', null),
+      lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', null),
     },
   },
 });
@@ -66,12 +67,14 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 
 | Key | Default | Purpose |
 |---|---|---|
-| `liffUrl` | `null` | Base of the links in LINE confirmations, e.g. `https://liff.line.me/<LIFF ID>`. Use `http://localhost:<port>` for local development. Until it's set, `pending_confirmations` answers `not_configured`. An empty value counts as not set. |
+| `liffUrl` | `null` | Base of the links in LINE confirmations, e.g. `https://liff.line.me/<LIFF ID>`. Use `http://localhost:<port>` for local development. Until it's set, Strapi sends no confirmations and `pending_confirmations` answers `not_configured`. An empty value counts as not set. |
 | `timezone` | `Asia/Tokyo` | Opening-hours checks, the times in messages, and the day of the `date` filter |
 | `defaultLocale` | `ja` | Content language when a tool call doesn't pass `locale` (`ja` or `en`) |
 | `maxOpenRequestsPerCustomer` | `3` | Unconfirmed future requests a customer may have |
 | `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation |
 | `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
+| `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
+| `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
 
 ## Tools
 
@@ -84,11 +87,11 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale` |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
-| `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it. It sends nothing. |
-| `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits not yet sent, each with a ready LINE flex message |
+| `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
+| `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
 | `record_confirmation` | MCP: send appointment confirmations | Records whether a LINE confirmation was delivered |
 
-The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server). It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
+The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
 **Errors don't throw.** They come back as `isError` results whose text is `{"error":{"code","message","hint"}}`. The codes are `not_signed_in`, `not_found`, `invalid_input`, `boutique_closed`, `in_the_past`, `too_many_open_requests`, `not_published` and `not_configured`. The hint says what to do next.
 
@@ -203,7 +206,7 @@ Each tool is offered only to admins whose role holds its permission. The custome
 ## The admin page
 
 **Maison** in the admin menu is shown to admins with "MCP: review appointment requests" or "Load and reset demo data":
-- **Appointment requests:** the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm.
+- **Appointment requests:** the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
 - **Demo data:** **Load demo catalog** and **Reset demo appointments**.
 
 ## The Homepage widget
@@ -244,7 +247,47 @@ The REST customer routes run the same lookup through the `customer-session` poli
 
 The Content Manager doesn't show an appointment's `customer` field at all, in the list or the edit view. The Document Service still reads and writes it, and saving or publishing an appointment in the Content Manager leaves it as it was.
 
+## LINE confirmations
+
+Strapi sends the customer the LINE confirmation when staff confirm a visit, whichever way they do it:
+- the board's **Confirm** button
+- `confirm_appointment`, in the admin chat or from an MCP client
+- **Publish** on the appointment in the Content Manager
+
+Each of them publishes the appointment. Once that publish has gone through, Strapi pushes the visit's flex message to the customer with LINE's push API, `POST /v2/bot/message/push`. It's the message `pending_confirmations` lists for the visit, built by the same code. Sending never makes the publish fail.
+- **Confirm and `confirm_appointment`** wait for LINE's answer, 8 seconds at most, so their answer and the board's next refresh show how it went.
+- **Publish in the Content Manager**, and its bulk Publish, run inside a database transaction. Strapi sends once that transaction commits, and the publish doesn't wait for LINE: the board shows the outcome on its next refresh. A publish that's rolled back sends nothing.
+
+Strapi records each attempt as a Maison notification, with `recordedBy` set to `strapi`:
+- **sent**, with LINE's answer. LINE also answers 200 for a customer it can't deliver to, such as one who has blocked the account, so `sent` means LINE took the message.
+- **failed**, with LINE's HTTP status and its message, or why LINE couldn't be reached
+
+A visit gets one confirmation. Once a `sent` notification exists for it, Strapi sends nothing more, so publishing a confirmed visit again sends nothing. A visit that's over gets none, as `pending_confirmations` lists none, even when the Content Manager publishes it.
+
+Two sends for the same visit at the same moment share one push, within one Strapi process. That's enough for this demo, which runs one Strapi. In production it isn't: several Strapi processes can each send, and a crash between the push and its record leaves no `sent` row. The usual remedies are a claim row with a unique index on the reference, written before the push so only one sender wins; LINE's `X-Line-Retry-Key` header on the push, with LINE's 409 answer to a repeated key treated as sent; or an outbox, where publishing only writes a pending row and a worker sends it and retries.
+
+**Give Strapi the channel access token** of your LINE Messaging API channel: set `LINE_CHANNEL_ACCESS_TOKEN` in the app's `.env`, read it in `config/plugins.ts` as in [Install](#install-for-local-development), and restart Strapi. Without a token, Strapi sends and records nothing, and logs this once: "LINE_CHANNEL_ACCESS_TOKEN isn't set: confirmations aren't sent from Strapi." The board then shows those visits as "not sent". Without a `liffUrl`, it sends nothing either, because the message's button would have no link.
+
+### Send again
+
+On the board, a confirmed request whose LINE column says "not sent" has a **Send again** button until its visit is over, for admins with "MCP: confirm appointment requests". It sends the confirmation, unless it has gone out already, and shows a notification saying how it went. It calls `POST /maison/appointments/:reference/notify`, gated on the same permission as **Confirm**, which answers:
+
+| Status | When |
+|---|---|
+| 200, with `status: "sent"` | LINE took the message |
+| 200, with `status: "already_sent"` | It had gone out already, so nothing was sent |
+| 200, with `status: "sent_unrecorded"` | LINE took the message, but recording it failed, so its row still says "not sent". Don't send it again |
+| 404 | No appointment has that reference |
+| 409 (`not_confirmed`) | The visit isn't confirmed |
+| 422 (`past`) | The visit is over, so it gets no confirmation |
+| 502 (`failed`) | LINE refused it or couldn't be reached. The failure is recorded |
+| 503 (`not_configured`) | There's no `lineChannelAccessToken` or no `liffUrl` |
+
+Every error says why in its message, which is what the board shows.
+
 ## Run the ops agent
+
+Strapi sends confirmations itself. The ops agent's tools are still there for an agent that retries the ones that didn't go out: `pending_confirmations` lists them, failed ones included, and `record_confirmation` records what the agent sent, with `recordedBy` set to `ops-agent`.
 
 Point Claude Desktop at Strapi with the ops token and at LINE Bot MCP with a Messaging API channel access token. Then run the `send_pending_confirmations` prompt. The URL below is LaunchPad's dev server; Strapi's default port is 1337.
 
@@ -291,5 +334,7 @@ The MCP smoke tests (the last line) need:
 - `liffUrl` set in the app, or `pending_confirmations` answers `not_configured`
 
 The token script also loads the demo catalog, then saves a customer, a staff and an ops token to `test/mcp/.tokens.json`, readable by you only.
+
+The integration tests never reach LINE. The harness keeps the app's `LINE_CHANNEL_ACCESS_TOKEN` out of Strapi, and the LINE confirmation suite points `lineApiBaseUrl` at a stand-in on a free local port.
 
 The plugin runs from `dist/`, so rebuild (`npm run link`) and restart Strapi after changing it.

@@ -4,21 +4,32 @@ import appointmentsController from '../../server/src/controllers/appointments';
 import routes from '../../server/src/routes';
 import { fakeStrapi } from './fake-strapi';
 
-/** Enough of a Koa context: Strapi's ctx.badRequest and ctx.notFound set the status and an error body. */
+/** Strapi's error helpers on a Koa context, such as ctx.badRequest, and the status each one sets. */
+const ERROR_HELPERS = {
+  badRequest: 400,
+  notFound: 404,
+  conflict: 409,
+  unprocessableEntity: 422,
+  badGateway: 502,
+  serviceUnavailable: 503,
+};
+
+/** Enough of a Koa context: each of Strapi's error helpers sets its status and an error body. */
 const fakeCtx = (overrides: Record<string, unknown> = {}) => {
   const ctx: any = { query: {}, params: {}, status: 200, body: undefined, ...overrides };
-  ctx.badRequest = vi.fn((message: string, details: unknown) => {
-    ctx.status = 400;
-    ctx.body = { error: { message, details } };
-  });
-  ctx.notFound = vi.fn((message: string, details: unknown) => {
-    ctx.status = 404;
-    ctx.body = { error: { message, details } };
-  });
+  for (const [helper, status] of Object.entries(ERROR_HELPERS)) {
+    ctx[helper] = vi.fn((message: string, details: unknown) => {
+      ctx.status = status;
+      ctx.body = { error: { message, details } };
+    });
+  }
   return ctx;
 };
 const controllerWith = (appointments: Record<string, unknown>) =>
   appointmentsController({ strapi: fakeStrapi({ services: { appointments } }) });
+/** The appointments controller, with `sendConfirmation` standing in for the line-confirmations service. */
+const controllerSending = (sendConfirmation: (reference: string) => Promise<unknown>) =>
+  appointmentsController({ strapi: fakeStrapi({ services: { 'line-confirmations': { sendConfirmation } } }) });
 
 describe('admin routes', () => {
   const gate = (action: string) => ['admin::isAuthenticatedAdmin', { name: 'admin::hasPermissions', config: { actions: [action] } }];
@@ -27,10 +38,12 @@ describe('admin routes', () => {
 
   it('each require a signed-in admin with the matching Maison permission', () => {
     expect(routes.admin.type).toBe('admin');
-    expect(routes.admin.routes).toHaveLength(5);
+    expect(routes.admin.routes).toHaveLength(6);
     expect(policiesOf('GET', '/appointments')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('GET', '/appointments/summary')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('POST', '/appointments/:reference/confirm')).toEqual(gate('plugin::maison.appointments.confirm'));
+    // Send again: whoever may confirm a visit may send its confirmation again.
+    expect(policiesOf('POST', '/appointments/:reference/notify')).toEqual(gate('plugin::maison.appointments.confirm'));
     expect(policiesOf('POST', '/demo/seed')).toEqual(gate('plugin::maison.demo.manage'));
     expect(policiesOf('POST', '/demo/reset')).toEqual(gate('plugin::maison.demo.manage'));
   });
@@ -135,5 +148,40 @@ describe('appointments controller', () => {
     await controllerWith({ confirm }).confirm(ctx);
     expect(ctx.status).toBe(400);
     expect(confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('Send again (notify)', () => {
+  it.each(['sent', 'already_sent', 'sent_unrecorded'])('answers %s with a 200 and the outcome', async (status) => {
+    const outcome = { reference: 'APT-4821', status, message: 'Sent the LINE confirmation for APT-4821.' };
+    const sendConfirmation = vi.fn(async () => outcome);
+    const ctx = fakeCtx({ params: { reference: 'APT-4821' } });
+    await controllerSending(sendConfirmation).notify(ctx);
+    expect(sendConfirmation).toHaveBeenCalledExactlyOnceWith('APT-4821');
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(outcome);
+  });
+
+  it.each([
+    ['not_found', 404],
+    ['not_confirmed', 409],
+    ['past', 422],
+    ['failed', 502],
+    ['not_configured', 503],
+  ])('answers %s with %i and its message, for the board to show', async (status, httpStatus) => {
+    const sendConfirmation = vi.fn(async () => ({ reference: 'APT-4821', status, message: 'Why nothing went out.' }));
+    const ctx = fakeCtx({ params: { reference: 'APT-4821' } });
+    await controllerSending(sendConfirmation).notify(ctx);
+    expect(ctx.status).toBe(httpStatus);
+    expect(ctx.body.error).toEqual({ message: 'Why nothing went out.', details: { code: status } });
+  });
+
+  it('rejects a malformed reference without sending', async () => {
+    const sendConfirmation = vi.fn();
+    const ctx = fakeCtx({ params: { reference: 'APT-48' } });
+    await controllerSending(sendConfirmation).notify(ctx);
+    expect(ctx.status).toBe(400);
+    expect(ctx.body.error.details.code).toBe('invalid_input');
+    expect(sendConfirmation).not.toHaveBeenCalled();
   });
 });

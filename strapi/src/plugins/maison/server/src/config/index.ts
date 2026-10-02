@@ -10,6 +10,10 @@ export interface MaisonConfig {
   maxOpenRequestsPerCustomer: number;
   houseName: { ja: string; en: string };
   disabledTools: ToolName[];
+  /** The LINE Messaging API channel access token Strapi sends confirmations with. Without one, Strapi sends none. */
+  lineChannelAccessToken: string | null;
+  /** Where the LINE Messaging API answers. Tests point it at a stand-in on this machine. */
+  lineApiBaseUrl: string;
 }
 
 export const defaultConfig: MaisonConfig = {
@@ -19,6 +23,8 @@ export const defaultConfig: MaisonConfig = {
   maxOpenRequestsPerCustomer: 3,
   houseName: { ja: 'メゾン', en: 'Maison' },
   disabledTools: [],
+  lineChannelAccessToken: null,
+  lineApiBaseUrl: 'https://api.line.me',
 };
 
 const fail = (message: string): never => {
@@ -27,6 +33,11 @@ const fail = (message: string): never => {
 
 /** https anywhere, or plain http on this machine for local development. */
 const APP_URL = /^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?)$/;
+/** LINE's API over https, or a stand-in on a port of this machine, for tests. */
+const LINE_API_URL = /^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1):\d+(\/\S*)?)$/;
+
+/** null, undefined and '' all mean not set: `NAME=` in an env file gives '', and that must never stop Strapi from starting. */
+const isSet = (value: unknown) => value !== null && value !== undefined && value !== '';
 
 export function validateConfig(config: Partial<MaisonConfig>): void {
   const merged = { ...defaultConfig, ...config };
@@ -61,12 +72,28 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
   if (!Array.isArray(merged.disabledTools) || merged.disabledTools.some((name) => !(TOOL_NAMES as readonly string[]).includes(name))) {
     fail(`config.disabledTools may only contain: ${TOOL_NAMES.join(', ')}`);
   }
+  // The message never repeats the token.
+  const token: unknown = merged.lineChannelAccessToken;
+  if (isSet(token) && (typeof token !== 'string' || /\s/.test(token))) {
+    fail('config.lineChannelAccessToken must be a LINE channel access token, a string without spaces, or null to send no confirmations from Strapi');
+  }
+  const lineApi: unknown = merged.lineApiBaseUrl;
+  if (isSet(lineApi) && (typeof lineApi !== 'string' || !LINE_API_URL.test(lineApi) || lineApi.endsWith('/'))) {
+    fail(
+      'config.lineApiBaseUrl must be an https URL without a trailing slash, e.g. https://api.line.me, or http://127.0.0.1:<port> for a stand-in on this machine'
+    );
+  }
 }
 
 export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
   const config = { ...defaultConfig, ...(strapi.config.get(`plugin::${PLUGIN_ID}`) as Partial<MaisonConfig>) };
-  // An empty liffUrl is the same as none.
-  return { ...config, liffUrl: config.liffUrl || null };
+  // An empty value is the same as none: no liffUrl, no token, and LINE's own API.
+  return {
+    ...config,
+    liffUrl: config.liffUrl || null,
+    lineChannelAccessToken: config.lineChannelAccessToken || null,
+    lineApiBaseUrl: config.lineApiBaseUrl || defaultConfig.lineApiBaseUrl,
+  };
 };
 
 export default {

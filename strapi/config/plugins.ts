@@ -53,6 +53,11 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
       config: {
         // The base of links in LINE confirmations. Unset: pending_confirmations answers not_configured.
         liffUrl: env('MAISON_LIFF_URL', '') || null,
+        // The Official Account's Messaging API channel access token. With it, confirming a visit (on the board, in the
+        // admin chat, over MCP or with the Content Manager's Publish) sends the customer's LINE confirmation from Strapi.
+        // Unset: nothing is sent, and the board shows "not sent". Under the verify mock (local mode) the customers are
+        // mock users with no LINE account to message, so Strapi sends nothing then either, whatever the token.
+        lineChannelAccessToken: lineVerifyUrl ? null : env('LINE_CHANNEL_ACCESS_TOKEN', '') || null,
       },
     },
     'strapi-oauth-mcp-manager': {

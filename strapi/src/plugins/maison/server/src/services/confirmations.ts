@@ -9,6 +9,8 @@ import { formatJaDateTime, toZonedIso } from '../domain/time';
 
 type Doc = Record<string, any>;
 export type Outcome = 'sent' | 'failed';
+/** Who recorded an outcome: Strapi itself, when it sent the confirmation, or the ops agent, through record_confirmation. */
+export type RecordedBy = 'strapi' | 'ops-agent';
 
 export interface PendingConfirmation {
   reference: string;
@@ -26,6 +28,47 @@ export interface RecordedConfirmation {
   notification: { reference: string; status: Outcome; sentAt: string; detail: string };
   alreadyRecorded: boolean;
 }
+
+/** Who gets an appointment's LINE confirmation, and what it says. */
+export type LineConfirmation = Omit<PendingConfirmation, 'reference' | 'previousAttempts'>;
+
+/** What a confirmation needs from a published appointment: the boutique's name and address, and the products' names. */
+export const CONFIRMATION_POPULATE = { boutique: { fields: ['name', 'address'] }, products: { fields: ['name'] } };
+
+/**
+ * The LINE confirmation of a published appointment populated with CONFIRMATION_POPULATE: its recipient, its details
+ * and its flex message. pending_confirmations lists it and Strapi sends it, so the two can't drift. null when the
+ * appointment has no valid LINE customer.
+ */
+export const confirmationFor = (
+  appointment: Doc,
+  { liffUrl, timezone, houseName }: { liffUrl: string; timezone: string; houseName: { ja: string } }
+): LineConfirmation | null => {
+  const subject = parseSubject(appointment.customer);
+  if (!subject) return null;
+  const when = new Date(appointment.requestedFor);
+  const appLink = `${liffUrl}/visits/${appointment.reference}`;
+  const boutique = { name: appointment.boutique?.name ?? '', address: appointment.boutique?.address ?? '' };
+  const products = ((appointment.products ?? []) as Doc[]).map((product) => ({ name: product.name as string }));
+  const requestedForText = formatJaDateTime(when, timezone);
+  return {
+    lineUserId: lineUserIdOf(subject),
+    boutique,
+    requestedFor: toZonedIso(when, timezone),
+    requestedForText,
+    products,
+    appLink,
+    message: buildConfirmationMessage({
+      houseName: houseName.ja,
+      reference: appointment.reference,
+      boutiqueName: boutique.name,
+      boutiqueAddress: boutique.address,
+      requestedForText,
+      productNames: products.map((product) => product.name),
+      appLink,
+    }),
+  };
+};
 
 const DETAIL_MAX = 500;
 /** Strapi's maxLength counts UTF-16 units (an emoji is two), so measure that, and never cut a surrogate pair. */
@@ -93,7 +136,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           ...(sent.length > 0 ? { reference: { $notIn: sent } } : {}),
         },
         sort: 'requestedFor:asc',
-        populate: { boutique: { fields: ['name', 'address'] }, products: { fields: ['name'] } },
+        populate: CONFIRMATION_POPULATE,
         limit,
       })) as Doc[];
       const state = await outcomes(published.map((doc) => doc.reference as string));
@@ -101,41 +144,37 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const pending: PendingConfirmation[] = [];
       for (const doc of published) {
         if (state.get(doc.reference)?.sent) continue; // recorded as sent since the query above
-        const subject = parseSubject(doc.customer);
-        if (!subject) {
+        const confirmation = confirmationFor(doc, { liffUrl, timezone, houseName });
+        if (!confirmation) {
           strapi.log.warn(`[maison] Appointment ${doc.reference} has no valid LINE customer, so it can't be confirmed over LINE.`);
           continue;
         }
-        const when = new Date(doc.requestedFor);
-        const appLink = `${liffUrl}/visits/${doc.reference}`;
-        const boutique = { name: doc.boutique?.name ?? '', address: doc.boutique?.address ?? '' };
-        const products = ((doc.products ?? []) as Doc[]).map((product) => ({ name: product.name as string }));
-        const requestedForText = formatJaDateTime(when, timezone);
+        // In the order pending_confirmations has always listed them.
         pending.push({
           reference: doc.reference,
-          lineUserId: lineUserIdOf(subject),
-          boutique,
-          requestedFor: toZonedIso(when, timezone),
-          requestedForText,
-          products,
+          lineUserId: confirmation.lineUserId,
+          boutique: confirmation.boutique,
+          requestedFor: confirmation.requestedFor,
+          requestedForText: confirmation.requestedForText,
+          products: confirmation.products,
           previousAttempts: state.get(doc.reference)?.failed ?? 0,
-          appLink,
-          message: buildConfirmationMessage({
-            houseName: houseName.ja,
-            reference: doc.reference,
-            boutiqueName: boutique.name,
-            boutiqueAddress: boutique.address,
-            requestedForText,
-            productNames: products.map((product) => product.name),
-            appLink,
-          }),
+          appLink: confirmation.appLink,
+          message: confirmation.message,
         });
       }
       return { ok: true, value: pending };
     },
 
-    /** Appends a delivery outcome. A second `sent` for the same appointment returns the first one instead. */
-    async record(input: { reference: string; status: Outcome; detail: string }): Promise<ServiceResult<RecordedConfirmation>> {
+    /**
+     * Appends a delivery outcome. A second `sent` for the same appointment returns the first one instead.
+     * `recordedBy` defaults to the ops agent, so record_confirmation, which never passes it, keeps writing 'ops-agent'.
+     */
+    async record(input: {
+      reference: string;
+      status: Outcome;
+      detail: string;
+      recordedBy?: RecordedBy;
+    }): Promise<ServiceResult<RecordedConfirmation>> {
       const appointment = (await strapi.documents(UID.appointment).findFirst({
         status: 'draft',
         filters: { reference: { $eq: input.reference } },
@@ -169,7 +208,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           outcome: input.status,
           sentAt: new Date().toISOString(),
           detail: clip(input.detail),
-          recordedBy: 'ops-agent',
+          recordedBy: input.recordedBy ?? 'ops-agent',
         },
       });
       const saved = (await strapi.documents(UID.notification).findOne({ documentId: created.documentId })) as Doc;

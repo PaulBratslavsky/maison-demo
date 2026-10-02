@@ -31,6 +31,13 @@ export default {
         handler: 'appointments.confirm',
         config: { policies: allow(ACTION.appointmentsConfirm) },
       },
+      // The board's Send again: whoever may confirm a visit may send its LINE confirmation again.
+      {
+        method: 'POST',
+        path: '/appointments/:reference/notify',
+        handler: 'appointments.notify',
+        config: { policies: allow(ACTION.appointmentsConfirm) },
+      },
       { method: 'POST', path: '/demo/seed', handler: 'demo.seed', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/reset', handler: 'demo.reset', config: { policies: allow(ACTION.demoManage) } },
     ],

@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Strapi sends the LINE confirmation itself, on every confirm path:** the board's Confirm, `confirm_appointment` in the admin chat or from an MCP client, and Publish in the Content Manager.
+  - Once a publish of an appointment has gone through, a document middleware pushes the visit's flex message with LINE's push API and waits for the answer, 8 seconds at most. Inside a transaction, as the Content Manager's Publish runs, it sends once the transaction commits instead, without waiting, and a rolled-back publish sends nothing. A failed send never fails the publish. The new `line-confirmations` service sends it, with the message `pending_confirmations` lists, now built by one shared function.
+  - Each attempt is recorded as a notification by `strapi`: sent, or failed with LINE's HTTP status and message. A push LINE took but that couldn't be recorded answers `sent_unrecorded`. A visit gets one, so publishing again sends nothing, two sends at once share one push, and a visit that's over gets none. `confirmations.record()` takes an optional `recordedBy`, and still writes `ops-agent` without it.
+  - A new appointment's reference is never one a notification still names, so a new visit can't count as already confirmed over LINE.
+  - New config: `lineChannelAccessToken`, from `LINE_CHANNEL_ACCESS_TOKEN`, and `lineApiBaseUrl`, `https://api.line.me` by default. Without a token, Strapi sends and records nothing, and logs a warning once.
+  - **Send again** on the board, for confirmed requests not yet sent whose visit is still ahead, through `POST /maison/appointments/:reference/notify`, gated like Confirm.
+  - The confirm toast says whether the customer's LINE confirmation was sent, and points to Send again when it wasn't. It and `confirm_appointment`'s description no longer say the ops agent sends the confirmation. The ops agent's tools and prompt are unchanged, for retries.
 - **A "Maison requests" widget on the admin Homepage** (`plugin::maison.requests`), for admins with "MCP: review appointment requests". It counts one pipeline of visits still ahead (the requests waiting for staff, the confirmed visits, and how many of those have had their LINE confirmation sent), lists the five newest requests, and refreshes every 5 seconds.
   - `GET /maison/appointments/summary`, an admin route gated on the same permission as the board's list. It answers `{ counts, recent }` from the new `appointments.summarizeRequests()`, which counts with the board's own definitions and returns the board's "All requests" rows, masked the same way.
 - **REST routes at `/api/maison`**, on the same services, input schemas and LINE customer identity as the MCP tools:

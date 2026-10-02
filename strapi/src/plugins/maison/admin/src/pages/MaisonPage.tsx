@@ -34,7 +34,7 @@ const MaisonPage = () => {
             // The counts come from the review route, so only these admins get them.
             <>
               <BoardCounts refreshKey={refreshKey} />
-              <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onConfirmed={refresh} />
+              <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onChange={refresh} />
             </>
           )}
           {allowedActions.canManage && <DemoData onChange={refresh} />}

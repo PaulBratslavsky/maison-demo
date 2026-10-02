@@ -108,6 +108,23 @@ const requestedConditions = (confirmed: string[], now: Date): Doc[] =>
 /** The board's "confirmed" view, whenever the visit is. null when nothing is confirmed, so nothing can match. */
 const confirmedConditions = (confirmed: string[]): Doc[] | null => (confirmed.length > 0 ? [{ documentId: { $in: confirmed } }] : null);
 
+/**
+ * A new appointment's reference: one no appointment has, and no notification names. An appointment deleted on its own
+ * leaves its notifications, and a new visit under its reference would count as already confirmed over LINE.
+ * `random` is only for tests.
+ */
+export const uniqueReference = async (strapi: Core.Strapi, random: () => number = Math.random): Promise<string> => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const reference = generateReference(random);
+    const [appointments, notifications] = await Promise.all([
+      strapi.documents(UID.appointment).count({ filters: { reference: { $eq: reference } } }),
+      strapi.documents(UID.notification).count({ filters: { appointmentReference: { $eq: reference } } }),
+    ]);
+    if (appointments === 0 && notifications === 0) return reference;
+  }
+  throw new Error('[maison] Could not find a free appointment reference after 20 attempts.');
+};
+
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const publishedBySlug = (uid: string, slug: string, locale: Locale) =>
     strapi.documents(uid as any).findFirst({ locale, status: 'published', filters: { slug: { $eq: slug } } }) as Promise<Doc | null>;
@@ -218,15 +235,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     return drafts.filter((doc) => !confirmed.has(doc.documentId as string)).length;
   };
 
-  const uniqueReference = async () => {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const reference = generateReference();
-      const taken = await strapi.documents(UID.appointment).count({ filters: { reference: { $eq: reference } } });
-      if (taken === 0) return reference;
-    }
-    throw new Error('[maison] Could not find a free appointment reference after 20 attempts.');
-  };
-
   /**
    * The references of the confirmed visits still ahead at `now`, on the drafts the board lists. Appointments aren't
    * localized, so there's one draft per confirmed documentId, and this limit never cuts the list short.
@@ -292,7 +300,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
       const created = await strapi.documents(UID.appointment).create({
         data: {
-          reference: await uniqueReference(),
+          reference: await uniqueReference(strapi),
           customer: input.subject,
           boutique: { documentId: boutique.documentId, locale: defaultLocale },
           products: products.map((product) => ({ documentId: product.documentId, locale: defaultLocale })),
@@ -357,7 +365,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * Staff confirmation: publishes the draft, the same as Publish in the Content Manager. Confirming twice is safe.
-     * It never messages anyone; the LINE ops agent sends the confirmation afterwards.
+     * Publishing sends the customer's LINE confirmation (document-middleware.ts) before it returns, so the answer's
+     * confirmationSent already says whether it went out. Confirming again publishes nothing, so it sends nothing.
      */
     async confirm(reference: string, now: Date = new Date()): Promise<ServiceResult<ConfirmedAppointment>> {
       const { defaultLocale, timezone } = getConfig(strapi);

@@ -37,15 +37,20 @@ const RequestsWidget = () => {
   const now = new Date();
 
   return (
-    <Flex direction="column" alignItems="stretch" gap={3}>
-      <RequestCounts counts={summary.counts} />
+    // Strapi gives the widget's body a fixed 261px and scrolls it as a whole (WidgetRoot). Filling exactly that height
+    // keeps the body from scrolling: the cards stay put, and only the table scrolls, inside its own box below them.
+    <Flex direction="column" alignItems="stretch" gap={3} height="100%">
+      <Box shrink={0}>
+        <RequestCounts counts={summary.counts} />
+      </Box>
 
       {/*
         The table keeps its own width and scrolls sideways inside the widget when that is wider than the widget. Strapi
         sizes the widget's body to its content, so a table that is wider would widen the body and the cards with it. The
         width of 0 makes the table add nothing to that size, and the minimum width of 100% then gives it the widget's.
+        Growing into the height left under the cards, with a minimum height of 0, makes this box scroll the rows.
       */}
-      <Box width="0" minWidth="100%">
+      <Box width="0" minWidth="100%" grow={1} minHeight="0" overflow="auto">
         <Table colCount={COLUMNS.length} rowCount={summary.recent.length + 1} aria-label="Newest requests">
           <Thead>
             <Tr>
