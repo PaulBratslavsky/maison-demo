@@ -88,7 +88,7 @@ curl "$STRAPI/api/maison/knowledge?query=How%20do%20I%20care%20for%20the%20leath
 ```
 
 - **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. Product knowledge takes `query`, `productSlugs` and `locale`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
-- **`locale`** is `ja` (the default) or `en`.
+- **`locale`** is `ja` (the default) or `en`. Product knowledge is in English only, so the knowledge route answers Japanese, which has no entries, unless you send `locale=en`.
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
 
@@ -129,8 +129,8 @@ The concierge uses a local model unless it has a key. Keys go in `liff/.env`; re
 - **The local model** is Qwen3 14B with a 32k context: `ollama pull qwen3:14b`, then `ollama create qwen3-14b-32k -f Modelfile` with a `Modelfile` of `FROM qwen3:14b` and `PARAMETER num_ctx 32768`. Any Ollama model that calls tools works through `OLLAMA_MODEL`.
 - **Qwen3 is slower:** about 20–60 seconds a turn, where Claude takes seconds.
 - **Dates are a tool.** When a customer names a day ("Saturday", "tomorrow"), the concierge asks `resolve_date`, a local tool on Tokyo's calendar, and its tool line reads `Local · resolve_date`. The model never works out a date itself: on the local model, "Saturday" came out as Friday until the date became a tool.
-- **Product questions go to product knowledge.** For care, sizing, delivery, repairs, warranty, gift wrapping and the like, the concierge calls `search_knowledge` and answers only from the entries it returns. When none answers, it calls `hand_off_to_staff`, a local tool like `resolve_date`. Its line reads `Local · hand_off_to_staff ✓`, with "Our team answers questions like this in Maison's LINE chat." and **Chat with Maison on LINE** under it. Nothing reaches staff from the app yet: the customer asks in the chat.
-- **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice.
+- **Product questions go to product knowledge.** For care, sizing, delivery, repairs, warranty, gift wrapping and the like, the concierge calls `search_knowledge` and answers only from the entries it returns. When none answers, it calls `hand_off_to_staff`, a local tool like `resolve_date`. Its line reads `Local · hand_off_to_staff ✓`, with "Our team answers questions like this in Maison's LINE chat." and **Chat with Maison on LINE** under it. The note also shows under a `search_knowledge` line that found nothing, even if the model skips the call. Nothing reaches staff from the app yet: the customer asks in the chat.
+- **An empty turn.** Now and then, the local model ends a turn with tool calls and no words. The concierge then shows "No reply came back." and **Try again**, which asks again. A turn that booked a visit never offers it, so nothing is booked twice, and neither does a turn that shows the hand-off note: the note is the answer.
 - **When the model can't be reached,** the concierge says which one, and how to fix it.
 - **Strapi runs no model.** The concierge's is the demo's only model.
 
@@ -223,7 +223,7 @@ console.log("Added maison-ops to", file);
 
 ### Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo appointments** between runs. Then once more on the local model, and once in Japanese. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo appointments** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the concierge hands the question to the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each beat works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.

@@ -151,6 +151,16 @@ export const grantPublicReads = async (api) => {
   return changed;
 };
 
+/**
+ * What setup says about the seed (POST /maison/demo/seed): whether it loaded the catalog or found it there, and, when
+ * it added any, how many product knowledge entries. A catalog loaded before gets the knowledge on the next run, so
+ * "already loaded" alone would hide that it did something.
+ */
+export const seedLines = (seeded) => [
+  seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.',
+  ...(seeded.knowledge > 0 ? [`Added ${seeded.knowledge} product knowledge entries.`] : []),
+];
+
 const main = async () => {
   if (!email || !password) {
     throw new Error('Set DEMO_ADMIN_EMAIL and DEMO_ADMIN_PASSWORD in strapi/.env. `npm install` at the repo root creates them.');
@@ -179,7 +189,7 @@ const main = async () => {
 
   // 2. The catalog, and reading it and the Home page over REST without credentials.
   const seeded = await api('POST', '/maison/demo/seed', {});
-  console.log(seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.');
+  for (const line of seedLines(seeded)) console.log(line);
   const actions = PUBLIC_ACTIONS.join(', ');
   console.log(
     (await grantPublicReads(api))
