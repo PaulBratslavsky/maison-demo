@@ -76,10 +76,14 @@ export const toolView = (part: ToolPart, locale: Locale) => {
  * Where a message's hand-off note goes, with the LINE chat button: the index, in its parts, of the part it goes under,
  * or null for no note. There is one note a message. The note is all hand_off_to_staff does (it sends nothing), and the
  * local model often skips the call, so the chat doesn't wait for it:
- * - under the first hand_off_to_staff that went through;
- * - otherwise under the last search_knowledge, when every one in the message came back whole with no entries. A search
- *   that found entries, one that failed, and one still running all mean no note: the question may be answered, and a
- *   note that showed while a second search was under way would vanish when that one found the answer.
+ * - under the first hand_off_to_staff that went through, whatever the searches found;
+ * - otherwise, when there was no such call, under the last search_knowledge, if it came back whole with no entries.
+ *
+ * The conditions below are the fallback's alone; a hand-off that went through needs none. The fallback shows only when no
+ * search in the message found entries (the question may be answered) and none is still running (a note that showed while
+ * a second search was under way would vanish when that one found the answer). The last search decides: an earlier one
+ * that failed or was refused doesn't count, because rule 6 has the model fix its arguments and search again, and the
+ * local model makes bad first calls. A last search that failed or was refused means no note.
  */
 export const handOffAt = (parts: ReadonlyArray<{ type: string }>): number | null => {
   const calls = parts.flatMap((part, index) => {
@@ -89,9 +93,13 @@ export const handOffAt = (parts: ReadonlyArray<{ type: string }>): number | null
   const handOff = calls.find(({ tool }) => handedOff(tool));
   if (handOff) return handOff.index;
   const searches = calls.filter(({ tool }) => tool.toolName === 'search_knowledge');
-  const foundNothing = ({ tool }: (typeof calls)[number]) => {
+  const last = searches.at(-1);
+  /** The entries a search found: undefined unless it came back whole with a list of them. */
+  const entriesOf = ({ tool }: (typeof calls)[number]) => {
     const entries = outcomeOf(tool).data?.entries;
-    return Array.isArray(entries) && entries.length === 0;
+    return Array.isArray(entries) ? entries : undefined;
   };
-  return searches.length > 0 && searches.every(foundNothing) ? searches[searches.length - 1].index : null;
+  const foundEntries = searches.some((search) => (entriesOf(search)?.length ?? 0) > 0);
+  const running = searches.some(({ tool }) => tool.state !== 'output-available' && tool.state !== 'output-error');
+  return last && !foundEntries && !running && entriesOf(last)?.length === 0 ? last.index : null;
 };

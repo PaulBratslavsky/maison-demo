@@ -189,6 +189,8 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(named.length, `the answer names a product. ${context}`).toBeGreaterThan(0);
     for (const slug of named) expect(returned.has(slug), `${slug} came from a tool call, not from the model. ${context}`).toBe(true);
     expect(named.some((slug) => fits.has(slug)), `a named product fits the question. ${context}`).toBe(true);
+    // A gift is no policy question: the chat shows no hand-off note under the answer.
+    expect(handOffAt((await assistantMessageOf(events)).parts), `a hand-off note shows on a gift question. ${context}`).toBeNull();
   });
 
   /**
@@ -217,7 +219,9 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     };
 
     const firstTurn = await converse([say('u1', ask)]);
-    const secondTurn = await converse([say('u1', ask), await assistantMessageOf(firstTurn), say('u2', yes)]);
+    const firstReply = await assistantMessageOf(firstTurn);
+    const secondTurn = await converse([say('u1', ask), firstReply, say('u2', yes)]);
+    const secondReply = await assistantMessageOf(secondTurn);
     const calls = callsIn([...firstTurn, ...secondTurn]);
     const replies = [textIn(firstTurn), textIn(secondTurn)];
     const trace = `Tools: ${calls.map((call) => `${call.name}(${JSON.stringify(call.input)})`).join(', ')}. Replies: ${JSON.stringify(replies)}`;
@@ -249,6 +253,11 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
       expect(datesIn(reply, year).filter((date) => date !== saturday), `the ${which} reply names another date. ${trace}`).toEqual([]);
       expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the ${which} reply names another weekday. ${trace}`).toEqual([]);
     }
+
+    // The stage beat is a gift and a booking, not a policy question: neither reply shows a hand-off note.
+    for (const [which, reply] of [['first', firstReply], ['second', secondReply]] as const) {
+      expect(handOffAt(reply.parts), `the ${which} reply shows a hand-off note. ${trace}`).toBeNull();
+    }
   });
 
   it("answers a care question from Maison's product knowledge", async () => {
@@ -272,6 +281,8 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     // The chat shows the note and the LINE chat button when the model calls hand_off_to_staff, and when it skips the call after a search that found nothing.
     const noteAt = handOffAt((await assistantMessageOf(events)).parts);
     expect(noteAt, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
+    // Rule 9 leaves where the team answers to that note, so the reply doesn't repeat it, and it promises no contact.
+    expect(answer, 'the reply repeats the note').not.toMatch(/\bLINE\b/);
     expect(answer, 'it promises no contact').not.toMatch(/will (contact|reach out|get back|reply)/i);
   });
 });

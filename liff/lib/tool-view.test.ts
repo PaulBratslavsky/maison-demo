@@ -133,15 +133,33 @@ describe('handOffAt', () => {
     expect(handOffAt([foundAnAnswer, words])).toBeNull();
   });
 
-  it('shows no fallback note while a search is running, or after one failed or was refused', () => {
+  it('shows no fallback note while a search is running, or when the last one failed or was refused', () => {
     expect(handOffAt([search('input-streaming')])).toBeNull();
     expect(handOffAt([search('input-available')])).toBeNull();
     // Held back while a second search is under way, so the note doesn't show and then vanish when that one finds an answer.
     expect(handOffAt([foundNothing, search('input-available')])).toBeNull();
+    expect(handOffAt([search('input-available'), foundNothing])).toBeNull();
     expect(handOffAt([search('output-error')])).toBeNull();
-    expect(handOffAt([foundNothing, search('output-error')])).toBeNull();
     expect(handOffAt([search('output-available', refusal)])).toBeNull();
+    // The last search decides, and it failed: the question wasn't answered, and nothing says the knowledge is empty.
+    expect(handOffAt([foundNothing, search('output-error')])).toBeNull();
     expect(handOffAt([foundNothing, search('output-available', refusal)])).toBeNull();
+  });
+
+  // Rule 6 has the model fix a refused call and call again, and the local model makes bad first calls.
+  it('lets the last search decide: an earlier one that failed, was refused or could not be read does not cancel the note', () => {
+    expect(handOffAt([search('output-available', refusal), foundNothing])).toBe(1);
+    expect(handOffAt([search('output-error'), foundNothing])).toBe(1);
+    expect(handOffAt([search('output-available', refusal), step, search('output-error'), step, foundNothing])).toBe(4); // two bad ones, then an empty one
+    expect(handOffAt([search('output-available', { content: [] }), foundNothing])).toBe(1); // a result with nothing to read
+    // A guessed slug is not_found; the model looks it up with search_products, then searches again.
+    const notFound = search('output-available', { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'not_found', message: 'No such product.', hint: 'Call search_products to find valid product slugs.' } }) }] });
+    const products: Part = { type: 'dynamic-tool', toolName: 'search_products', state: 'output-available', output: { content: [], structuredContent: { products: [{ slug: 'weekender-50' }] } } };
+    expect(handOffAt([notFound, products, foundNothing])).toBe(2);
+    // The last one still has to be the empty one, and no search may have found entries or be running.
+    expect(handOffAt([search('output-available', refusal), foundAnAnswer, foundNothing])).toBeNull();
+    expect(handOffAt([search('output-error'), foundAnAnswer])).toBeNull();
+    expect(handOffAt([search('output-available', refusal), search('input-available')])).toBeNull(); // the retry is still running
   });
 
   it("shows no fallback note when it can't tell that the search found nothing, or nothing was searched", () => {

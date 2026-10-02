@@ -128,6 +128,9 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, foundNothing, { type: 'step-start' })], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, foundNothing)], false)).toBe(false); // two searches, both empty
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(false); // a failed hand-off doesn't take the note away
+    // A first search that was refused or broke, and a second that found nothing: rule 6 has the model call again, and the last one decides.
+    expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('output-available', refusal), foundNothing)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ ...knowledge('output-error'), errorText: 'fetch failed' }, foundNothing)], false)).toBe(false);
   });
 
   it('still allows it after a search that found entries, failed or has not finished, with no words after it', () => {
@@ -137,5 +140,6 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('output-available', refusal))], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('input-available'))], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, knowledge('input-available'))], false)).toBe(true); // a second search is under way
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, knowledge('output-available', refusal))], false)).toBe(true); // the last search was refused
   });
 });

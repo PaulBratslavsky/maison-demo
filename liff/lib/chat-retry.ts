@@ -20,19 +20,17 @@ interface ChatMessage {
 const shown = (part: ChatPart) =>
   part.type === 'text' ? Boolean(part.text?.trim()) : part.type === 'dynamic-tool' || part.type.startsWith('tool-');
 
-/** A tool call's name: a dynamic-tool part carries it (MCP tools arrive as dynamic tools), a static one has it in its type. */
-const toolNameOf = (part: ChatPart): string | undefined =>
-  part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
-
-/** Whether a call's result is a refusal: an MCP error result (isError) that came back. */
-const refused = (part: ChatPart): boolean => part.state === 'output-available' && (part.output as { isError?: unknown } | null | undefined)?.isError === true;
-
 /**
  * Whether a part is a request_appointment call that may have booked a visit. Only Maison's refusal says it didn't: an
  * MCP error result (isError) that came back. A result without one is a booking. A call with no result, or one that failed
  * on the way (output-error), can't be told from a booking that went through, so it counts as one.
  */
-const mayHaveBooked = (part: ChatPart): boolean => toolNameOf(part) === 'request_appointment' && !refused(part);
+const mayHaveBooked = (part: ChatPart): boolean => {
+  const name = part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : undefined;
+  if (name !== 'request_appointment') return false;
+  const refused = part.state === 'output-available' && (part.output as { isError?: unknown } | null | undefined)?.isError === true;
+  return !refused;
+};
 
 /**
  * Whether the last reply ended with nothing to read: no text, or tool calls and no words after them. The local model
@@ -48,7 +46,7 @@ const mayHaveBooked = (part: ChatPart): boolean => toolNameOf(part) === 'request
  * Nor when the chat shows the reply's hand-off note (handOffAt in lib/tool-view.ts), under a hand-off that went through
  * or, when the model skipped the call, under a search that found nothing: the note and the LINE chat button are the
  * answer, so a reply that ends there, with no words after it, isn't empty. With no note (a hand-off that failed, a search
- * that found entries, failed or didn't finish) nothing has answered.
+ * that found entries, or a last search that failed or hasn't finished) nothing has answered.
  */
 export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boolean => {
   if (busy) return false;
