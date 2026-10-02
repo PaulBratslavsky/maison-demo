@@ -37,6 +37,11 @@ const knowledge = (state: string, output?: unknown): Part => ({ type: 'dynamic-t
 const entries = (...titles: string[]) => ({ content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
 const foundNothing = knowledge('output-available', entries());
 const foundAnAnswer = knowledge('output-available', entries('How do I care for the leather?'));
+/** A search that found nothing, and the app's server handed the question to staff itself: its result carries what Strapi recorded. */
+const handedOffBySearch = knowledge('output-available', {
+  content: [{ type: 'text', text: '{}' }],
+  structuredContent: { locale: 'en', entries: [], handOff: { reference: 'Q-4821', question: 'Can I pay in bitcoin?', product: null } },
+});
 /** A question Maison has written nothing about, and one it has. */
 const askedAboutBitcoin = [user('Can I pay in bitcoin?')];
 const askedAboutCare = [user('How do I care for the leather?')];
@@ -151,6 +156,19 @@ describe('needsRetry', () => {
     // A first search that was refused or broke, and a second that found nothing: rule 6 has the model call again, and the last one decides.
     expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('output-available', refusal), foundNothing)], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant({ ...knowledge('output-error'), errorText: 'fetch failed' }, foundNothing)], false)).toBe(false);
+  });
+
+  // The app records the question itself when a search finds nothing: the recorded note under that search is the answer.
+  it('is false after a search the app handed the question to staff for, with no words after it, whatever the model did next', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, handedOffBySearch, { type: 'step-start' })], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch, handedOff)], false)).toBe(false); // the model's call after it, answered with the same reference
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch, handOff('input-available'))], false)).toBe(false); // the note stays while a second call runs
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch, foundNothing)], false)).toBe(false); // a second search
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, handedOffBySearch)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch, foundAnAnswer)], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handedOffBySearch)], true)).toBe(false); // and never while a reply is coming in
   });
 
   it('still allows it after a search that found entries, failed or has not finished, with no words after it', () => {

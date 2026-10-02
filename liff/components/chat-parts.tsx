@@ -108,9 +108,9 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
  * The hand-off note, which handOffAt places once a message. After a hand-off Strapi recorded (`recorded`): who has the
  * question, by its reference, and where and when they reply, with "Send it in the LINE chat", a secondary button that
  * opens the chat with Maison with the question already typed in, for the customer to send (lineMessageUrl). Without
- * NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the model skipped the call after a search that found
- * nothing, or the call failed): where the team answers, and "Chat with Maison on LINE", so a customer can always reach a
- * person. Only a recorded hand-off says the question is with the advisors.
+ * NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the hand-off after a search that found nothing, or the
+ * model's own, failed): where the team answers, and "Chat with Maison on LINE", so a customer can always reach a person.
+ * Only a recorded hand-off says the question is with the advisors.
  */
 export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | null; locale: Locale }) {
   const copy = COPY[locale].handOff;
@@ -138,8 +138,9 @@ export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | 
 /**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
  * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note,
- * once, under the line handOffAt names (a hand_off_to_staff call that went through; otherwise, with the plain note, the
- * last search that found nothing, or a hand-off that failed), and the pieces a search found under the message's words.
+ * once, under the line handOffAt names (a hand-off that went through: the model's hand_off_to_staff, or a search that
+ * found nothing and carries the one the app made; otherwise, with the plain note, the last search that found nothing, or
+ * a hand-off that failed), and the pieces a search found under the message's words.
  */
 export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
   const blocks: ReactNode[] = [];

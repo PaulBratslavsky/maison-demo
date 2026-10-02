@@ -12,6 +12,18 @@ const recorded = (reference = 'Q-4821') => ({
 });
 /** What the model sent: a Maison tool's part holds it as `input`. */
 const asked = { question: 'Can it hold a watch?', reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en' };
+/**
+ * What search_knowledge answers when it found nothing and the app's server handed the question to staff itself
+ * (withAutoHandOff in lib/concierge.ts): the entries, none, with what Strapi recorded in `handOff`, and a sentence for the
+ * model after the entries' text.
+ */
+const searchedAndHandedOff = (reference = 'Q-4821', question = 'Can it hold a watch?', product: { slug: string; name: string } | null = null) => ({
+  content: [
+    { type: 'text', text: JSON.stringify({ locale: 'en', entries: [] }) },
+    { type: 'text', text: `No entry answers this, so the question was passed to Maison's client advisors as ${reference}. Don't call hand_off_to_staff for it.` },
+  ],
+  structuredContent: { locale: 'en', entries: [], handOff: { reference, question, product } },
+});
 
 describe('toolView', () => {
   it('counts what search_knowledge found, on an MCP line, with no hand-off', () => {
@@ -160,12 +172,96 @@ describe('toolView: hand_off_to_staff', () => {
     }
   });
 
-  it('is the only call that gives the page a hand-off, and resolve_date is the only local tool', () => {
+  it("reads a hand-off from a hand_off_to_staff result's question only (a search carries its own, in handOff), and resolve_date is the only local tool", () => {
     // Nothing but hand_off_to_staff, even with a result shaped like its own.
     expect(toolView({ toolName: 'search_knowledge', state: 'output-available', input: asked, output: recorded() }, 'en').handOff).toBeNull();
     expect(toolView({ toolName: 'request_appointment', state: 'output-available', input: asked, output: recorded() }, 'en').handOff).toBeNull();
     expect(toolView({ toolName: 'resolve_date', state: 'output-available', input: asked, output: recorded() }, 'en').line).toMatch(/^Local · resolve_date ✓/);
     expect(toolView({ toolName: 'hand_off_to_staff', state: 'output-available', output: recorded() }, 'en').line).toMatch(/^MCP · /);
+  });
+});
+
+// A search that found nothing may carry the hand-off the app made for it: the question is with the advisors, as if the
+// model had called hand_off_to_staff, and the page treats it the same way.
+describe('toolView: search_knowledge that handed the question to staff', () => {
+  const call = { toolName: 'search_knowledge', input: { query: 'watch' } };
+
+  it('keeps its line, with the count of what it found, and hands the page the reference Strapi gave and the question the app sent', () => {
+    const view = toolView({ ...call, state: 'output-available', output: searchedAndHandedOff('Q-4821', 'Can it hold a watch?') }, 'en');
+    expect(view.line).toBe('MCP · search_knowledge ✓ 0 results');
+    expect(view.failed).toBe(false);
+    expect(view.handOff).toEqual({ reference: 'Q-4821', question: 'Can it hold a watch?' });
+    expect(view.products).toBeNull();
+    expect(view.appointment).toBeNull();
+    // The same in Japanese: only the count's words change.
+    const ja = toolView({ ...call, state: 'output-available', output: searchedAndHandedOff('Q-4821', 'これは腕時計を入れられますか？') }, 'ja');
+    expect(ja.line).toBe('MCP · search_knowledge ✓ 0件');
+    expect(ja.handOff).toEqual({ reference: 'Q-4821', question: 'これは腕時計を入れられますか？' });
+  });
+
+  it('leaves the piece out of what it hands the page: the reference and the question only', () => {
+    const view = toolView({ ...call, state: 'output-available', output: searchedAndHandedOff('Q-4821', 'Can it hold a watch?', { slug: 'jewelry-coffret', name: 'Jewelry Coffret' }) }, 'en');
+    expect(view.handOff).toStrictEqual({ reference: 'Q-4821', question: 'Can it hold a watch?' });
+  });
+
+  it("reads the question from the result's handOff, not from what the model sent the search, and trims it like a hand-off's", () => {
+    const handOffOf = (question: unknown) => {
+      const output = searchedAndHandedOff();
+      return toolView({ ...call, state: 'output-available', output: { ...output, structuredContent: { ...output.structuredContent, handOff: { reference: 'Q-4821', question } } } }, 'en').handOff;
+    };
+    expect(handOffOf('  Can it hold a watch?\n')).toEqual({ reference: 'Q-4821', question: 'Can it hold a watch?' });
+    expect(handOffOf('Can it hold\na watch?')?.question).toBe('Can it hold\na watch?');
+    // Still recorded when the question can't be read: the reference is what says Strapi has it.
+    for (const question of [undefined, null, 42, {}]) expect(handOffOf(question), JSON.stringify(question)).toEqual({ reference: 'Q-4821', question: '' });
+    expect(toolView({ ...call, input: { query: 'something else' }, state: 'output-available', output: searchedAndHandedOff('Q-4821', 'Can it hold a watch?') }, 'en').handOff?.question).toBe('Can it hold a watch?');
+  });
+
+  it("hands the page nothing when the result's handOff has no reference to show", () => {
+    const withHandOff = (handOff: unknown) => ({ content: [], structuredContent: { locale: 'en', entries: [], handOff } });
+    const results = [
+      searchedAndHandedOff('', 'Can it hold a watch?'),
+      withHandOff({ question: 'Can it hold a watch?' }),
+      withHandOff({ reference: 4821, question: 'Can it hold a watch?' }),
+      withHandOff({ reference: null }),
+      withHandOff({}),
+      withHandOff(null),
+      withHandOff('Q-4821'),
+      withHandOff(['Q-4821']),
+      withHandOff(4821),
+      { content: [], structuredContent: { locale: 'en', entries: [] } }, // a search that found nothing, and no hand-off
+      null,
+    ];
+    for (const output of results) {
+      const view = toolView({ ...call, state: 'output-available', output }, 'en');
+      expect(view.handOff, JSON.stringify(output)).toBeNull();
+      expect(view.failed, JSON.stringify(output)).toBe(false);
+    }
+  });
+
+  it("hands the page nothing while the search runs, when it broke on the way, or when Maison refused it, whatever its result says", () => {
+    for (const state of ['input-streaming', 'input-available']) {
+      expect(toolView({ ...call, state, output: searchedAndHandedOff() }, 'en').handOff, state).toBeNull();
+    }
+    expect(toolView({ ...call, state: 'output-error', errorText: 'fetch failed', output: searchedAndHandedOff() }, 'en').handOff).toBeNull();
+    const refused = { ...searchedAndHandedOff(), isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'invalid_input', message: 'Check the query.', hint: 'Use 1 to 300 characters.' } }) }] };
+    const view = toolView({ ...call, state: 'output-available', output: refused }, 'en');
+    expect(view.handOff).toBeNull();
+    expect(view.failed).toBe(true);
+    expect(view.line).toBe('MCP · search_knowledge ✕ invalid_input');
+  });
+
+  it('reads a hand-off from a search only: another tool with the same field has none', () => {
+    const output = searchedAndHandedOff();
+    for (const toolName of ['search_products', 'request_appointment', 'view_product', 'my_appointments']) {
+      expect(toolView({ toolName, state: 'output-available', output }, 'en').handOff, toolName).toBeNull();
+    }
+    // hand_off_to_staff has its own result, read as before: question.reference, whatever else the result holds.
+    expect(toolView({ toolName: 'hand_off_to_staff', state: 'output-available', input: asked, output }, 'en').handOff).toBeNull();
+    const both = { content: [], structuredContent: { ...recorded('Q-0007').structuredContent, handOff: { reference: 'Q-9999', question: 'No.' } } };
+    expect(toolView({ toolName: 'hand_off_to_staff', state: 'output-available', input: asked, output: both }, 'en').handOff).toEqual({ reference: 'Q-0007', question: 'Can it hold a watch?' });
+    // And a search reads its handOff, not a question of the kind a hand-off has.
+    const mixed = { content: [], structuredContent: { entries: [], ...recorded('Q-0007').structuredContent } };
+    expect(toolView({ ...call, state: 'output-available', output: mixed }, 'en').handOff).toBeNull();
   });
 });
 
@@ -185,9 +281,10 @@ describe('toolPartOf', () => {
 });
 
 // Where the hand-off note goes in a message, and which note (`kind`): the index of the part it goes under, with what
-// Strapi recorded, or null for no note. A hand-off that went through gets the recorded note. When nothing was recorded
-// the plain one shows, so a customer can always reach a person: under a search that found nothing (the model may skip
-// the call, as the local model does), or under a hand-off that failed.
+// Strapi recorded, or null for no note. A hand-off that went through gets the recorded note: the model's call, or the
+// one the app made itself for a search that found nothing (its result's `handOff`). When nothing was recorded the plain
+// one shows, so a customer can always reach a person: under a search that found nothing (the app's own hand-off failed,
+// or Strapi has no such tool for this token), or under a hand-off that failed.
 describe('handOffAt', () => {
   type Part = { type: string; [key: string]: unknown };
   /** A hand_off_to_staff call as the page holds it: a Maison tool, so a dynamic-tool part, whose output is the MCP result. */
@@ -210,6 +307,8 @@ describe('handOffAt', () => {
   const found = (...titles: string[]) => search('output-available', { content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
   const foundNothing = found();
   const foundAnAnswer = found('How do I care for the leather?');
+  /** A search that found nothing, and the app handed the question to staff itself: it carries what Strapi recorded. */
+  const handedOffBySearch = (reference = 'Q-4821', question = 'Can it hold a watch?') => search('output-available', searchedAndHandedOff(reference, question));
   /** A result Maison refused (isError), as the MCP client passes it on. */
   const refusal = { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'invalid_input', message: 'Check the query.', hint: 'Use 1 to 300 characters.' } }) }] };
   const words: Part = { type: 'text', text: 'I could not find a reliable answer, so I have passed your question to the advisors.' };
@@ -351,5 +450,65 @@ describe('handOffAt', () => {
     expect(handOffAt([step, words, { ...typed, output: { content: [], structuredContent: { entries: [{ title: 'A' }] } } }])).toBeNull();
     const typedHandOff: Part = { type: 'tool-hand_off_to_staff', state: 'output-available', input: { question: 'Can it hold a watch?' }, output: recorded('Q-4821') };
     expect(handOffAt([step, typed, words, typedHandOff])).toEqual(recordedAt(3));
+  });
+
+  // The app records the question itself when a search finds nothing: the note is under that search, with what the result says.
+  describe('a search that the app handed the question to staff for', () => {
+    it('puts the recorded note under the search, with the reference and the question its result carries', () => {
+      expect(handOffAt([handedOffBySearch()])).toEqual(recordedAt(0));
+      expect(handOffAt([handedOffBySearch('Q-0007', 'Is it waterproof?')])).toEqual(recordedAt(0, 'Q-0007', 'Is it waterproof?'));
+      expect(handOffAt([step, handedOffBySearch(), words])).toEqual(recordedAt(1)); // under the search, above the model's words
+      // The question is trimmed, as a hand-off's is: it is typed into the LINE chat.
+      expect(handOffAt([handedOffBySearch('Q-0007', '  Is it waterproof?\n')])).toEqual(recordedAt(0, 'Q-0007', 'Is it waterproof?'));
+    });
+
+    it("is a recorded note, not the empty search's plain one: the plain note is only for a search nothing was recorded for", () => {
+      const place = handOffAt([handedOffBySearch()]);
+      expect(place?.kind).toBe('recorded');
+      expect(place?.recorded).not.toBeNull();
+      expect(handOffAt([foundNothing])?.kind).toBe('empty_search'); // the same search without the hand-off
+    });
+
+    it('counts a static part too, and every part toward the index', () => {
+      const typed: Part = { type: 'tool-search_knowledge', state: 'output-available', output: searchedAndHandedOff() };
+      expect(handOffAt([step, words, typed])).toEqual(recordedAt(2));
+    });
+
+    it('wins over the empty-search fallback, whichever search came first: one note, under the first hand-off that went through', () => {
+      expect(handOffAt([handedOffBySearch(), foundNothing])).toEqual(recordedAt(0));
+      expect(handOffAt([foundNothing, handedOffBySearch()])).toEqual(recordedAt(1));
+      expect(handOffAt([foundNothing, step, handedOffBySearch('Q-0002'), step, foundNothing])).toEqual(recordedAt(2, 'Q-0002'));
+      // The first one of several, like a hand-off the model made.
+      expect(handOffAt([handedOffBySearch('Q-0001'), step, handedOffBySearch('Q-0002')])).toEqual(recordedAt(0, 'Q-0001'));
+    });
+
+    it("goes with the first hand-off that went through, the search's or the model's, whatever the searches found", () => {
+      expect(handOffAt([handedOffBySearch('Q-0001'), handOff('output-available', recorded('Q-0002'))])).toEqual(recordedAt(0, 'Q-0001'));
+      expect(handOffAt([handOff('output-available', recorded('Q-0002')), handedOffBySearch('Q-0001')])).toEqual(recordedAt(0, 'Q-0002'));
+      expect(handOffAt([handedOffBySearch(), foundAnAnswer])).toEqual(recordedAt(0)); // a later search found entries: the question is recorded all the same
+      expect(handOffAt([foundAnAnswer, handedOffBySearch()])).toEqual(recordedAt(1));
+    });
+
+    it("keeps the note when the model's own hand-off after it is running, failed or was refused, and when searches before it failed", () => {
+      for (const state of ['input-streaming', 'input-available']) expect(handOffAt([handedOffBySearch(), handOff(state)]), state).toEqual(recordedAt(0)); // no flicker, no second note
+      expect(handOffAt([handedOffBySearch(), handOff('output-error')])).toEqual(recordedAt(0));
+      expect(handOffAt([handedOffBySearch(), handOff('output-available', refusal)])).toEqual(recordedAt(0));
+      expect(handOffAt([search('output-error'), search('output-available', refusal), handedOffBySearch()])).toEqual(recordedAt(2));
+    });
+
+    it('shows no note of this kind while the search runs, when it broke on the way or was refused, or when its hand-off has no reference', () => {
+      expect(handOffAt([search('input-available', searchedAndHandedOff())])).toBeNull();
+      expect(handOffAt([search('output-error', searchedAndHandedOff())])).toBeNull();
+      expect(handOffAt([search('output-available', { ...searchedAndHandedOff(), isError: true })])).toBeNull();
+      // Without a reference nothing says Strapi has the question, so it is the plain search: the fallback, as for any empty one.
+      expect(handOffAt([handedOffBySearch('')])).toEqual(emptySearchAt(0));
+      expect(handOffAt([search('output-available', { content: [], structuredContent: { locale: 'en', entries: [], handOff: { reference: 4821 } } })])).toEqual(emptySearchAt(0));
+    });
+
+    it("takes nothing from a hand-off of the same kind on another tool's result", () => {
+      const products: Part = { type: 'dynamic-tool', toolName: 'search_products', state: 'output-available', output: { content: [], structuredContent: { products: [], handOff: { reference: 'Q-4821', question: 'x' } } } };
+      expect(handOffAt([products])).toBeNull();
+      expect(handOffAt([products, foundNothing])).toEqual(emptySearchAt(1));
+    });
   });
 });

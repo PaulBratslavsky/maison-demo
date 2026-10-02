@@ -1,11 +1,12 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
+import { createMCPClient, type MCPTransport } from '@ai-sdk/mcp';
 import { APICallError, RetryError, dynamicTool, jsonSchema, simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf } from './concierge';
+import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, withAutoHandOff } from './concierge';
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
 
@@ -589,6 +590,531 @@ describe('handleConcierge', () => {
     });
     const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient }));
     expect(response.status).toBe(502);
+  });
+});
+
+// When the knowledge search finds nothing, the app's server hands the question to staff itself (withAutoHandOff in
+// lib/concierge.ts), so the record doesn't depend on the model calling hand_off_to_staff, which the local model skipped.
+describe('a knowledge search that finds nothing', () => {
+  const QUESTION = 'Can it hold a watch?';
+  /** The sentence the model is given with the search's result, word for word. */
+  const told = (reference: string) => `No entry answers this, so the question was passed to Maison's client advisors as ${reference}. Don't call hand_off_to_staff for it.`;
+  const entry = { title: 'How do I care for the leather?', answer: 'Wipe it with a soft dry cloth.', category: 'care', productSlugs: [] };
+
+  /** What Strapi answers to a search, as the MCP client passes it on: the entries it found, as text and as structuredContent. */
+  const searched = (locale: string, ...entries: unknown[]) => {
+    const data = { locale, entries };
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+  };
+  /** What Strapi answers to a hand-off it recorded. */
+  const recordedAs = (reference: string, product: { slug: string; name: string } | null = null) => {
+    const data = { question: { reference, status: 'open', product } };
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+  };
+  /** What Strapi answers to a call it refuses (isError). */
+  const refusal = (code: string) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message: 'Refused.', hint: 'Do not try again.' } }) }] });
+  const broken = () => {
+    throw new TypeError('fetch failed');
+  };
+
+  const say = (text: string, id = 'u1') => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  const assistant = (text: string, id = 'a1') => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
+  type Call = { toolName: string; input: unknown };
+  const searchFor = (input: unknown = { query: 'watch' }): Call => ({ toolName: 'search_knowledge', input });
+  const handOffFor = (input: unknown = { question: QUESTION, reason: 'no_answer' }): Call => ({ toolName: 'hand_off_to_staff', input });
+
+  /**
+   * search_knowledge and hand_off_to_staff as mcp.tools() gives them: dynamic tools with a JSON schema and no validation
+   * of their own, answering as Strapi's plugin does. `received` is every input their execute gets, in order. A search
+   * finds nothing unless `search` says otherwise, and a hand-off records the question under the next reference, Q-0001,
+   * Q-0002 and so on, unless `handOff` says otherwise.
+   */
+  const strapi = ({ search, handOff }: { search?: (input: any) => unknown; handOff?: (input: any, reference: string) => unknown } = {}) => {
+    const received: Array<{ name: string; input: any }> = [];
+    let handOffs = 0;
+    const maisonTool = (name: string, properties: Record<string, unknown>, answer: (input: any) => unknown) =>
+      dynamicTool({
+        description: name,
+        inputSchema: jsonSchema({ type: 'object', properties, additionalProperties: false }),
+        execute: async (input) => {
+          received.push({ name, input });
+          return answer(input);
+        },
+      });
+    const tools = {
+      search_knowledge: maisonTool(
+        'search_knowledge',
+        { query: { type: 'string' }, productSlugs: { type: 'array', items: { type: 'string' } }, locale: { type: 'string', enum: ['ja', 'en'] } },
+        (input) => (search ? search(input) : searched(input?.locale ?? 'en'))
+      ),
+      hand_off_to_staff: maisonTool(
+        'hand_off_to_staff',
+        { question: { type: 'string' }, reason: { type: 'string', enum: ['no_answer', 'asked_for_person'] }, productSlug: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } },
+        (input) => {
+          const reference = `Q-${String((handOffs += 1)).padStart(4, '0')}`;
+          return handOff ? handOff(input, reference) : recordedAs(reference);
+        }
+      ),
+    };
+    return { tools, received, createMcpClient: clientOf(tools) };
+  };
+  /** An MCP client that offers `tools` and nothing else. */
+  const clientOf = (tools: Record<string, unknown>) => vi.fn(async () => ({ tools: async () => tools, close: vi.fn(async () => {}) }));
+  /** What the hand-off tool was sent, call by call. */
+  const handOffsOf = (received: Array<{ name: string; input: any }>) => received.filter(({ name }) => name === 'hand_off_to_staff').map(({ input }) => input);
+
+  /** A model that makes each step's tool calls (the calls of one step go out together), one step after another, and then answers. */
+  const makesCalls = (...steps: Call[][]) =>
+    new MockLanguageModelV4({
+      doStream: [
+        ...steps.map((calls, step) => ({
+          stream: simulateReadableStream({
+            chunks: [
+              ...calls.map(({ toolName, input }, index) => ({ type: 'tool-call' as const, toolCallId: `call-${step + 1}-${index + 1}`, toolName, input: JSON.stringify(input) })),
+              { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage },
+            ],
+          }),
+        })),
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start' as const, id: 't1' },
+              { type: 'text-delta' as const, id: 't1', delta: 'Noted.' },
+              { type: 'text-end' as const, id: 't1' },
+              { type: 'finish' as const, finishReason: { unified: 'stop' as const, raw: undefined }, usage },
+            ],
+          }),
+        },
+      ],
+    });
+
+  /** One request through the route, as the app sends it: the stream's events. */
+  const converse = async (body: Record<string, unknown>, { createMcpClient, model }: { createMcpClient: unknown; model: MockLanguageModelV4 }) => {
+    const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model }));
+    expect(response.status).toBe(200);
+    return eventsOf(await response.text());
+  };
+  /** What each tool call returned, in the order the results arrived. */
+  const outputsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'tool-output-available').map((event) => event.output);
+  /** The question's reference in a result: the search's `handOff`, or the hand-off's own `question`. */
+  const referenceIn = (output: any): string | undefined => output?.structuredContent?.handOff?.reference ?? output?.structuredContent?.question?.reference;
+
+  it("hands the question to staff itself: once, with the customer's last message as the question, reason no_answer, the page's piece and the chat's language", async () => {
+    const { received, createMcpClient } = strapi();
+    const messages = [say('Hello'), assistant('Good afternoon.'), say(`  ${QUESTION} \n`, 'u2')];
+    const model = makesCalls([searchFor({ query: 'watch storage', productSlugs: ['weekender-50'] })]);
+    await converse({ messages, locale: 'en', product: 'jewelry-coffret' }, { createMcpClient, model });
+    expect(received).toStrictEqual([
+      { name: 'search_knowledge', input: { query: 'watch storage', productSlugs: ['weekender-50'], locale: 'en' } },
+      { name: 'hand_off_to_staff', input: { question: QUESTION, reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en' } },
+    ]);
+  });
+
+  it("sends the chat's language with it, which is the question's language", async () => {
+    const { received, createMcpClient } = strapi();
+    const question = 'これは腕時計を入れられますか？';
+    await converse({ messages: [say(question)], locale: 'ja' }, { createMcpClient, model: makesCalls([searchFor()]) });
+    expect(handOffsOf(received)).toStrictEqual([{ question, reason: 'no_answer', locale: 'ja' }]);
+  });
+
+  it("names the piece it is about: the page's piece, else the search's first product, else none", async () => {
+    const cases = [
+      { piece: 'jewelry-coffret', productSlugs: ['weekender-50', 'voyage-trunk'], slug: 'jewelry-coffret' },
+      { piece: 'jewelry-coffret', productSlugs: undefined, slug: 'jewelry-coffret' },
+      { piece: undefined, productSlugs: ['weekender-50', 'voyage-trunk'], slug: 'weekender-50' },
+      { piece: '../etc', productSlugs: ['weekender-50'], slug: 'weekender-50' }, // not a slug: the page's value is ignored
+      { piece: undefined, productSlugs: [], slug: undefined },
+      { piece: undefined, productSlugs: undefined, slug: undefined },
+    ];
+    for (const { piece, productSlugs, slug } of cases) {
+      const { received, createMcpClient } = strapi();
+      const model = makesCalls([searchFor({ query: 'watch', ...(productSlugs ? { productSlugs } : {}) })]);
+      await converse({ messages: [say(QUESTION)], locale: 'en', product: piece }, { createMcpClient, model });
+      // Left out when there's none, not sent as undefined or "".
+      expect(handOffsOf(received), JSON.stringify({ piece, productSlugs })).toStrictEqual([{ question: QUESTION, reason: 'no_answer', ...(slug ? { productSlug: slug } : {}), locale: 'en' }]);
+    }
+  });
+
+  it("adds what Strapi recorded to the search's result, and a sentence for the model, and changes nothing else in it", async () => {
+    const product = { slug: 'jewelry-coffret', name: 'Jewelry Coffret' };
+    const { createMcpClient } = strapi({ handOff: (_input, reference) => recordedAs(reference, product) });
+    const events = await converse({ messages: [say(`  ${QUESTION}  `)], locale: 'en', product: 'jewelry-coffret' }, { createMcpClient, model: makesCalls([searchFor()]) });
+    expect(outputsOf(events)).toStrictEqual([
+      {
+        content: [{ type: 'text', text: JSON.stringify({ locale: 'en', entries: [] }) }, { type: 'text', text: told('Q-0001') }],
+        // The question is the text the app sent, and the piece is what Strapi answered.
+        structuredContent: { locale: 'en', entries: [], handOff: { reference: 'Q-0001', question: QUESTION, product } },
+      },
+    ]);
+  });
+
+  it("has a piece of null when Strapi's answer names none, and takes Strapi's reference as it is", async () => {
+    const { createMcpClient } = strapi({ handOff: () => recordedAs('Q-9X7', null) });
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()]) });
+    const [output] = outputsOf(events);
+    expect(output.structuredContent.handOff).toStrictEqual({ reference: 'Q-9X7', question: QUESTION, product: null });
+    expect(output.content.at(-1)).toStrictEqual({ type: 'text', text: told('Q-9X7') });
+  });
+
+  it('works on the tools the real MCP client gives, and the model is told what the app did, in this reply and the next', async () => {
+    // A Strapi in memory that speaks MCP, with the real client of @ai-sdk/mcp in front of it: its tools are the ones the app gets.
+    const calls: Array<{ name: string; arguments: any }> = [];
+    const product = { slug: 'jewelry-coffret', name: 'Jewelry Coffret' };
+    const properties = { locale: { type: 'string', enum: ['ja', 'en'] } };
+    const definitions = [
+      { name: 'search_knowledge', description: 'Searches what Maison has written down.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, productSlugs: { type: 'array', items: { type: 'string' } }, ...properties } } },
+      { name: 'hand_off_to_staff', description: "Hands the customer's question to Maison's client advisors.", inputSchema: { type: 'object', properties: { question: { type: 'string' }, reason: { type: 'string' }, productSlug: { type: 'string' }, ...properties } } },
+    ];
+    const answers: Record<string, (args: any) => unknown> = { search_knowledge: (args) => searched(args.locale), hand_off_to_staff: () => recordedAs('Q-4821', product) };
+    const transport: MCPTransport = {
+      async start() {},
+      async close() {},
+      async send(message) {
+        if (!('method' in message) || !('id' in message)) return; // a notification has no answer
+        const { id, method } = message;
+        const params = (message.params ?? {}) as Record<string, any>;
+        if (method === 'tools/call') calls.push({ name: params.name, arguments: params.arguments });
+        const result =
+          method === 'initialize'
+            ? { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'strapi', version: '1.0.0' } }
+            : method === 'tools/list'
+              ? { tools: definitions }
+              : answers[params.name](params.arguments);
+        queueMicrotask(() => transport.onmessage?.({ jsonrpc: '2.0', id, result } as Parameters<NonNullable<MCPTransport['onmessage']>>[0]));
+      },
+    };
+    const createMcpClient = vi.fn(async () => createMCPClient({ transport }));
+    const model = makesCalls([searchFor({ query: QUESTION })]);
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en', product: 'jewelry-coffret' }, { createMcpClient, model });
+
+    // Strapi was asked to record the question once, as the app's own call.
+    expect(calls.filter((call) => call.name === 'hand_off_to_staff')).toStrictEqual([
+      { name: 'hand_off_to_staff', arguments: { question: QUESTION, reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en' } },
+    ]);
+    // The chat's stream carries what the page needs, ...
+    const [output] = outputsOf(events);
+    expect(output.structuredContent.handOff).toStrictEqual({ reference: 'Q-4821', question: QUESTION, product });
+    // ... and the model's next step has the sentence in the result, shaped as MCP tools are (toModelOutput), after the entries it was given.
+    const results = model.doStreamCalls[1].prompt.flatMap((message) => (message.role === 'tool' ? message.content : []));
+    expect(results).toHaveLength(1);
+    const shown = results[0].type === 'tool-result' && results[0].output.type === 'content' ? results[0].output.value : [];
+    expect(shown.map((part) => (part.type === 'text' ? part.text : ''))).toStrictEqual([JSON.stringify({ locale: 'en', entries: [] }), told('Q-4821')]);
+
+    // The next turn comes back with that result in the conversation: the model is shown the sentence again, as the tool shapes it.
+    const next = makesCalls();
+    const earlier = [
+      say(QUESTION),
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'dynamic-tool', toolName: 'search_knowledge', toolCallId: 'call-1-1', state: 'output-available', input: { query: QUESTION }, output }, { type: 'text', text: 'Noted.' }],
+      },
+      say('Thank you.', 'u2'),
+    ];
+    await converse({ messages: earlier, locale: 'en' }, { createMcpClient, model: next });
+    expect(JSON.stringify(next.doStreamCalls[0].prompt)).toContain(told('Q-4821'));
+  });
+
+  it("doesn't hand off when the search found an entry, and leaves its result as it is", async () => {
+    const { received, createMcpClient } = strapi({ search: (input) => searched(input.locale, entry) });
+    const events = await converse({ messages: [say('How do I care for the leather?')], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()]) });
+    expect(handOffsOf(received)).toEqual([]);
+    expect(outputsOf(events)).toStrictEqual([searched('en', entry)]);
+  });
+
+  it("doesn't hand off when the search failed, was refused, or can't be read as finding nothing", async () => {
+    const answers: Array<[string, () => unknown]> = [
+      ['refused', () => refusal('invalid_input')],
+      ['broke on the way', broken],
+      ['an error result with an empty list', () => ({ isError: true, content: [], structuredContent: { locale: 'en', entries: [] } })],
+      ['no structuredContent', () => ({ content: [{ type: 'text', text: '{"entries":[]}' }] })],
+      ['no entries', () => ({ content: [], structuredContent: { locale: 'en' } })],
+      ['entries that is no list', () => ({ content: [], structuredContent: { locale: 'en', entries: null } })],
+    ];
+    for (const [what, search] of answers) {
+      const { received, createMcpClient } = strapi({ search });
+      const model = makesCalls([searchFor()]);
+      const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model });
+      expect(handOffsOf(received), what).toEqual([]);
+      expect(JSON.stringify(model.doStreamCalls[1].prompt), what).not.toContain('No entry answers this');
+      // Whatever came back is what the chat shows: nothing was added to it.
+      const [output] = outputsOf(events);
+      expect(output === undefined || !JSON.stringify(output).includes('handOff'), what).toBe(true);
+    }
+  });
+
+  it("leaves the search's result as it is when the hand-off fails: Strapi refuses it, it breaks, or the answer has no reference", async () => {
+    // Nothing in the chat says why the question wasn't recorded, so the log does, without the question.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const failures: Array<[string, () => unknown, string]> = [
+        ['refused', () => refusal('too_many_open_questions'), 'too_many_open_questions'],
+        ['broke on the way', broken, 'fetch failed'],
+        ['no reference', () => ({ content: [], structuredContent: { question: { status: 'open', product: null } } }), 'no reference'],
+        ['an empty reference', () => ({ content: [], structuredContent: { question: { reference: '', status: 'open', product: null } } }), 'no reference'],
+        ['a reference that is no string', () => ({ content: [], structuredContent: { question: { reference: 4821, status: 'open', product: null } } }), 'no reference'],
+        ['no question', () => ({ content: [], structuredContent: {} }), 'no reference'],
+        ['no structuredContent', () => ({ content: [{ type: 'text', text: '{}' }] }), 'no reference'],
+        ['an error result that has a question', () => ({ ...recordedAs('Q-4821'), isError: true }), 'Q-4821'], // a refusal is logged as Strapi gave it
+      ];
+      for (const [what, handOff, logged] of failures) {
+        warn.mockClear();
+        const { received, createMcpClient } = strapi({ handOff });
+        const model = makesCalls([searchFor()]);
+        const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model });
+        expect(handOffsOf(received), `${what}: it tried once`).toHaveLength(1);
+        // The result is the one Strapi gave, so the chat's fallback note shows, and the model is told nothing of a hand-off.
+        expect(outputsOf(events), what).toStrictEqual([searched('en')]);
+        expect(JSON.stringify(model.doStreamCalls[1].prompt), what).not.toContain('No entry answers this');
+        expect(warn, what).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0]), what).toContain('[concierge]');
+        expect(String(warn.mock.calls[0][0]), what).toContain(logged);
+        expect(String(warn.mock.calls[0][0]), `${what}: the log has no question in it`).not.toContain(QUESTION);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('says nothing in the log when the hand-off went through, or no hand-off was made', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const search of [undefined, (input: any) => searched(input.locale, entry)]) {
+        const { createMcpClient } = strapi({ search });
+        await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()], [handOffFor()]) });
+      }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('answers an explicit hand_off_to_staff after the automatic one with the same question and no second call', async () => {
+    const product = { slug: 'jewelry-coffret', name: 'Jewelry Coffret' };
+    const { received, createMcpClient } = strapi({ handOff: (_input, reference) => recordedAs(reference, product) });
+    // What the model does when it follows rule 9 after all: the same question, in its own words.
+    const model = makesCalls([searchFor()], [handOffFor({ question: 'Can a watch fit in it?', reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en' })]);
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en', product: 'jewelry-coffret' }, { createMcpClient, model });
+    expect(handOffsOf(received)).toHaveLength(1);
+    const [search, explicit] = outputsOf(events);
+    expect(referenceIn(search)).toBe('Q-0001');
+    // A success, in the shape Strapi's own answer has: content and structuredContent.
+    expect(explicit).toStrictEqual(recordedAs('Q-0001', product));
+  });
+
+  it('gives the same answer to every explicit hand-off after it, whatever it asks, still with no call to Strapi', async () => {
+    const { received, createMcpClient } = strapi();
+    const model = makesCalls([searchFor()], [handOffFor({ question: 'And a ring?', reason: 'no_answer' })], [handOffFor({ question: 'A person, please.', reason: 'asked_for_person' })]);
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model });
+    expect(handOffsOf(received)).toHaveLength(1);
+    expect(outputsOf(events).map(referenceIn)).toEqual(['Q-0001', 'Q-0001', 'Q-0001']);
+  });
+
+  it("goes to Strapi with an explicit hand_off_to_staff when no hand-off has happened, and an empty search after it hands off nothing more", async () => {
+    const { received, createMcpClient } = strapi();
+    const model = makesCalls([handOffFor({ question: 'A person, please.', reason: 'asked_for_person' })], [searchFor()]);
+    const events = await converse({ messages: [say('A person, please.')], locale: 'en' }, { createMcpClient, model });
+    // The model's own call went through, and was the request's one hand-off.
+    expect(handOffsOf(received)).toStrictEqual([{ question: 'A person, please.', reason: 'asked_for_person', locale: 'en' }]);
+    const [explicit, search] = outputsOf(events);
+    expect(explicit).toStrictEqual(recordedAs('Q-0001'));
+    expect(search).toStrictEqual(searched('en'));
+  });
+
+  it("doesn't count a hand-off that failed: the model's own call after it still reaches Strapi", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); // the app's own hand-off is refused, and logged
+    try {
+      const { received, createMcpClient } = strapi({ handOff: (_input, reference) => (reference === 'Q-0001' ? refusal('too_many_open_questions') : recordedAs(reference)) });
+      const model = makesCalls([searchFor()], [handOffFor()]);
+      const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model });
+      expect(handOffsOf(received)).toHaveLength(2); // the app's, which Strapi refused, and the model's
+      const [search, explicit] = outputsOf(events);
+      expect(search).toStrictEqual(searched('en'));
+      expect(explicit).toStrictEqual(recordedAs('Q-0002'));
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("doesn't let a hand-off that broke on the way stop the next one: the model's call or the app's still goes to Strapi", async () => {
+    const breaksFirst = (_input: unknown, reference: string) => {
+      if (reference === 'Q-0001') throw new TypeError('fetch failed');
+      return recordedAs(reference);
+    };
+    // The model's own call broke, and its second try goes through, and an empty search after it hands off nothing more.
+    const again = strapi({ handOff: breaksFirst });
+    const tried = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient: again.createMcpClient, model: makesCalls([handOffFor()], [handOffFor()], [searchFor()]) });
+    expect(handOffsOf(again.received)).toHaveLength(2);
+    expect(outputsOf(tried)).toStrictEqual([recordedAs('Q-0002'), searched('en')]);
+    // The model's call broke, and then a search that found nothing: the app records the question.
+    const later = strapi({ handOff: breaksFirst });
+    const searchedAfter = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient: later.createMcpClient, model: makesCalls([handOffFor()], [searchFor()]) });
+    expect(handOffsOf(later.received)).toHaveLength(2);
+    expect(outputsOf(searchedAfter).map(referenceIn)).toEqual(['Q-0002']);
+  });
+
+  it('hands off once in each request: a hand-off is never shared with another, one after the other or at the same time', async () => {
+    const { received, createMcpClient } = strapi(); // the same tools for every request, as a cached client would give them
+    const request = () => converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()], [handOffFor()]) });
+    const first = await request();
+    const second = await request();
+    expect(handOffsOf(received)).toHaveLength(2);
+    // Each request's search and explicit call agree with each other, and not with the other request.
+    expect(outputsOf(first).map(referenceIn)).toEqual(['Q-0001', 'Q-0001']);
+    expect(outputsOf(second).map(referenceIn)).toEqual(['Q-0002', 'Q-0002']);
+    const together = await Promise.all([request(), request(), request()]);
+    expect(handOffsOf(received)).toHaveLength(5);
+    expect(new Set(together.flatMap((events) => outputsOf(events).map(referenceIn))).size).toBe(3);
+    for (const events of together) expect(new Set(outputsOf(events).map(referenceIn)).size).toBe(1);
+  });
+
+  it('hands off once when the model searches and hands off in the same step: its two calls run together', async () => {
+    const { received, createMcpClient } = strapi();
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor(), handOffFor()]) });
+    expect(handOffsOf(received)).toHaveLength(1);
+    // Whichever call reached Strapi first recorded it, and the other was given the same question.
+    const references = outputsOf(events).map(referenceIn).filter(Boolean);
+    expect(references.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(references)).toEqual(new Set(['Q-0001']));
+  });
+
+  it('leaves the search alone when the token has no hand_off_to_staff, and the hand-off alone when it has no search_knowledge', async () => {
+    const { tools, received } = strapi();
+    const model = makesCalls([searchFor()]);
+    const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient: clientOf({ search_knowledge: tools.search_knowledge }), model });
+    expect(received.map(({ name }) => name)).toEqual(['search_knowledge']);
+    expect(outputsOf(events)).toStrictEqual([searched('en')]);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_knowledge']);
+
+    // Without the search, the hand-off is Strapi's own tool: each call reaches it, as before.
+    const other = strapi();
+    const twice = makesCalls([handOffFor()], [handOffFor()]);
+    await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient: clientOf({ hand_off_to_staff: other.tools.hand_off_to_staff }), model: twice });
+    expect(handOffsOf(other.received)).toHaveLength(2);
+  });
+
+  it("takes the customer's last message as the question: its text parts, trimmed, and cut to the 1000 characters the tool takes, never through half an emoji", async () => {
+    const part = (text: string) => ({ type: 'text', text });
+    const user = (...parts: unknown[]) => ({ id: 'u1', role: 'user', parts });
+    const cases: Array<[string, unknown[], string]> = [
+      ['trimmed', [say('  Can it hold a watch? \n\n')], 'Can it hold a watch?'],
+      ['the last of the customer’s messages', [say('Hello'), say('Is it waterproof?', 'u2'), assistant('Let me look.')], 'Is it waterproof?'],
+      ['a message of several parts', [user(part('Can it hold'), part('a watch?'))], 'Can it hold\na watch?'],
+      ['cut at 1000', [user(part('a'.repeat(600)), part('b'.repeat(600)))], `${'a'.repeat(600)}\n${'b'.repeat(399)}`],
+      ['cut at 1000 in Japanese', [user(part('あ'.repeat(1000)), part('い'))], 'あ'.repeat(1000)],
+      ['not through half an emoji', [user(part('a'.repeat(998)), part('😀😀'))], 'a'.repeat(998)],
+      ['with the emoji whole when it fits', [user(part('a'.repeat(997)), part('😀'))], `${'a'.repeat(997)}\n😀`],
+    ];
+    for (const [what, messages, question] of cases) {
+      const { received, createMcpClient } = strapi();
+      await converse({ messages, locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()]) });
+      const [sent] = handOffsOf(received);
+      expect(sent?.question, what).toBe(question);
+      expect(sent?.question.length, what).toBeLessThanOrEqual(1000);
+    }
+  });
+
+  it("doesn't hand off a question with nothing in it: Strapi would refuse it", async () => {
+    const { received, createMcpClient } = strapi();
+    const events = await converse({ messages: [say(' \n ')], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()]) });
+    expect(handOffsOf(received)).toEqual([]);
+    expect(outputsOf(events)).toStrictEqual([searched('en')]);
+  });
+});
+
+describe('withAutoHandOff', () => {
+  const context = { question: 'Can it hold a watch?', piece: null, locale: 'en' } as const;
+  const options = { toolCallId: 'call-1', messages: [] } as any;
+  const searchResult = { content: [{ type: 'text', text: '{"locale":"en","entries":[]}' }], structuredContent: { locale: 'en', entries: [] } };
+  const recorded = (reference: string) => ({ content: [{ type: 'text', text: '{}' }], structuredContent: { question: { reference, status: 'open', product: null } } });
+  const maisonTool = (execute: (input: any) => unknown) => dynamicTool({ description: 'x', inputSchema: jsonSchema({ type: 'object', properties: {} }), execute: async (input) => execute(input), toModelOutput: () => ({ type: 'text', value: 'shaped' }) });
+
+  it('is the tools it was given when search_knowledge or hand_off_to_staff is missing, or has nothing to run', () => {
+    const search = maisonTool(() => searchResult);
+    const handOff = maisonTool(() => recorded('Q-1'));
+    const other = maisonTool(() => ({}));
+    for (const tools of [{}, { search_knowledge: search }, { hand_off_to_staff: handOff }, { search_products: other, hand_off_to_staff: handOff }, { search_knowledge: search, hand_off_to_staff: { ...handOff, execute: undefined } }]) {
+      expect(withAutoHandOff(tools as any, context)).toBe(tools);
+    }
+  });
+
+  it('wraps the two tools in new ones, keeping everything else about them, and leaves the tools it was given as they were', () => {
+    const search = maisonTool(() => searchResult);
+    const handOff = maisonTool(() => recorded('Q-1'));
+    const other = maisonTool(() => ({}));
+    const tools = { search_knowledge: search, hand_off_to_staff: handOff, search_products: other };
+    const wrapped = withAutoHandOff(tools, context) as typeof tools;
+    expect(Object.keys(wrapped).sort()).toEqual(['hand_off_to_staff', 'search_knowledge', 'search_products']);
+    expect(wrapped.search_products).toBe(other);
+    expect(tools).toEqual({ search_knowledge: search, hand_off_to_staff: handOff, search_products: other });
+    expect(tools.search_knowledge).toBe(search);
+    expect(tools.search_knowledge.execute).toBe(search.execute);
+    for (const name of ['search_knowledge', 'hand_off_to_staff'] as const) {
+      expect(wrapped[name]).not.toBe(tools[name]);
+      expect(wrapped[name].execute).not.toBe(tools[name].execute);
+      expect(wrapped[name].description).toBe(tools[name].description);
+      expect(wrapped[name].inputSchema).toBe(tools[name].inputSchema);
+      expect(wrapped[name].toModelOutput).toBe(tools[name].toModelOutput); // how the model is shown a result
+    }
+  });
+
+  it("keeps one hand-off for each call to it: two sets of wrapped tools over the same tools don't share one", async () => {
+    let handOffs = 0;
+    const tools = { search_knowledge: maisonTool(() => searchResult), hand_off_to_staff: maisonTool(() => recorded(`Q-${(handOffs += 1)}`)) };
+    const one = withAutoHandOff(tools, context) as any;
+    const two = withAutoHandOff(tools, context) as any;
+    expect((await one.search_knowledge.execute({}, options)).structuredContent.handOff.reference).toBe('Q-1');
+    expect((await two.search_knowledge.execute({}, options)).structuredContent.handOff.reference).toBe('Q-2');
+    expect((await one.hand_off_to_staff.execute({}, options)).structuredContent.question.reference).toBe('Q-1');
+    expect((await two.hand_off_to_staff.execute({}, options)).structuredContent.question.reference).toBe('Q-2');
+    expect(handOffs).toBe(2);
+  });
+
+  it("makes an explicit hand-off that arrives while the app's own is still with Strapi wait for it, and share its answer", async () => {
+    const answer = Promise.withResolvers<unknown>();
+    const received: unknown[] = [];
+    const tools = {
+      search_knowledge: maisonTool(() => searchResult),
+      hand_off_to_staff: maisonTool((input) => {
+        received.push(input);
+        return answer.promise;
+      }),
+    };
+    const wrapped = withAutoHandOff(tools, context) as any;
+    const search = wrapped.search_knowledge.execute({ query: 'watch' }, options);
+    await vi.waitFor(() => expect(received).toHaveLength(1)); // the app's call is out
+    const explicit = wrapped.hand_off_to_staff.execute({ question: 'Can a watch fit in it?', reason: 'no_answer' }, options);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(received).toHaveLength(1); // the model's call waits: it didn't go to Strapi too
+    answer.resolve(recorded('Q-7'));
+    expect((await search).structuredContent.handOff.reference).toBe('Q-7');
+    expect((await explicit).structuredContent.question.reference).toBe('Q-7');
+    expect(received).toHaveLength(1);
+  });
+
+  it("lets the model's own hand-off go to Strapi when the app's, which it waited for, failed", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const first = Promise.withResolvers<unknown>();
+    const received: unknown[] = [];
+    const tools = {
+      search_knowledge: maisonTool(() => searchResult),
+      hand_off_to_staff: maisonTool((input) => {
+        received.push(input);
+        return received.length === 1 ? first.promise : recorded('Q-8');
+      }),
+    };
+    const wrapped = withAutoHandOff(tools, context) as any;
+    const search = wrapped.search_knowledge.execute({ query: 'watch' }, options);
+    await vi.waitFor(() => expect(received).toHaveLength(1)); // the app's call is out
+    const explicit = wrapped.hand_off_to_staff.execute({ question: 'A person, please.', reason: 'asked_for_person' }, options);
+    first.resolve({ isError: true, content: [{ type: 'text', text: '{}' }] });
+    // Nothing was recorded, so the model's call is its own: it reaches Strapi, with what the model sent.
+    expect((await explicit).structuredContent.question.reference).toBe('Q-8');
+    expect(received).toEqual([{ question: 'Can it hold a watch?', reason: 'no_answer', locale: 'en' }, { question: 'A person, please.', reason: 'asked_for_person' }]);
+    expect(await search).toStrictEqual(searchResult); // the app's own hand-off failed: the result is as Strapi gave it
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
 

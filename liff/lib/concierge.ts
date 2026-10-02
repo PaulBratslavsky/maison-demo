@@ -24,6 +24,8 @@ import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
 export const SURFACE_HEADER = 'x-maison-surface';
 const MAX_MESSAGES = 20;
 const MAX_CHARS = 1000;
+/** The longest question hand_off_to_staff takes (its schema's limit), in UTF-16 units: how Strapi counts a string's length. */
+const MAX_QUESTION = 1000;
 const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 left a long search no room to answer
 /** How many days the calendar in the instructions covers, today first. */
 const CALENDAR_DAYS = 14;
@@ -179,6 +181,137 @@ export const withConversationLocale = async <TOOLS extends ToolSet>(tools: TOOLS
   return Object.fromEntries(entries) as TOOLS;
 };
 
+/**
+ * The customer's last message as the question for staff: its text parts, trimmed, and cut to what hand_off_to_staff
+ * takes, never through half of an emoji. Empty when it has no text.
+ */
+const lastQuestionOf = (messages: UIMessage[]): string => {
+  const text = messages.findLast((message) => message.role === 'user')?.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n') ?? '';
+  const trimmed = text.trim();
+  if (trimmed.length <= MAX_QUESTION) return trimmed;
+  const head = trimmed.slice(0, MAX_QUESTION);
+  return (/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head).trimEnd(); // the cut may have left a lone half of a pair
+};
+
+/** What the app records for staff when the knowledge search finds nothing (withAutoHandOff). */
+export interface AutoHandOffContext {
+  /** The customer's last message (lastQuestionOf): the question, as they wrote it. */
+  question: string;
+  /** The piece whose page the customer asked from (pieceSlugOf), or null. */
+  piece: string | null;
+  /** The chat's language: the question's. */
+  locale: 'ja' | 'en';
+}
+
+/** The question Strapi recorded, as hand_off_to_staff answers it. */
+interface RecordedQuestion {
+  reference: string;
+  status: 'open';
+  product: { slug: string; name: string } | null;
+}
+
+/** The question a hand_off_to_staff result says Strapi recorded: null for a refusal, and for a result with no reference. */
+const recordedQuestionOf = (result: unknown): RecordedQuestion | null => {
+  if (!isObject(result) || result.isError === true || !isObject(result.structuredContent)) return null;
+  const { question } = result.structuredContent;
+  if (!isObject(question) || typeof question.reference !== 'string' || question.reference === '') return null;
+  const { product } = question;
+  return {
+    reference: question.reference,
+    status: 'open',
+    product: isObject(product) && typeof product.slug === 'string' && typeof product.name === 'string' ? { slug: product.slug, name: product.name } : null,
+  };
+};
+
+/** hand_off_to_staff's own answer for a question that is already recorded, in the shape Strapi's tool gives it. */
+const recordedResult = (question: RecordedQuestion) => {
+  const data = { question };
+  return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+};
+
+/** What a hand-off that recorded nothing says, for the log: Strapi's refusal as it gave it, or that its answer has no reference. */
+const whyNothingWasRecorded = (answer: unknown): string => {
+  const item = isObject(answer) && answer.isError === true && Array.isArray(answer.content) ? answer.content.find((part) => isObject(part) && part.type === 'text') : undefined;
+  return isObject(item) && typeof item.text === 'string' ? item.text.slice(0, 300) : 'its answer has no reference';
+};
+
+/** Whether a search_knowledge result came back whole and found nothing: not a refusal, and its `entries` an empty list. */
+const foundNothing = (result: unknown): result is Record<string, unknown> & { structuredContent: Record<string, unknown> } =>
+  isObject(result) && result.isError !== true && isObject(result.structuredContent) && Array.isArray(result.structuredContent.entries) && result.structuredContent.entries.length === 0;
+
+/**
+ * Has the app's server record a question no entry answers for Maison's staff, whatever the model does. Rule 9 tells the
+ * model to call hand_off_to_staff when search_knowledge finds nothing, but the local model searched, found nothing,
+ * skipped the call and wrote that the question was with the advisors: nothing was recorded, so its words were false. So:
+ * - A search that comes back whole with no entries makes the call itself, for the customer's last message (their own
+ *   words, not the model's), reason "no_answer", about the page's piece or else the search's first product. When Strapi
+ *   records it, the search's result carries what it recorded (structuredContent.handOff, which the chat shows as the
+ *   hand-off note, lib/tool-view.ts) and a sentence that tells the model. When the call fails, the result is as Strapi
+ *   gave it and the chat shows its plain note. Nothing in the chat says why, so the log does.
+ * - hand_off_to_staff records once a request: after a question is recorded, by the model's call or the app's, a later
+ *   call is answered with it and doesn't reach Strapi. A call that failed doesn't count, so a retry does. The calls run
+ *   one at a time, so the model's call and the app's, made in the same step, can't both record.
+ * Each call to this function has a hand-off of its own, so none is shared between requests. The tools are returned as
+ * they are when either one is missing (a token without the permission).
+ */
+export const withAutoHandOff = <TOOLS extends ToolSet>(tools: TOOLS, context: AutoHandOffContext): TOOLS => {
+  const { search_knowledge: searchTool, hand_off_to_staff: handOffTool } = tools;
+  const runSearch = searchTool?.execute;
+  const runHandOff = handOffTool?.execute;
+  if (!searchTool || !handOffTool || !runSearch || !runHandOff) return tools;
+  type Options = Parameters<typeof runSearch>[1];
+
+  /** What Strapi recorded in this request, once something has. */
+  let recorded: RecordedQuestion | null = null;
+  let queue: Promise<unknown> = Promise.resolve();
+  /** Runs `task` once every one before it has finished, however it ended. */
+  const oneAtATime = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.then(task);
+    queue = run.catch(() => {});
+    return run;
+  };
+
+  const searchAndHandOff = async (input: unknown, options: Options) => {
+    const result = await runSearch(input, options);
+    if (!foundNothing(result) || context.question === '') return result;
+    return oneAtATime(async () => {
+      if (recorded) return result;
+      const productSlug = context.piece ?? (isObject(input) && Array.isArray(input.productSlugs) ? pieceSlugOf(input.productSlugs[0]) : null);
+      let answer: unknown;
+      try {
+        answer = await runHandOff({ question: context.question, reason: 'no_answer', ...(productSlug ? { productSlug } : {}), locale: context.locale }, options);
+      } catch (error) {
+        console.warn(`[concierge] The hand-off for a search that found nothing broke on the way: ${error instanceof Error ? error.message : String(error)}`);
+        return result;
+      }
+      const question = recordedQuestionOf(answer);
+      if (!question) {
+        console.warn(`[concierge] The hand-off for a search that found nothing recorded nothing: ${whyNothingWasRecorded(answer)}`);
+        return result;
+      }
+      recorded = question;
+      return {
+        ...result,
+        content: [
+          ...(Array.isArray(result.content) ? result.content : []),
+          { type: 'text', text: `No entry answers this, so the question was passed to Maison's client advisors as ${question.reference}. Don't call hand_off_to_staff for it.` },
+        ],
+        structuredContent: { ...result.structuredContent, handOff: { reference: question.reference, question: context.question, product: question.product } },
+      };
+    });
+  };
+
+  const handOffOnce = (input: unknown, options: Options) =>
+    oneAtATime(async () => {
+      if (recorded) return recordedResult(recorded);
+      const result = await runHandOff(input, options);
+      recorded = recordedQuestionOf(result);
+      return result;
+    });
+
+  return { ...tools, search_knowledge: { ...searchTool, execute: searchAndHandOff }, hand_off_to_staff: { ...handOffTool, execute: handOffOnce } } as TOOLS;
+};
+
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
 const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string; product?: unknown } | null => {
   try {
@@ -246,7 +379,9 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
 
   try {
     const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
-    const tools = { ...(await withConversationLocale(await mcp.tools(), locale)), resolve_date: resolveDateTool(locale, now) };
+    // The Maison tools, with the chat's locale, and with the hand-off an empty knowledge search makes on its own.
+    const maisonTools = withAutoHandOff(await withConversationLocale(await mcp.tools(), locale), { question: lastQuestionOf(messages), piece, locale });
+    const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now) };
     const result = streamText({
       model: deps.model,
       instructions: conciergeInstructions(locale, now, piece),

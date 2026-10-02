@@ -44,10 +44,11 @@ const mayHaveBooked = (part: ChatPart): boolean => {
  * still write.
  *
  * Nor when the chat shows the reply's hand-off note (handOffAt in lib/tool-view.ts), under a hand-off that went through
- * or, when the model skipped the call, under a search that found nothing: the note and the LINE chat button are the
- * answer, so a reply that ends there, with no words after it, isn't empty. The plain note under a hand-off that failed
- * is no answer: the failure may be a passing one, so "Try again" stays until words follow. With no note (a search that
- * found entries, a last search that failed or hasn't finished, or a hand-off that hasn't finished) nothing has answered.
+ * (the model's call, or the one the app made for a search that found nothing) or, when nothing was recorded, under a
+ * search that found nothing: the note and the LINE chat button are the answer, so a reply that ends there, with no words
+ * after it, isn't empty. The plain note under a hand-off that failed is no answer: the failure may be a passing one, so
+ * "Try again" stays until words follow. With no note (a search that found entries, a last search that failed or hasn't
+ * finished, or a hand-off that hasn't finished) nothing has answered.
  */
 export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boolean => {
   if (busy) return false;

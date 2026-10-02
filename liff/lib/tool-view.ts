@@ -48,32 +48,42 @@ const outcomeOf = (part: ToolPart) => {
 /** Whether a call is over, with its result or failed. One that isn't may still change what the chat shows. */
 const finished = (part: ToolPart) => part.state === 'output-available' || part.state === 'output-error';
 
-/** A question Strapi recorded for Maison's client advisors: the reference it gave, and the question as the model sent it. */
+/** A question Strapi recorded for Maison's client advisors: the reference it gave, and the question that was sent. */
 export interface RecordedHandOff {
   reference: string;
   question: string;
 }
 
 /**
- * What Strapi recorded, for a hand_off_to_staff that went through; null for any other call, one that is running, broke
- * on the way or was refused, and a result with no reference. The reference is read from the result's structuredContent
- * (question.reference) and nowhere else, and it is what says the question is with the advisors. The question is read from
- * what the model sent, which Strapi checked before it recorded it, without the spaces and line breaks around it: it is
- * typed into the LINE chat.
+ * What Strapi recorded, for a call that handed a question to the advisors and went through; null for any other call, one
+ * that is running, broke on the way or was refused, and a result with no reference. Two calls do:
+ * - hand_off_to_staff, the model's own: the reference is read from the result's structuredContent (question.reference)
+ *   and nowhere else, and the question from what the model sent, which Strapi checked before it recorded it.
+ * - search_knowledge, when it found nothing and the app's server handed the question to staff itself (withAutoHandOff in
+ *   lib/concierge.ts): the reference and the question are read from the result's structuredContent.handOff, which only
+ *   that code adds. The question is the customer's own message, as the app sent it to Strapi.
+ * The reference is what says the question is with the advisors. The question comes without the spaces and line breaks
+ * around it: it is typed into the LINE chat.
  */
 const recordedBy = (part: ToolPart): RecordedHandOff | null => {
-  if (part.toolName !== 'hand_off_to_staff' || part.state !== 'output-available') return null;
+  if (part.state !== 'output-available') return null;
+  const recordedAs = (reference: unknown, question: unknown): RecordedHandOff | null =>
+    typeof reference !== 'string' || reference === '' ? null : { reference, question: typeof question === 'string' ? question.trim() : '' };
+  if (part.toolName === 'search_knowledge') {
+    const handOff = outcomeOf(part).data?.handOff as { reference?: unknown; question?: unknown } | null | undefined;
+    return recordedAs(handOff?.reference, handOff?.question);
+  }
+  if (part.toolName !== 'hand_off_to_staff') return null;
   const reference = (outcomeOf(part).data?.question as { reference?: unknown } | null | undefined)?.reference;
-  if (typeof reference !== 'string' || reference === '') return null;
-  const question = (part.input as { question?: unknown } | null | undefined)?.question;
-  return { reference, question: typeof question === 'string' ? question.trim() : '' };
+  return recordedAs(reference, (part.input as { question?: unknown } | null | undefined)?.question);
 };
 
 /**
  * What a tool call shows in the chat, built from its structuredContent, never from the model's text: its line ("MCP ·
  * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "… ✕ boutique_closed"), the products a
- * search found, the appointment a request made, and the question a hand-off recorded (handOffAt decides where a
- * message's note goes).
+ * search found, the appointment a request made, and the question a hand-off recorded: the model's own call to
+ * hand_off_to_staff, or the app's, which a search that found nothing carries (handOffAt decides where a message's note
+ * goes).
  */
 export const toolView = (part: ToolPart, locale: Locale) => {
   const t = COPY[locale];
@@ -103,12 +113,16 @@ export type HandOffPlace =
 /**
  * Where a message's hand-off note goes, and which note it is: `index`, in its parts, of the part it goes under, and
  * `kind`; or null for no note. There is one note a message, and the first of these that applies decides:
- * - `recorded`: under the first hand_off_to_staff that went through, whatever the searches found. `recorded` is what
- *   Strapi recorded, so the note names the question's reference, and its button sends the question in the LINE chat.
+ * - `recorded`: under the first call that handed the question to the advisors and went through, whatever the searches
+ *   found: a hand_off_to_staff the model made, or a search_knowledge that found nothing and the app's server handed off
+ *   itself (its result's `handOff`, which is why the note shows at once, with no call after the search for it to wait
+ *   for). `recorded` is what Strapi recorded, so the note names the question's reference, and its button sends the
+ *   question in the LINE chat.
  * - No note while a hand_off_to_staff is still running. It may yet go through, and the plain note would show under the
  *   search or the failure and then be replaced by the recorded one.
- * - `empty_search`: under the last search_knowledge, if it came back whole with no entries. The local model often skips
- *   the hand-off call.
+ * - `empty_search`: under the last search_knowledge, if it came back whole with no entries and nothing was recorded for
+ *   it. The app's server hands such a question off itself, so this is when that failed (Strapi refused it, or the token
+ *   can't hand questions off) or couldn't be made.
  * - `failed_hand_off`: under the last hand_off_to_staff, which failed: it broke on the way, Maison refused it, or its
  *   result has no reference to show.
  * The last two are the plain note, with `recorded` null: it says only where the team answers, never that the question is

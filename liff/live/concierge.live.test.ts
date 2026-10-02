@@ -279,13 +279,17 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     const calls = callsIn(events);
     const called = calls.map((call) => call.name);
     expect(called, answer).toContain('search_knowledge');
-    // The chat shows a note when the model calls hand_off_to_staff, and when it skips the call or the call fails, after a search that found nothing.
+    // The chat shows a note after a search that found nothing: the app records the question itself (the search's result carries it), or the plain note when that fails.
     const note = handOffAt((await assistantMessageOf(events)).parts);
     expect(note, `the chat shows no hand-off note. Tools: ${called.join(', ')}. Answer: ${answer}`).not.toBeNull();
-    // The note says the question is with the advisors, under its reference, only when the call went through: Strapi's own reference, or none.
-    const recorded = calls.find((call) => call.name === 'hand_off_to_staff' && call.output?.structuredContent?.question?.reference);
-    expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(recorded?.output?.structuredContent.question.reference);
-    // With nothing recorded (the model skipped the call, or it failed), the reply must not promise contact: nobody has the question.
+    // The note says the question is with the advisors, under its reference, only when Strapi recorded it: its own reference, from the app's hand-off on the search or from the model's call, or none.
+    const recorded = calls.find(
+      (call) =>
+        (call.name === 'search_knowledge' && call.output?.structuredContent?.handOff?.reference) || (call.name === 'hand_off_to_staff' && call.output?.structuredContent?.question?.reference)
+    );
+    const reference = recorded?.output?.structuredContent.handOff?.reference ?? recorded?.output?.structuredContent.question?.reference;
+    expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(reference);
+    // With nothing recorded (the hand-off failed), the reply must not promise contact: nobody has the question.
     if (!note?.recorded) expect(answer, `it promises contact though nothing was recorded. Tools: ${called.join(', ')}`).not.toMatch(/will (contact|reach out|get back)/i);
   });
 });
