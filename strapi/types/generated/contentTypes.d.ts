@@ -1201,6 +1201,78 @@ export interface PluginMaisonProduct extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface PluginMaisonQuestion extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_questions';
+  info: {
+    description: "A question the concierge handed to Maison's client advisors. Staff see and answer it on the Maison page.";
+    displayName: 'Maison customer question';
+    pluralName: 'questions';
+    singularName: 'question';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    answer: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 2000;
+      }>;
+    answeredAt: Schema.Attribute.DateTime;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    customerName: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    knowledgeDocumentId: Schema.Attribute.String;
+    language: Schema.Attribute.Enumeration<['ja', 'en']> &
+      Schema.Attribute.DefaultTo<'ja'>;
+    lineDetail: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 500;
+      }>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.question'
+    > &
+      Schema.Attribute.Private;
+    productSlug: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    question: Schema.Attribute.Text &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 1000;
+      }>;
+    reason: Schema.Attribute.Enumeration<['no_answer', 'asked_for_person']> &
+      Schema.Attribute.DefaultTo<'no_answer'>;
+    reference: Schema.Attribute.String & Schema.Attribute.Required;
+    staffName: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 100;
+      }>;
+    status: Schema.Attribute.Enumeration<['open', 'taken', 'answered']> &
+      Schema.Attribute.DefaultTo<'open'>;
+    takenAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface PluginMaisonStockLevel extends Struct.CollectionTypeSchema {
   collectionName: 'maison_stock_levels';
   info: {
@@ -1806,6 +1878,7 @@ declare module '@strapi/strapi' {
       'plugin::maison.knowledge': PluginMaisonKnowledge;
       'plugin::maison.notification': PluginMaisonNotification;
       'plugin::maison.product': PluginMaisonProduct;
+      'plugin::maison.question': PluginMaisonQuestion;
       'plugin::maison.stock-level': PluginMaisonStockLevel;
       'plugin::review-workflows.workflow': PluginReviewWorkflowsWorkflow;
       'plugin::review-workflows.workflow-stage': PluginReviewWorkflowsWorkflowStage;
