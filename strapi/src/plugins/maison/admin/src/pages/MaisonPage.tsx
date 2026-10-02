@@ -10,7 +10,7 @@ import { QuestionsList } from '../components/QuestionsList';
 import { RequestCounts } from '../components/RequestCounts';
 import { RequestsBoard } from '../components/RequestsBoard';
 import { PERMISSIONS } from '../permissions';
-import { selectTab, tabCounts, tabLabel, visibleTabs } from '../tabs';
+import { PAGE_SUBTITLE, selectTab, tabCounts, tabLabel, visibleTabs } from '../tabs';
 import { useInquiriesSummary } from '../useInquiriesSummary';
 import { useOpenQuestions } from '../useOpenQuestions';
 import { useRequestsSummary } from '../useRequestsSummary';
@@ -44,7 +44,7 @@ const MaisonPage = () => {
   return (
     <Page.Main>
       <Page.Title>Maison</Page.Title>
-      <Layouts.Header title="Maison" subtitle="Boutique appointment requests and customer questions, as they arrive." />
+      <Layouts.Header title="Maison" subtitle={PAGE_SUBTITLE} />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={8}>
           {activeTab && (

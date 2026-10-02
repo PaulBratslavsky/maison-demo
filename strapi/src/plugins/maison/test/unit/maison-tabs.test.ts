@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
+import { PAGE_SUBTITLE, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
 import { COUNTS } from '../../admin/src/inquiries';
 import { isSummary } from '../../admin/src/inquiries';
 import { world } from './fake-inquiries';
@@ -31,6 +31,14 @@ describe('the tabs of the Maison page', () => {
   it('treat a flag useRBAC has not answered as no permission', () => {
     expect(visibleTabs({} as never)).toEqual([]);
     expect(visibleTabs({ canView: true } as never)).toEqual(['inquiries']);
+  });
+});
+
+describe('the page subtitle', () => {
+  // The subtitle sat on the page after the Inquiries tab was added, and still named only requests and questions.
+  it('names what each tab shows: the requests, the questions and the inquiries', () => {
+    const subtitle = PAGE_SUBTITLE.toLowerCase();
+    for (const label of Object.values(TAB_LABELS)) expect(subtitle, label).toContain(label.toLowerCase());
   });
 });
 

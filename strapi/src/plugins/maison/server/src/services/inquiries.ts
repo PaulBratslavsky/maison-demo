@@ -85,6 +85,12 @@ export interface InquirySummary {
   notLabelled: number;
 }
 
+/** What the quota route answers: whether Strapi can message customers at all, and this month's messages on the channel. */
+export interface InquiryQuota extends MonthlyUsage {
+  /** False without a channel access token: a reply can't be sent, and `used` and `limit` are null. */
+  configured: boolean;
+}
+
 /**
  * What became of Reply on LINE:
  * - `sent`: LINE took the message, and the inquiry says so. With `warning`, recording it failed, and `message` says so.
@@ -334,6 +340,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * labels go through. A sentiment clears the model's score, since the person gave a label and no score; the reason and
      * the topic stay as the model wrote them. The analysis status stays as it was: `skipped` says AI was off when the
      * sweep saw the row, and only the sweep sets it.
+     *
+     * A sentiment alone is refused for a row with no kind (`invalid_input`, "Pick a kind too."): a row with no kind is in
+     * no queue, and a person's label takes it out of Not labelled, so it would drop out of sight.
      */
     async changeLabel(
       documentId: string,
@@ -344,6 +353,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       }
       const row = await findRow(documentId);
       if (!row) return notFound(documentId);
+      if (labels.kind === undefined && (row.kind ?? null) === null) {
+        return failure('invalid_input', 'Pick a kind too.', 'This inquiry has no kind yet, and without one it is in no queue.');
+      }
       return changed(row, {
         ...(labels.kind !== undefined ? { kind: labels.kind } : {}),
         ...(labels.sentimentLabel !== undefined ? { sentimentLabel: labels.sentimentLabel, sentimentScore: null } : {}),
@@ -403,11 +415,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * This month's messages on Maison's LINE channel, for the Inquiries tab: replies count toward it, as confirmations do.
-     * Both are null without a channel access token, and when LINE gives no answer.
+     * `configured` is false without a channel access token: replies can't be sent then, which the reply form says up front,
+     * and LINE isn't asked. `used` and `limit` are null without a token, and when LINE gives no answer.
      */
-    async quota(): Promise<MonthlyUsage> {
+    async quota(): Promise<InquiryQuota> {
       const { lineChannelAccessToken: token, lineApiBaseUrl } = getConfig(strapi);
-      return token ? getMonthlyUsage({ apiBaseUrl: lineApiBaseUrl, token }) : { used: null, limit: null };
+      if (!token) return { configured: false, used: null, limit: null };
+      return { configured: true, ...(await getMonthlyUsage({ apiBaseUrl: lineApiBaseUrl, token })) };
     },
 
     /**

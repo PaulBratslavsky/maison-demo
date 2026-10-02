@@ -43,7 +43,6 @@ The ports are the demo's own, so it runs next to a Strapi on 1337. `npm run dev:
 | `strapi/` | A Strapi 5.55.1 app (TypeScript, SQLite), made with `create-strapi` |
 | `strapi/src/plugins/maison/` | The Maison plugin: content types, twelve MCP tools and a prompt, REST routes, the requests board and the homepage widget, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
-| `strapi/src/extensions/maison/` | Keeps customers' LINE user IDs out of admin API responses and the list search |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
 | `strapi/scripts/maison-setup.mjs` | `npm run setup` |
 | `liff/` | The Maison app: Next.js 16, LIFF and the LIFF mock, the MCP SDK, and the concierge on AI SDK 7 |
@@ -485,7 +484,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `7ac5dbd` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `7b63867` (branch `feat/maison-inquiries`), unchanged. That repo is the source of truth, so change Maison there first. The demo doesn't change Maison: it only configures it, in `strapi/config/plugins.ts`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 
@@ -522,5 +521,4 @@ test -n "$SHA" && diff <(git -C "$SRC" ls-tree -r "$SHA" -- "${FILES[@]}" | awk 
 - **The REST door's customer routes** skip two of `/mcp`'s checks (see "The REST door"). Keep sessions short, with oauth-mcp-manager's `endUserAccessTokenTtl`, until oauth-mcp-manager refuses expired admin tokens itself.
 - **Staff agents read what customers wrote.** `appointment_requests` gives a staff agent customers' notes, up to 500 characters each, which could try to instruct the model. The tool descriptions tell it to treat notes as information, and to confirm only a reference the staff member asked for. Keep `appointments.confirm` off an agent's token, or add an approval step for tools that write.
 - **One Strapi sends each LINE confirmation once.** A visit's `sent` record stops a second send, and two sends at the same moment share one push, but only within one Strapi process. With more than one, add a claim row, LINE's `X-Line-Retry-Key` or an outbox (the plugin's README, "LINE confirmations").
-- **`strapi/src/extensions/maison/strapi-server.ts`** keeps customers' LINE user IDs out of admin API responses and the list search. Keep it until Maison's own schema does the same.
 - **Nothing here needs Strapi Enterprise.** If your license includes audit logs, they also record what admins do.

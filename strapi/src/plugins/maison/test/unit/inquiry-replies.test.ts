@@ -46,8 +46,19 @@ describe('inquiryReplyText', () => {
 
   it('quotes the customer in English, then the staff text, then signs as Maison', () => {
     expect(inquiryReplyText({ language: 'en', message: MESSAGE, text: TEXT })).toBe(
-      `About your question: "${MESSAGE}"\n\n${TEXT}\n\nMaison`
+      `About your message: "${MESSAGE}"\n\n${TEXT}\n\nMaison`
     );
+  });
+
+  // A reply goes to any inquiry, and a praise or a complaint is no question: the opening line says only what it is about.
+  it('opens an English reply with "About your message", for praise and for a complaint as for a question', () => {
+    const praise = inquiryReplyText({ language: 'en', message: 'Thank you, the weekender is beautiful.', text: PRAISE_EN });
+    const complaint = inquiryReplyText({ language: 'en', message: MESSAGE, text: COMPLAINT_EN });
+
+    expect(praise.split('\n')[0]).toBe('About your message: "Thank you, the weekender is beautiful."');
+    expect(complaint.split('\n')[0]).toBe(`About your message: "${MESSAGE}"`);
+    expect(praise).not.toContain('question');
+    expect(complaint).not.toContain('question');
   });
 
   it('quotes the customer in Japanese, then the staff text, then signs as Maison', () => {
@@ -58,7 +69,7 @@ describe('inquiryReplyText', () => {
 
   it('quotes the customer as the questions do: with quoteOf', () => {
     const message = `${'a'.repeat(60)}\n\n${'b'.repeat(60)}`;
-    expect(inquiryReplyText({ language: 'en', message, text: TEXT })).toBe(`About your question: "${quoteOf(message)}"\n\n${TEXT}\n\nMaison`);
+    expect(inquiryReplyText({ language: 'en', message, text: TEXT })).toBe(`About your message: "${quoteOf(message)}"\n\n${TEXT}\n\nMaison`);
     expect(inquiryReplyText({ language: 'ja', message, text: TEXT })).toBe(
       `「${quoteOf(message)}」についてのお問い合わせへのご返信です。\n\n${TEXT}\n\nMaison`
     );
@@ -69,12 +80,12 @@ describe('inquiryReplyText', () => {
     const quote = `${'a'.repeat(50)} ${'b'.repeat(28)}…`;
     expect(Array.from(quote)).toHaveLength(80);
 
-    expect(inquiryReplyText({ language: 'en', message, text: TEXT })).toBe(`About your question: "${quote}"\n\n${TEXT}\n\nMaison`);
+    expect(inquiryReplyText({ language: 'en', message, text: TEXT })).toBe(`About your message: "${quote}"\n\n${TEXT}\n\nMaison`);
   });
 
   it('trims the staff text, and keeps the line breaks and the spaces inside it', () => {
     expect(inquiryReplyText({ language: 'en', message: MESSAGE, text: '  Thank you.\n\nWe will call you.  \n' })).toBe(
-      `About your question: "${MESSAGE}"\n\nThank you.\n\nWe will call you.\n\nMaison`
+      `About your message: "${MESSAGE}"\n\nThank you.\n\nWe will call you.\n\nMaison`
     );
     expect(inquiryReplyText({ language: 'ja', message: '腕時計は入りますか？', text: '  ありがとうございます。\n\nお電話します。  \n' })).toBe(
       '「腕時計は入りますか？」についてのお問い合わせへのご返信です。\n\nありがとうございます。\n\nお電話します。\n\nMaison'
@@ -88,7 +99,7 @@ describe('inquiryReplyText', () => {
 
   it('sends a suggested text as it is, between the quote and the signature', () => {
     expect(inquiryReplyText({ language: 'en', message: MESSAGE, text: COMPLAINT_EN })).toBe(
-      `About your question: "The clasp of my coffret broke after a week."\n\n${COMPLAINT_EN}\n\nMaison`
+      `About your message: "The clasp of my coffret broke after a week."\n\n${COMPLAINT_EN}\n\nMaison`
     );
     expect(inquiryReplyText({ language: 'ja', message: 'ストラップが切れました。', text: COMPLAINT_JA })).toBe(
       `「ストラップが切れました。」についてのお問い合わせへのご返信です。\n\n${COMPLAINT_JA}\n\nMaison`

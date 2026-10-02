@@ -59,7 +59,7 @@ describe('inquiries.reply', () => {
     expect(body.messages).toHaveLength(1);
     expect(message.type).toBe('text');
     expect(message.text).toBe(inquiryReplyText({ language: 'en', message: COMPLAINT.message, text: TEXT }));
-    expect(message.text).toBe(`About your question: "The clasp of my coffret broke after a week."\n\n${TEXT}\n\nMaison`);
+    expect(message.text).toBe(`About your message: "The clasp of my coffret broke after a week."\n\n${TEXT}\n\nMaison`);
     expect(findOne).toHaveBeenCalledExactlyOnceWith({ documentId: 'inq-4' });
     expect(update).toHaveBeenCalledExactlyOnceWith({
       documentId: 'inq-4',
@@ -85,7 +85,7 @@ describe('inquiries.reply', () => {
     await service.reply('inq-4', TEXT, 'Jane', NOW);
 
     expect(pushed().message.text).toBe(
-      `About your question: "The clasp of my coffret broke after a week, and the lining of the lid has come …"\n\n${TEXT}\n\nMaison`
+      `About your message: "The clasp of my coffret broke after a week, and the lining of the lid has come …"\n\n${TEXT}\n\nMaison`
     );
   });
 
@@ -94,7 +94,7 @@ describe('inquiries.reply', () => {
 
     await service.reply('inq-4', `  ${TEXT}\n`, 'Jane', NOW);
 
-    expect(pushed().message.text).toBe(`About your question: "${COMPLAINT.message}"\n\n${TEXT}\n\nMaison`);
+    expect(pushed().message.text).toBe(`About your message: "${COMPLAINT.message}"\n\n${TEXT}\n\nMaison`);
     expect(update.mock.calls[0][0].data.replyText).toBe(TEXT);
   });
 
@@ -498,11 +498,11 @@ describe('inquiries.quota', () => {
   const usageAnswers = (consumption: unknown = { totalUsage: 12 }, quota: unknown = { type: 'limited', value: 200 }) =>
     vi.fn(async (url: string, _init: RequestInit) => new Response(JSON.stringify(url.endsWith('/quota/consumption') ? consumption : quota), { status: 200 }));
 
-  it("answers the month's total and the limit from LINE, asked with the token at the configured address", async () => {
+  it("answers that it is configured, with the month's total and the limit from LINE, asked with the token at the configured address", async () => {
     useFetch(usageAnswers());
     const { service } = world();
 
-    expect(await service.quota()).toEqual({ used: 12, limit: 200 });
+    expect(await service.quota()).toEqual({ configured: true, used: 12, limit: 200 });
 
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([`${LINE_API}/v2/bot/message/quota`, `${LINE_API}/v2/bot/message/quota/consumption`]);
     for (const [, init] of fetchMock.mock.calls) expect(init.headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
@@ -510,32 +510,32 @@ describe('inquiries.quota', () => {
 
   it('answers a total and no limit for a channel that has none', async () => {
     useFetch(usageAnswers({ totalUsage: 7 }, { type: 'none' }));
-    expect(await world().service.quota()).toEqual({ used: 7, limit: null });
+    expect(await world().service.quota()).toEqual({ configured: true, used: 7, limit: null });
   });
 
   it.each([
     ['no token is set', {}],
     ['the token is empty', { lineChannelAccessToken: '', lineApiBaseUrl: LINE_API }],
-  ])('answers no total and no limit, and asks LINE nothing, when %s', async (_label, config) => {
+  ])('answers that it is not configured, with no total and no limit, and asks LINE nothing, when %s', async (_label, config) => {
     const { service, strapi } = world({ config });
 
-    expect(await service.quota()).toEqual({ used: null, limit: null });
+    expect(await service.quota()).toEqual({ configured: false, used: null, limit: null });
 
     expect(fetchMock).not.toHaveBeenCalled();
     // The page asks all the time: a missing token is not worth a log line each time.
     expect(strapi.log.warn).not.toHaveBeenCalled();
   });
 
-  it('answers no total and no limit when LINE does not answer, and never throws', async () => {
+  it('answers configured, with no total and no limit, when LINE does not answer, and never throws', async () => {
     useFetch(rejects(new TypeError('fetch failed')));
-    expect(await world().service.quota()).toEqual({ used: null, limit: null });
+    expect(await world().service.quota()).toEqual({ configured: true, used: null, limit: null });
   });
 
-  it('answers no total and no limit when LINE refuses the token, and logs nothing: the page asks all the time', async () => {
+  it('answers configured, with no total and no limit, when LINE refuses the token, and logs nothing: the page asks all the time', async () => {
     useFetch(vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ message: 'Authentication failed' }), { status: 401 })));
     const { service, strapi } = world();
 
-    expect(await service.quota()).toEqual({ used: null, limit: null });
+    expect(await service.quota()).toEqual({ configured: true, used: null, limit: null });
 
     for (const log of [strapi.log.warn, strapi.log.error, strapi.log.info]) expect(log).not.toHaveBeenCalled();
   });

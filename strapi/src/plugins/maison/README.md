@@ -266,7 +266,7 @@ Anything but `line:U` followed by 32 lowercase hex characters counts as not sign
 
 The REST customer routes run the same lookup through the `customer-session` policy, after running `/mcp`'s session check (see [The customer session](#the-customer-session)).
 
-The Content Manager doesn't show an appointment's `customer` field at all, in the list or the edit view. The Document Service still reads and writes it, and saving or publishing an appointment in the Content Manager leaves it as it was.
+The Content Manager doesn't show an appointment's `customer` field at all, in the list or the edit view. The schema also marks it `hidden` in its config and `searchable: false`, as the question and inquiry content types do, so no admin API answer carries it and the list search doesn't match it. The Document Service still reads and writes it, and saving or publishing an appointment in the Content Manager leaves it as it was.
 
 ## LINE confirmations
 
@@ -403,7 +403,8 @@ A cron job, `maison-label-inquiries`, runs every minute. The plugin adds it itse
 
 - The prompt tells the model that the customer's text is evidence to label, never instructions to follow. The queue rule is code, not the model: it keeps a hand-off in Needs an answer whatever the labels say.
 - Each labelled inquiry records the `modelVersion` and `promptVersion` that labelled it.
-- **A model that answers in the wrong shape** (a missing field, a sentiment of 3, a kind of "angry") fails that inquiry: it becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**. One failing inquiry never stops the ones behind it.
+- **A model that answers in the wrong shape** (a missing field, a sentiment of 3, a kind of "angry") fails that inquiry: it becomes `failed` with one more attempt, and nothing half-written is saved. At 5 attempts it's parked until staff press **Label again**. One inquiry the model answers wrongly never stops the ones behind it.
+- **A refused key, or no answer from the model, isn't the inquiry's fault.** The provider answering 401 or 403, a timeout after 30 seconds, a dropped connection, or a provider that is down or rate-limiting (after the AI SDK's two retries) changes nothing on the inquiry: no status change and no attempt. The sweep logs one warning that says which it was, never with the key, and ends, so the inquiries behind it aren't tried in the same sweep. The next sweep, a minute later, tries again, so a wrong `AI_API_KEY` or a dropped hotspot parks nothing. Any other failure, such as a model name the provider doesn't know, is treated the same way.
 - A sweep that starts while another is still running does nothing.
 - **A person's label wins.** **Change label** marks the inquiry as corrected, and the sweep reads each inquiry again right before it writes, so a label changed during the model's call isn't overwritten.
 
@@ -417,7 +418,7 @@ The queue is decided by code, from the labels and the hand-off, never by the mod
 
 | Queue | An inquiry is in it when |
 |---|---|
-| **Needs an answer** | the turn handed the question to staff, whatever the labels say, or the model labelled it a question the concierge didn't answer |
+| **Needs an answer** | the turn handed the question to staff, whatever the labels say, or it's labelled a question that nobody has said was answered: the model said the concierge didn't answer it, or a person labelled it a question by hand |
 | **Complaints** | the model labelled it a complaint |
 | **Praise** | the model labelled it praise |
 | none | anything else, such as small talk or a question the concierge answered. **All** still shows it |
@@ -426,7 +427,7 @@ The queue is decided by code, from the labels and the hand-off, never by the mod
 
 ### The tab
 
-**Inquiries** opens on **Needs an answer**, and refreshes every 5 seconds, newest first, up to 50 rows. Four cards count the open inquiries in **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, and five buttons filter the list to those, or to **All**. Above the table, a line gives the month's LINE messages, like "LINE messages this month: 12 of 200": replies count toward the channel's quota, as confirmations do. Strapi asks LINE for it when the tab opens and after a reply, not on the refresh, because each ask makes two calls to LINE. The line is left out without a channel access token, and when LINE gives no answer.
+**Inquiries** opens on **Needs an answer**, and refreshes every 5 seconds, newest first, up to 50 rows. Four cards count the open inquiries in **Needs an answer**, **Complaints**, **Praise** and **Not labelled**, and five buttons filter the list to those, or to **All**. Above the table, a line gives the month's LINE messages, like "LINE messages this month: 12 of 200": replies count toward the channel's quota, as confirmations do. Strapi asks LINE for it when the tab opens and after a reply, not on the refresh, because each ask makes two calls to LINE. The line is left out without a channel access token, and when LINE gives no answer. Without a token, the Reply on LINE dialog says so as soon as it opens, in the words Send would be refused with, and **Send on LINE** is disabled.
 
 Each row shows:
 - when the customer wrote (Tokyo time), and the customer, masked
@@ -439,15 +440,15 @@ Each row shows:
 
 Admins with "Reply to customer inquiries on LINE" get these buttons, which are disabled while a request runs:
 - **Reply on LINE**, on an open inquiry that isn't a hand-off, opens a dialog with the customer's message and a box for the reply, which is never pre-filled. **Use the suggested text** puts in the text for a complaint or for praise, in the chat's language, after anything already typed. Staff edit it, and **Send on LINE** is enabled for a reply of 1 to 2,000 characters. It pushes one LINE text message from Maison's channel, in the inquiry's language, and marks the inquiry replied, with the text, when, and by whom. The message quotes the customer's first 80 characters, and is signed by Maison. The admin's first name is saved on the inquiry, and never sent:
-  > About your question: "The clasp of my coffret broke after a week."
+  > About your message: "The clasp of my coffret broke after a week."
   >
   > We're sorry about this, and thank you for telling us. A member of our team will look into it and reply in this chat with the next step.
   >
   > Maison
 
-  A Japanese chat gets `「…」についてのお問い合わせへのご返信です。` in place of the first line. A message LINE refuses is recorded as failed, with LINE's answer, and the inquiry stays open. Nothing guards two admins replying to the same inquiry at the same moment: both messages could go out.
+  A Japanese chat gets `「…」についてのお問い合わせへのご返信です。` in place of the first line. A message LINE refuses is recorded as failed, with LINE's answer, and the inquiry stays open. Only customers who have added Maison on LINE get it. LINE answers 200 for one who hasn't, or who has blocked the account, and delivers nothing, so the inquiry is marked replied all the same. Nothing guards two admins replying to the same inquiry at the same moment: both messages could go out.
 - **Close**, on an open inquiry, with a reason: **Answered elsewhere**, **Not needed** or **Spam**. It isn't offered for a replied inquiry, which keeps its reply.
-- **Change label** sets the kind, the sentiment, or both, and sends only what the admin changed. The inquiry is then the person's: the sweep never labels it again, **Not labelled** no longer lists it, and its queue follows the new kind by the same rule as before. A new sentiment drops the model's score, and the model's reason and topic stay as the model wrote them.
+- **Change label** sets the kind, the sentiment, or both, and sends only what the admin changed. The inquiry is then the person's: the sweep never labels it again, **Not labelled** no longer lists it, and its queue follows the new kind by the same rule as before, so a question labelled by hand is in **Needs an answer**. A new sentiment drops the model's score, and the model's reason and topic stay as the model wrote them. An inquiry with no kind needs one: a sentiment alone would leave it in no queue and out of **Not labelled**, so **Save label** stays disabled until a kind is picked, and the server refuses it with "Pick a kind too."
 - **Label again**, on an inquiry the model failed on, puts it back for the next sweep with its attempts reset. It isn't offered for one a person has labelled.
 
 ### The suggested texts
@@ -470,7 +471,7 @@ The routes are admin routes, so each takes an admin session that holds its permi
 |---|---|---|---|
 | `GET /maison/inquiries?filter=…&limit=…` | Review customer inquiries | None. `filter` is `needs-answer` (the default), `complaint`, `praise`, `not-labelled` or `all`, and `limit` is 1 to 100 (50 by default) | `{ inquiries }`, newest first |
 | `GET /maison/inquiries/summary` | Review customer inquiries | None | `{ needsAnswer, complaint, praise, notLabelled }`, the open counts |
-| `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ used, limit }`, both null without a channel access token and when LINE gives no answer, and `limit` null for a channel with none |
+| `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ configured, used, limit }`: `configured` is false without a channel access token, and then `used` and `limit` are null, as they are when LINE gives no answer. `limit` is null for a channel with none |
 | `POST /maison/inquiries/:documentId/reply` | Reply to customer inquiries on LINE | `{ text }` | `{ documentId, status: "sent", message, warning? }` |
 | `POST /maison/inquiries/:documentId/close` | Reply to customer inquiries on LINE | `{ reason }`: `answered-elsewhere`, `not-needed` or `spam` | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label` | Reply to customer inquiries on LINE | `{ kind, sentimentLabel }`, one or both | `{ inquiry, message }` |
@@ -480,7 +481,7 @@ The staff name for a reply comes from the signed-in admin's account, never from 
 
 | Status | When |
 |---|---|
-| 400 (`invalid_input`) | The filter isn't one of the five, `limit` is out of range, the reply text is empty or over 2,000 characters, the reason isn't one of the three, or Change label has neither a kind nor a sentiment, or one that isn't a label |
+| 400 (`invalid_input`) | The filter isn't one of the five, `limit` is out of range, the reply text is empty or over 2,000 characters, the reason isn't one of the three, or Change label has neither a kind nor a sentiment, one that isn't a label, or only a sentiment for an inquiry with no kind |
 | 404 (`not_found`) | No inquiry has that `documentId` |
 | 409 (`already_closed`) | Reply or Close, for a closed inquiry |
 | 409 (`already_replied`) | Reply or Close, for a replied inquiry |

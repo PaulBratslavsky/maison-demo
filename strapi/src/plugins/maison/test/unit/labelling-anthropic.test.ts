@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { APICallError, NoObjectGeneratedError, RetryError } from 'ai';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labelSystemPrompt, labelsSchema } from '../../server/src/domain/inquiry-criteria';
 import labelling from '../../server/src/services/labelling';
 import { fakeStrapi } from './fake-strapi';
@@ -6,12 +7,15 @@ import { fakeStrapi } from './fake-strapi';
 // The real Anthropic provider, with the only fetch it can use: a stand-in that keeps each request and answers like the
 // Messages API. Nothing here reaches a network, and the provider isn't given a chance to choose another fetch.
 const sent = vi.hoisted(() => [] as Array<{ url: string; headers: Record<string, string>; body: Record<string, any> }>);
+/** What the stand-in answers instead of the labels, when a test sets it: the API's failures, as the provider meets them. */
+const failing = vi.hoisted(() => ({ with: undefined as undefined | (() => Response | Promise<Response>) }));
 const LABELS = { kind: 'complaint', sentimentScore: -0.6, sentimentLabel: 'negative', answered: true, reason: 'The strap broke.', topic: 'repairs' };
 
 vi.mock('@ai-sdk/anthropic', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@ai-sdk/anthropic')>();
   const messagesApi = async (url: unknown, init: { headers: Record<string, string>; body: string }) => {
     sent.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
+    if (failing.with) return failing.with();
     return new Response(
       JSON.stringify({
         id: 'msg_stand_in',
@@ -74,5 +78,87 @@ describe('what labelling sends to Anthropic', () => {
     const { request } = await labelled();
 
     for (const name of ['temperature', 'top_p', 'top_k', 'thinking']) expect(request.body, name).not.toHaveProperty(name);
+  });
+});
+
+/*
+ * What labelling.sweep makes of a failure rests on the classes the SDK throws for them, and these are those, from the real
+ * provider: a refused key is an APICallError with its status, one request and no retry; a call that never gets an answer
+ * is retried twice, and ends as a RetryError; an answer in the wrong shape is a NoObjectGeneratedError.
+ */
+describe('what the SDK throws when the Messages API fails', () => {
+  const service = () => labelling({ strapi: fakeStrapi({ config: { aiProvider: 'anthropic', aiApiKey: KEY } }) });
+  const thrownBy = (call: Promise<unknown>) => call.then(() => null, (error: unknown) => error);
+  const failure = (status: number, type: string, message: string) => () =>
+    new Response(JSON.stringify({ type: 'error', error: { type, message } }), { status, headers: { 'content-type': 'application/json' } });
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+  afterEach(() => {
+    failing.with = undefined;
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [401, 'authentication_error', 'invalid x-api-key'],
+    [403, 'permission_error', 'Your API key does not have permission to use the specified resource.'],
+  ])('is an APICallError with status %i, after one request, when the key is refused', async (status, type, message) => {
+    failing.with = failure(status, type, message);
+
+    const error = await thrownBy(service().label(EXCHANGE));
+
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).statusCode).toBe(status);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is a RetryError, after three requests, when the API keeps answering 529 overloaded', async () => {
+    vi.useFakeTimers();
+    failing.with = failure(529, 'overloaded_error', 'Overloaded');
+
+    const outcome = thrownBy(service().label(EXCHANGE));
+    await vi.advanceTimersByTimeAsync(2_000 + 4_000);
+    const error = await outcome;
+
+    expect(RetryError.isInstance(error)).toBe(true);
+    expect(sent).toHaveLength(3);
+  });
+
+  it('is a RetryError over APICallErrors with no status, after three requests, when the connection never comes up', async () => {
+    vi.useFakeTimers();
+    failing.with = () => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:443'), { code: 'ECONNREFUSED' }) });
+    };
+
+    const outcome = thrownBy(service().label(EXCHANGE));
+    await vi.advanceTimersByTimeAsync(2_000 + 4_000);
+    const error = await outcome;
+
+    expect(RetryError.isInstance(error)).toBe(true);
+    expect((error as RetryError).errors.every((attempt) => APICallError.isInstance(attempt) && attempt.statusCode === undefined)).toBe(true);
+    expect(sent).toHaveLength(3);
+  });
+
+  it('is a NoObjectGeneratedError when the model answers in the wrong shape', async () => {
+    failing.with = () =>
+      new Response(
+        JSON.stringify({
+          id: 'msg_stand_in',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-stand-in',
+          content: [{ type: 'text', text: JSON.stringify({ ...LABELS, sentimentScore: 3 }) }],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+
+    const error = await thrownBy(service().label(EXCHANGE));
+
+    expect(NoObjectGeneratedError.isInstance(error)).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 });

@@ -21,9 +21,10 @@ describe('queueFor', () => {
     expect(queueFor({ handedOff: false, kind: 'question', answered: true })).toBe('none');
   });
 
-  // Only an explicit "not answered" puts a question in Needs an answer: a staff relabel of an unlabelled row has no `answered`.
-  it('keeps a question out of the queues while nobody has said whether it was answered', () => {
-    expect(queueFor({ handedOff: false, kind: 'question', answered: null })).toBe('none');
+  // Only a person's label leaves `answered` null: the model always gives a boolean, and a logged turn has no kind. A person who
+  // labels a row Question (with AI off, the only way to label at all) has no `answered` to give, and the row must not leave every queue.
+  it('sends a question nobody has said was answered to needs-answer: when in doubt, a person sees it', () => {
+    expect(queueFor({ handedOff: false, kind: 'question', answered: null })).toBe('needs-answer');
   });
 
   it('sends a complaint to the complaint queue, answered or not', () => {

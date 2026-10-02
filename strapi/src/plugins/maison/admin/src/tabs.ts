@@ -3,6 +3,9 @@ export type MaisonTab = 'requests' | 'questions' | 'inquiries';
 
 export const TAB_LABELS: Record<MaisonTab, string> = { requests: 'Requests', questions: 'Questions', inquiries: 'Inquiries' };
 
+/** The line under the page's title: what each tab holds (a test holds it to the tabs' names), as it arrives. */
+export const PAGE_SUBTITLE = 'Boutique appointment requests, customer questions and customer inquiries, as they arrive.';
+
 /** The flags useRBAC answers for the page's permissions: review requests, read questions, review inquiries. */
 export interface TabAccess {
   canReview: boolean;

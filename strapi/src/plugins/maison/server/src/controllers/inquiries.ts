@@ -84,7 +84,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       ctx.body = await inquiries().summary();
     },
 
-    /** GET /inquiries/quota: the month's LINE messages sent, and the limit. Both are null when there is none to show. */
+    /**
+     * GET /inquiries/quota: whether there is a channel access token (`configured`), and the month's LINE messages sent and
+     * the limit. Without a token, `configured` is false, and the other two are null, as they are when LINE gives no answer.
+     */
     async quota(ctx) {
       ctx.body = await inquiries().quota();
     },

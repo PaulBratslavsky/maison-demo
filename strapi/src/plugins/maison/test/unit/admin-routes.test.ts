@@ -750,20 +750,21 @@ describe('inquiries controller', () => {
   });
 
   describe('quota', () => {
-    it("returns the month's total and the limit as they are", async () => {
-      const service = vi.fn(async () => ({ used: 12, limit: 200 }));
+    it("returns whether there is a token, with the month's total and the limit, as they are", async () => {
+      const service = vi.fn(async () => ({ configured: true, used: 12, limit: 200 }));
       const ctx = fakeCtx();
 
       await controllerOver({ quota: service }).quota(ctx);
 
       expect(service).toHaveBeenCalledExactlyOnceWith();
       expect(ctx.status).toBe(200);
-      expect(ctx.body).toEqual({ used: 12, limit: 200 });
+      expect(ctx.body).toEqual({ configured: true, used: 12, limit: 200 });
     });
 
     it.each([
-      ['no limit', { used: 12, limit: null }],
-      ['nothing, when LINE gave no answer or there is no token', { used: null, limit: null }],
+      ['no limit', { configured: true, used: 12, limit: null }],
+      ['no total, when LINE gave no answer', { configured: true, used: null, limit: null }],
+      ['no token: replies cannot be sent', { configured: false, used: null, limit: null }],
     ])('returns %s as a 200: the page shows what it has', async (_label, quota) => {
       const ctx = fakeCtx();
       await controllerOver({ quota: vi.fn(async () => quota) }).quota(ctx);

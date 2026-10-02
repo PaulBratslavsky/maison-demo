@@ -1,5 +1,5 @@
 import type { Core } from '@strapi/strapi';
-import { generateObject } from 'ai';
+import { APICallError, NoObjectGeneratedError, RetryError, TypeValidationError, generateObject } from 'ai';
 
 import { aiEnabled, languageModelOf, modelVersionOf, type AiSettings } from '../ai/provider';
 import { getConfig } from '../config';
@@ -30,8 +30,8 @@ export interface SweepResult {
 /**
  * The rows worth a model call: waiting (pending), passed over while AI was off (skipped, so labelling catches up once a
  * key is set), or failed fewer than MAX_LABEL_ATTEMPTS times. A failed row that used its attempts is parked until staff
- * press Label again: otherwise a row that always fails, or a bad key, would take a place in every batch and starve the
- * rows behind it. A row a person labelled is never picked: their label wins.
+ * press Label again: otherwise a row the model always answers in the wrong shape would take a place in every batch and
+ * starve the rows behind it. A row a person labelled is never picked: their label wins.
  */
 const TO_LABEL: Doc = {
   humanCorrected: { $ne: true },
@@ -53,6 +53,34 @@ const withoutKey = (text: string, key: string | null): string => (key ? text.spl
 /** What went wrong, from whatever was thrown, without the key. */
 const reasonOf = (error: unknown, key: string | null): string => withoutKey(String((error as Error | undefined)?.message ?? error), key);
 
+/**
+ * What a failed labelling says, as far as the sweep acts on it:
+ * - `wrong-shape`: the model answered, and the labels don't fit (`NoObjectGeneratedError`, `TypeValidationError`). That is
+ *   a verdict on this inquiry, so it counts an attempt and can fail the row.
+ * - `key-refused`: the provider answered 401 or 403. Every row would meet it, until the key is fixed.
+ * - `no-answer`: the provider didn't answer. The SDK has already retried a call that never connected, or got a 429 or a
+ *   5xx, and gives up with a `RetryError`, and the 30-second timeout or an abort is an error named `TimeoutError` or
+ *   `AbortError`. Every row would meet it, until the network or the provider is back.
+ * - `other`: anything else, such as a model that doesn't exist, or Strapi failing to save.
+ * The last three say nothing against the inquiry, so a sweep that meets one leaves the row as it was and stops.
+ */
+type Failure = 'wrong-shape' | 'key-refused' | 'no-answer' | 'other';
+
+const failureOf = (error: unknown): Failure => {
+  if (NoObjectGeneratedError.isInstance(error) || TypeValidationError.isInstance(error)) return 'wrong-shape';
+  if (APICallError.isInstance(error) && (error.statusCode === 401 || error.statusCode === 403)) return 'key-refused';
+  const name = (error as { name?: unknown } | null | undefined)?.name;
+  if (RetryError.isInstance(error) || name === 'TimeoutError' || name === 'AbortError') return 'no-answer';
+  return 'other';
+};
+
+/** What the warning says when a sweep stops, for each failure that says nothing against the inquiry. */
+const STOPPED: Record<Exclude<Failure, 'wrong-shape'>, string> = {
+  'key-refused': 'The AI provider refused the API key',
+  'no-answer': 'The AI provider gave no answer',
+  other: 'It failed for another reason',
+};
+
 /** What the model factory is given: the AI settings, and none of the plugin's other config. */
 const aiSettingsOf = (strapi: Core.Strapi): AiSettings => {
   const { aiProvider, aiModel, aiApiKey, aiBaseUrl } = getConfig(strapi);
@@ -73,7 +101,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       schema: labelsSchema,
       system: labelSystemPrompt(),
       prompt: labelUserMessage({ ...input, reply: input.reply ?? '' }),
-      // A labelling that takes longer than this is a hung connection, not a slow model: the sweep retries with a capped attempt count.
+      // A labelling that takes longer than this is a hung connection, not a slow model: the sweep leaves the row as it was, stops, and tries again on the next one.
       abortSignal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
     });
     return object;
@@ -94,8 +122,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     return row && !row.humanCorrected && LABELLABLE.includes(row.analysisStatus) ? row : null;
   };
 
-  /** Labels one row: its outcome, or null when the row was left as it is because it is no longer the sweep's. */
-  const labelRow = async (row: Doc, settings: AiSettings): Promise<'labelled' | 'failed' | null> => {
+  /**
+   * Labels one row: its outcome, or null when the row was left as it is because it is no longer the sweep's. Only an
+   * answer in the wrong shape fails the row, with one more attempt. Any other failure says nothing against it: the row
+   * is left as it was, with no write and no attempt, the sweep logs one warning that says which kind it was, and the
+   * outcome is `stopped`, for the batch to end.
+   */
+  const labelRow = async (row: Doc, settings: AiSettings): Promise<'labelled' | 'failed' | 'stopped' | null> => {
     try {
       const labels = await labelWith(settings, {
         message: row.message,
@@ -115,6 +148,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       });
       return 'labelled';
     } catch (error) {
+      const failure = failureOf(error);
+      if (failure !== 'wrong-shape') {
+        strapi.log.warn(`[maison] Labelling stopped until the next sweep. ${STOPPED[failure]}: ${reasonOf(error, settings.aiApiKey)}`);
+        return 'stopped';
+      }
       const current = await stillWaiting(row.documentId);
       if (!current) return null;
       const attempts = (current.analysisAttempts ?? 0) + 1;
@@ -140,9 +178,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     const rows = (await strapi.documents(UID.inquiry).findMany({ filters: TO_LABEL, sort: 'createdAt:asc', limit: LABEL_BATCH })) as Doc[];
     let labelled = 0;
     let failed = 0;
-    // One at a time, each in its own try: a row the model fails on never stops the rows after it.
+    // One at a time, each in its own try: a row the model answers wrongly never stops the rows after it. A failure that says
+    // nothing against the inquiry (a refused key, no answer) ends the batch: every row would meet it, and the next sweep tries again.
     for (const row of rows) {
       const outcome = await labelRow(row, settings);
+      if (outcome === 'stopped') break;
       if (outcome === 'labelled') labelled += 1;
       if (outcome === 'failed') failed += 1;
     }

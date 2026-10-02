@@ -8,6 +8,8 @@ import {
   FILTERS,
   FILTER_LABELS,
   LIST_LIMIT,
+  introText,
+  noTokenNotice,
   quotaText,
   type InquiriesSummary,
   type InquiryFilter,
@@ -118,8 +120,8 @@ export const InquiriesList = ({
           Customer inquiries
         </Typography>
         <Typography variant="pi" textColor="neutral600">
-          What customers ask the concierge, in queues. A model labels each inquiry, and you can change its label. Refreshes every{' '}
-          {REFRESH_MS / 1000} seconds. {loadError && inquiries !== null ? `Last refresh failed: ${loadError}` : ''}
+          {introText(canReply)} Refreshes every {REFRESH_MS / 1000} seconds.{' '}
+          {loadError && inquiries !== null ? `Last refresh failed: ${loadError}` : ''}
         </Typography>
       </Flex>
 
@@ -210,6 +212,7 @@ export const InquiriesList = ({
           key={replying.documentId}
           inquiry={replying}
           sending={acting !== null}
+          cannotSendBecause={noTokenNotice(quota)}
           onSend={(body) =>
             run(replying.documentId, 'reply', body, () => {
               setReplying(null);
