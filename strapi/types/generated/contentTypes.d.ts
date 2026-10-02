@@ -728,6 +728,8 @@ export interface PluginMaisonAppointment extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 500;
       }>;
+    language: Schema.Attribute.Enumeration<['ja', 'en']> &
+      Schema.Attribute.DefaultTo<'ja'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
