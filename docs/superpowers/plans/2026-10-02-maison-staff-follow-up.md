@@ -725,7 +725,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 6: The app hands off through Strapi, and opens the LINE chat with the question typed in
 
-Work in `~/work/maison-demo/liff`, branch `feat/maison-follow-up`. Product knowledge Task 6 added a local `hand_off_to_staff`, `lib/tool-view.ts` with a `handOff` flag, `COPY.handOff`, and the hand-off note in `components/chat-parts.tsx`. This task replaces them.
+Work in `~/work/maison-demo/liff`, branch `feat/maison-follow-up`. Product knowledge Task 6 added a local `hand_off_to_staff`, `lib/tool-view.ts` with a `handOff` flag and `handOffAt(parts)` (where the one hand-off note of a message goes: under a successful hand-off, or under the last knowledge search when every search came back empty), `COPY.handOff`, and the note in `components/chat-parts.tsx`. `needsRetry` (`lib/chat-retry.ts`) counts a message with a note as answered. This task makes the hand-off a Strapi tool and keeps the empty-search fallback.
 
 **Files:**
 - Modify: `lib/concierge.ts`, `lib/tool-view.ts`, `lib/line-chat.ts`, `lib/copy.ts`, `components/chat-parts.tsx`, `components/line-chat.tsx`, `app/concierge/page.tsx` (`CONCIERGE_TOOLS`), `README.md` (the concierge's tools)
@@ -733,11 +733,11 @@ Work in `~/work/maison-demo/liff`, branch `feat/maison-follow-up`. Product knowl
 
 **Interfaces:**
 - Consumes: the MCP tool `hand_off_to_staff` (Task 3), whose output is `{ question: { reference, status, product } }`.
-- Produces: `lineMessageUrl(basicId, text)`; `toolView(...).handOff: { reference: string; question: string } | null`.
+- Produces: `lineMessageUrl(basicId, text)`; `toolView(...).handOff: { reference: string; question: string } | null`; `handOffAt(parts)` answering `{ index, recorded: { reference, question } | null } | null`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `lib/line-chat.test.ts`: `lineMessageUrl('@maison', 'Question for a Maison advisor (Q-4821): Can it hold a watch?')` is `https://line.me/R/oaMessage/%40maison/?Question%20for%20a%20Maison%20advisor%20(Q-4821)%3A%20Can%20it%20hold%20a%20watch%3F`; it's null for an unset or invalid ID, as `lineChatUrl` is; text over 500 characters is cut to 500 before encoding.
-  - `lib/tool-view.test.ts`: `hand_off_to_staff` is a Maison tool now: its line is `MCP · hand_off_to_staff ✓`; a successful call's `handOff` is `{ reference: 'Q-4821', question: <the call's input question> }`; a failed call's is null and its line is red with the error's code; `resolve_date` is still `Local`.
+  - `lib/tool-view.test.ts`: `hand_off_to_staff` is a Maison tool now: its line is `MCP · hand_off_to_staff ✓`; a successful call's `handOff` is `{ reference: 'Q-4821', question: <the call's input question> }`; a failed call's is null and its line is red with the error's code; `resolve_date` is still `Local`. `handOffAt` answers `recorded` for a successful hand-off (under that part), and `recorded: null` for the empty-search fallback (under the last search), with product knowledge's other cases unchanged.
   - `lib/concierge.test.ts`: the tools given to the model are the MCP tools plus `resolve_date` only; the instructions contain rules 9 and 10 below, word for word.
 - [ ] **Step 2: Run** `npm test --prefix liff`. Expected: FAIL.
 - [ ] **Step 3: `lib/concierge.ts`.** Remove the local hand-off tool and its entry in the tools. Rule 9 becomes, and rule 10 is added:
@@ -747,7 +747,7 @@ Work in `~/work/maison-demo/liff`, branch `feat/maison-follow-up`. Product knowl
 10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.
 ```
 
-- [ ] **Step 4: `lib/tool-view.ts`.** `LOCAL_TOOLS` is `['resolve_date']` again. `ToolPart` gains `input?: unknown`. `handOff` is `{ reference, question }` for a successful `hand_off_to_staff` (the reference from `structuredContent.question.reference`, the question from the part's `input.question`), else null.
+- [ ] **Step 4: `lib/tool-view.ts`.** `LOCAL_TOOLS` is `['resolve_date']` again. `ToolPart` gains `input?: unknown`. `handOff` is `{ reference, question }` for a successful `hand_off_to_staff` (the reference from `structuredContent.question.reference`, the question from the part's `input.question`), else null. `handOffAt` keeps its placement rules and also answers which note: `recorded` (the hand-off's `{ reference, question }`) or null for the empty-search fallback.
 - [ ] **Step 5: `lib/line-chat.ts`:**
 
 ```ts
@@ -770,19 +770,21 @@ export const lineMessageUrl = (basicId: string | undefined, text: string): strin
 ```ts
 // en
 handOff: {
+  fallback: "Our team answers questions like this in Maison's LINE chat.",
   note: (reference: string) => `Your question is with Maison's client advisors (${reference}). They reply in your LINE chat with Maison, 11:00–20:00 Japan time.`,
   send: 'Send it in the LINE chat',
   typed: (reference: string, question: string) => `Question for a Maison advisor (${reference}): ${question}`,
 },
 // ja
 handOff: {
+  fallback: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
   note: (reference: string) => `ご質問（${reference}）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。`,
   send: 'LINEトークで送る',
   typed: (reference: string, question: string) => `アドバイザーへの質問（${reference}）：${question}`,
 },
 ```
 
-- [ ] **Step 7: The chat.** In `components/chat-parts.tsx`, under a successful hand-off's tool line: the note (`data-testid="hand-off"`), then a secondary button (`data-testid="hand-off-line"`, the same classes as `LineChat`'s) linking to `lineMessageUrl(config.lineOaId, copy.typed(reference, question))`, with the words `copy.send`. Without a URL there's no button. A failed hand-off shows `<LineChat />` as before. Add `hand_off_to_staff` to `CONCIERGE_TOOLS` in `app/concierge/page.tsx`.
+- [ ] **Step 7: The chat.** In `components/chat-parts.tsx`, at the place `handOffAt` names, once per message. A recorded hand-off: the note `copy.note(reference)` (`data-testid="hand-off"`), then a secondary button (`data-testid="hand-off-line"`, the same classes as `LineChat`'s) linking to `lineMessageUrl(config.lineOaId, copy.typed(reference, question))`, with the words `copy.send`; without a URL there's no button. The empty-search fallback (nothing recorded): `copy.fallback` and `<LineChat />`, as product knowledge shows it now. Add `hand_off_to_staff` to `CONCIERGE_TOOLS` in `app/concierge/page.tsx`.
 - [ ] **Step 8: Run** `npm test --prefix liff` and `npm run typecheck --prefix liff`. Expected: PASS.
 - [ ] **Step 9: Commit**
 
