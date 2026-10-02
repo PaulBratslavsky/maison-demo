@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PROFILE_TIMEOUT_MS,
   PUSH_TIMEOUT_MS,
+  USAGE_TIMEOUT_MS,
   getDisplayName,
+  getMonthlyUsage,
   pushMessages,
   type LineApi,
   type LineMessage,
@@ -186,5 +188,134 @@ describe('getDisplayName', () => {
     const displayName = await getDisplayName(API, 'Uabc');
     expect(displayName).toBe(cut);
     expect(displayName?.length).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('getMonthlyUsage', () => {
+  const CONSUMPTION_URL = 'http://127.0.0.1:4010/v2/bot/message/quota/consumption';
+  const QUOTA_URL = 'http://127.0.0.1:4010/v2/bot/message/quota';
+  const NO_USAGE = { used: null, limit: null };
+
+  /** LINE's answer to one request: `status`, with `body` as JSON, or as the text it is when it is a string. */
+  const lineSays = (body: unknown, status = 200) => () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+  /** `fetch` as LINE answers the two endpoints, each as the function for it says. Anything else it is asked is a mistake. */
+  const usageAnswers = (consumption: () => Response | Promise<Response>, quota: () => Response | Promise<Response>) =>
+    vi.fn(async (url: string, _init: RequestInit) => {
+      if (url === CONSUMPTION_URL) return consumption();
+      if (url === QUOTA_URL) return quota();
+      throw new Error(`The stand-in has no route ${url}`);
+    });
+
+  it("asks LINE for this month's total and for the limit, with the token, and answers both", async () => {
+    useFetch(usageAnswers(lineSays({ totalUsage: 12 }), lineSays({ type: 'limited', value: 200 })));
+
+    expect(await getMonthlyUsage(API)).toEqual({ used: 12, limit: 200 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([QUOTA_URL, CONSUMPTION_URL].sort());
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.method ?? 'GET').toBe('GET');
+      expect(init.headers).toEqual({ Authorization: 'Bearer tok' });
+      expect(init.body).toBeUndefined();
+    }
+  });
+
+  it('answers no limit when LINE says the channel has none', async () => {
+    useFetch(usageAnswers(lineSays({ totalUsage: 12 }), lineSays({ type: 'none' })));
+    expect(await getMonthlyUsage(API)).toEqual({ used: 12, limit: null });
+  });
+
+  it('answers a total of 0 as 0, not as nothing', async () => {
+    useFetch(usageAnswers(lineSays({ totalUsage: 0 }), lineSays({ type: 'limited', value: 0 })));
+    expect(await getMonthlyUsage(API)).toEqual({ used: 0, limit: 0 });
+  });
+
+  it('reads the limit only when the type is limited: a value beside none is ignored', async () => {
+    useFetch(usageAnswers(lineSays({ totalUsage: 5 }), lineSays({ type: 'none', value: 200 })));
+    expect(await getMonthlyUsage(API)).toEqual({ used: 5, limit: null });
+  });
+
+  // No limit and no answer are different things to staff: a limit of null means there is none. So when either call goes
+  // wrong, both are null, and the page shows nothing rather than a total that looks like a channel with no limit.
+  it.each([
+    ['refuses the total', lineSays({ message: 'Authentication failed' }, 401), lineSays({ type: 'limited', value: 200 })],
+    ['refuses the limit', lineSays({ totalUsage: 12 }), lineSays({ message: 'Authentication failed' }, 401)],
+    // A refusal says nothing about usage, whatever its body looks like.
+    ['refuses the total, with a total in its body', lineSays({ totalUsage: 12 }, 429), lineSays({ type: 'limited', value: 200 })],
+    ['refuses the limit, with a limit in its body', lineSays({ totalUsage: 12 }), lineSays({ type: 'limited', value: 200 }, 403)],
+    ['has an error of its own for the total', lineSays('<html>Bad Gateway</html>', 502), lineSays({ type: 'limited', value: 200 })],
+    ['has an error of its own for the limit', lineSays({ totalUsage: 12 }), lineSays('', 500)],
+    ['answers the total with something that is not JSON', lineSays('nope'), lineSays({ type: 'limited', value: 200 })],
+    ['answers the limit with something that is not JSON', lineSays({ totalUsage: 12 }), lineSays('nope')],
+    ['answers the total with an empty body', lineSays(''), lineSays({ type: 'limited', value: 200 })],
+    ['answers the total with null', lineSays('null'), lineSays({ type: 'limited', value: 200 })],
+    ['answers the limit with null', lineSays({ totalUsage: 12 }), lineSays('null')],
+    ['answers a total that has no totalUsage', lineSays({ total: 12 }), lineSays({ type: 'limited', value: 200 })],
+    ['answers a totalUsage that is text', lineSays({ totalUsage: '12' }), lineSays({ type: 'limited', value: 200 })],
+    ['answers a totalUsage below 0', lineSays({ totalUsage: -1 }), lineSays({ type: 'limited', value: 200 })],
+    ['answers a totalUsage that is not a whole number', lineSays({ totalUsage: 1.5 }), lineSays({ type: 'limited', value: 200 })],
+    ['answers a limit of a type it does not know', lineSays({ totalUsage: 12 }), lineSays({ type: 'unlimited' })],
+    ['answers a limited channel with no value', lineSays({ totalUsage: 12 }), lineSays({ type: 'limited' })],
+    ['answers a limited channel with a value that is text', lineSays({ totalUsage: 12 }), lineSays({ type: 'limited', value: '200' })],
+    ['answers a limited channel with a value below 0', lineSays({ totalUsage: 12 }), lineSays({ type: 'limited', value: -5 })],
+    ['answers a limit with no type', lineSays({ totalUsage: 12 }), lineSays({ value: 200 })],
+  ])('answers no total and no limit when LINE %s', async (_label, consumption, quota) => {
+    useFetch(usageAnswers(consumption, quota));
+    expect(await getMonthlyUsage(API)).toEqual(NO_USAGE);
+  });
+
+  it.each([
+    ['fetch rejects for both', rejects(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 127.0.0.1:4010') }))],
+    ["LINE doesn't answer in time", rejects(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))],
+    [
+      'fetch rejects for the total only',
+      vi.fn(async (url: string, _init: RequestInit): Promise<Response> => {
+        if (url === CONSUMPTION_URL) throw new TypeError('fetch failed');
+        return lineSays({ type: 'limited', value: 200 })();
+      }),
+    ],
+    [
+      'fetch rejects for the limit only',
+      vi.fn(async (url: string, _init: RequestInit): Promise<Response> => {
+        if (url === QUOTA_URL) throw new TypeError('fetch failed');
+        return lineSays({ totalUsage: 12 })();
+      }),
+    ],
+    ['reading an answer fails halfway', answersThenBreaks(200)],
+  ])('answers no total and no limit, and never throws, when %s', async (_label, mock) => {
+    useFetch(mock);
+    expect(await getMonthlyUsage(API)).toEqual(NO_USAGE);
+  });
+
+  it('gives LINE 3 seconds for each answer', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    useFetch(usageAnswers(lineSays({ totalUsage: 12 }), lineSays({ type: 'limited', value: 200 })));
+
+    await getMonthlyUsage(API);
+
+    expect(USAGE_TIMEOUT_MS).toBe(3000);
+    expect(timeout).toHaveBeenCalledTimes(2);
+    expect(timeout.mock.calls).toEqual([[3000], [3000]]);
+    // Each request has a signal of its own, made by one of those two calls.
+    fetchMock.mock.calls.forEach(([, init], call) => expect(init.signal).toBe(timeout.mock.results[call].value));
+    expect(fetchMock.mock.calls[0][1].signal).not.toBe(fetchMock.mock.calls[1][1].signal);
+  });
+
+  it('asks for both at once, so a slow LINE costs one wait and not two', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    useFetch(
+      vi.fn(async (url: string, _init: RequestInit) => {
+        await gate;
+        return url === CONSUMPTION_URL ? lineSays({ totalUsage: 12 })() : lineSays({ type: 'limited', value: 200 })();
+      })
+    );
+
+    const usage = getMonthlyUsage(API);
+    // Neither has answered, and both have been asked.
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    release();
+
+    expect(await usage).toEqual({ used: 12, limit: 200 });
   });
 });

@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 
+import { AI_PROVIDERS, type AiProvider } from '../ai/provider';
 import { LOCALES, PLUGIN_ID, TOOL_NAMES, type Locale, type ToolName } from '../constants';
 
 export interface MaisonConfig {
@@ -14,6 +15,17 @@ export interface MaisonConfig {
   lineChannelAccessToken: string | null;
   /** Where the LINE Messaging API answers. Tests point it at a stand-in on this machine. */
   lineApiBaseUrl: string;
+  /**
+   * The model that labels inquiries. These are Pulse's AI_PROVIDER, AI_MODEL, AI_API_KEY and AI_BASE_URL, which the app
+   * maps onto them. Without a key (or, for openai-compatible, a base URL), labelling is off and new inquiries wait
+   * under Not labelled.
+   */
+  aiProvider: AiProvider;
+  /** The provider's default model when null. */
+  aiModel: string | null;
+  aiApiKey: string | null;
+  /** Where an openai-compatible server answers, e.g. http://127.0.0.1:11434/v1 for Ollama. Only that provider uses it. */
+  aiBaseUrl: string | null;
 }
 
 export const defaultConfig: MaisonConfig = {
@@ -25,6 +37,10 @@ export const defaultConfig: MaisonConfig = {
   disabledTools: [],
   lineChannelAccessToken: null,
   lineApiBaseUrl: 'https://api.line.me',
+  aiProvider: 'anthropic',
+  aiModel: null,
+  aiApiKey: null,
+  aiBaseUrl: null,
 };
 
 const fail = (message: string): never => {
@@ -35,6 +51,9 @@ const fail = (message: string): never => {
 const APP_URL = /^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?)$/;
 /** LINE's API over https, or a stand-in on a port of this machine, for tests. */
 const LINE_API_URL = /^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1):\d+(\/\S*)?)$/;
+
+/** An http or https URL: the model server may be on this machine, or hosted. */
+const AI_BASE_URL = /^https?:\/\/\S+$/;
 
 /** null, undefined and '' all mean not set: `NAME=` in an env file gives '', and that must never stop Strapi from starting. */
 const isSet = (value: unknown) => value !== null && value !== undefined && value !== '';
@@ -83,16 +102,38 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
       'config.lineApiBaseUrl must be an https URL without a trailing slash, e.g. https://api.line.me, or http://127.0.0.1:<port> for a stand-in on this machine'
     );
   }
+  // `AI_PROVIDER=` and the like in an env file give '', which means not set.
+  const provider: unknown = merged.aiProvider;
+  if (isSet(provider) && !(AI_PROVIDERS as readonly unknown[]).includes(provider)) {
+    fail(`config.aiProvider must be one of ${AI_PROVIDERS.join(', ')}`);
+  }
+  const model: unknown = merged.aiModel;
+  if (isSet(model) && (typeof model !== 'string' || /\s/.test(model))) {
+    fail("config.aiModel must be a model ID, a string without spaces, or null for the provider's default model");
+  }
+  // The message never repeats the key.
+  const key: unknown = merged.aiApiKey;
+  if (isSet(key) && (typeof key !== 'string' || /\s/.test(key))) {
+    fail('config.aiApiKey must be an API key for the model provider, a string without spaces, or null to label no inquiries');
+  }
+  const aiBase: unknown = merged.aiBaseUrl;
+  if (isSet(aiBase) && (typeof aiBase !== 'string' || !AI_BASE_URL.test(aiBase) || aiBase.endsWith('/'))) {
+    fail('config.aiBaseUrl must be an http or https URL without a trailing slash, e.g. http://127.0.0.1:11434/v1');
+  }
 }
 
 export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
   const config = { ...defaultConfig, ...(strapi.config.get(`plugin::${PLUGIN_ID}`) as Partial<MaisonConfig>) };
-  // An empty value is the same as none: no liffUrl, no token, and LINE's own API.
+  // An empty value is the same as none: no liffUrl, no token, LINE's own API, Anthropic as the provider, and no model, key or base URL.
   return {
     ...config,
     liffUrl: config.liffUrl || null,
     lineChannelAccessToken: config.lineChannelAccessToken || null,
     lineApiBaseUrl: config.lineApiBaseUrl || defaultConfig.lineApiBaseUrl,
+    aiProvider: config.aiProvider || defaultConfig.aiProvider,
+    aiModel: config.aiModel || null,
+    aiApiKey: config.aiApiKey || null,
+    aiBaseUrl: config.aiBaseUrl || null,
   };
 };
 

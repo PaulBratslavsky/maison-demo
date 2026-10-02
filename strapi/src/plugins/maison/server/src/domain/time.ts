@@ -71,3 +71,6 @@ export function zonedDayRange(isoDate: string, timeZone: string): { start: Date;
   next.setUTCDate(next.getUTCDate() + 1);
   return { start: startOfDay(isoDate, timeZone), end: startOfDay(next.toISOString().slice(0, 10), timeZone) };
 }
+
+/** A date as an ISO string, or null when there is none. */
+export const isoOrNull = (value: unknown): string | null => (value ? new Date(value as string | number | Date).toISOString() : null);

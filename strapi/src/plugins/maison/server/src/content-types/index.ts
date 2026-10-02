@@ -1,6 +1,7 @@
 import appointment from './appointment';
 import boutique from './boutique';
 import collection from './collection';
+import inquiry from './inquiry';
 import knowledge from './knowledge';
 import notification from './notification';
 import product from './product';
@@ -16,4 +17,5 @@ export default {
   notification,
   knowledge,
   question,
+  inquiry,
 };

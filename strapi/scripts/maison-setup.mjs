@@ -215,7 +215,7 @@ const main = async () => {
     });
   const customer = await mint(
     'Maison customer',
-    ['plugin::maison.catalog.read', 'plugin::maison.appointments.request', 'plugin::maison.questions.ask'],
+    ['plugin::maison.catalog.read', 'plugin::maison.appointments.request', 'plugin::maison.questions.ask', 'plugin::maison.inquiries.log'],
     'Every customer session of the Maison app runs with this token.'
   );
   const ops = await mint('Maison ops', ['plugin::maison.confirmations.send'], 'An ops agent in the Maison demo, which can retry LINE confirmations.');

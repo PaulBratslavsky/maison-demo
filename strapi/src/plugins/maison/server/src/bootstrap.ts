@@ -13,6 +13,9 @@ const ACTIONS = [
   { uid: 'questions.ask', displayName: 'MCP: hand questions to staff', subCategory: 'mcp' },
   { uid: 'questions.read', displayName: 'Read customer questions', subCategory: 'questions' },
   { uid: 'questions.answer', displayName: 'Answer customer questions on LINE', subCategory: 'questions' },
+  { uid: 'inquiries.log', displayName: 'MCP: log customer inquiries', subCategory: 'mcp' },
+  { uid: 'inquiries.view', displayName: 'Review customer inquiries', subCategory: 'inquiries' },
+  { uid: 'inquiries.reply', displayName: 'Reply to customer inquiries on LINE', subCategory: 'inquiries' },
   { uid: 'demo.manage', displayName: 'Load and reset demo data', subCategory: 'demo' },
 ];
 
@@ -29,6 +32,20 @@ const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   if (!getConfig(strapi).liffUrl) {
     strapi.log.warn('[maison] config.liffUrl is not set, so pending_confirmations will return not_configured.');
   }
+
+  // Labels inquiries every minute, as Pulse's analysisSweep does. With AI off, the sweep only marks new rows skipped.
+  strapi.cron.add({
+    'maison-label-inquiries': {
+      task: async ({ strapi: app }) => {
+        try {
+          await app.plugin(PLUGIN_ID).service('labelling').sweep();
+        } catch (error) {
+          app.log.error(`[maison] The labelling sweep crashed: ${(error as Error).message}`);
+        }
+      },
+      options: { rule: '* * * * *' },
+    },
+  });
 };
 
 export default bootstrap;

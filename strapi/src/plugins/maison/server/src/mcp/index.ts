@@ -9,6 +9,7 @@ import { searchProductsTool } from './tools/search-products';
 import { searchKnowledgeTool } from './tools/search-knowledge';
 import { myAppointmentsTool } from './tools/my-appointments';
 import { handOffToStaffTool } from './tools/hand-off-to-staff';
+import { logInquiryTool } from './tools/log-inquiry';
 import { appointmentRequestsTool } from './tools/appointment-requests';
 import { confirmAppointmentTool } from './tools/confirm-appointment';
 import { requestAppointmentTool } from './tools/request-appointment';
@@ -34,6 +35,7 @@ export const registerMcp = (strapi: Core.Strapi) => {
   if (enabled('request_appointment')) mcp.registerTool(requestAppointmentTool);
   if (enabled('my_appointments')) mcp.registerTool(myAppointmentsTool);
   if (enabled('hand_off_to_staff')) mcp.registerTool(handOffToStaffTool);
+  if (enabled('log_inquiry')) mcp.registerTool(logInquiryTool);
   if (enabled('appointment_requests')) mcp.registerTool(appointmentRequestsTool);
   if (enabled('confirm_appointment')) mcp.registerTool(confirmAppointmentTool);
   if (enabled('pending_confirmations')) mcp.registerTool(pendingConfirmationsTool);

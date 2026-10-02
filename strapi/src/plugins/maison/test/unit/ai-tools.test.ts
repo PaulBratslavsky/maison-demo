@@ -21,7 +21,8 @@ describe('ai-tools for the in-admin chat', () => {
   it('never offers the customer tools or the LINE confirmation tools', () => {
     const names = chatTools().map((tool) => tool.name);
     // pending_confirmations returns every customer's full LINE user ID, and the chat has no LINE tool to use it with.
-    for (const name of ['request_appointment', 'my_appointments', 'hand_off_to_staff', 'pending_confirmations', 'record_confirmation']) {
+    // log_inquiry records a turn for a signed-in LINE customer, and a chat has an admin instead.
+    for (const name of ['request_appointment', 'my_appointments', 'hand_off_to_staff', 'log_inquiry', 'pending_confirmations', 'record_confirmation']) {
       expect(names).not.toContain(name);
     }
   });

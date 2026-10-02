@@ -47,6 +47,7 @@ const tokens = {
     'plugin::maison.catalog.read',
     'plugin::maison.appointments.request',
     'plugin::maison.questions.ask',
+    'plugin::maison.inquiries.log',
   ]),
   staff: await mint('maison-staff', [
     'plugin::maison.catalog.read',

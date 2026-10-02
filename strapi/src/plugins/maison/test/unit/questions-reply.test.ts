@@ -64,7 +64,8 @@ interface WorldOptions {
 /**
  * The Document Service as notify and answer read and write it. The question is kept, and `update` writes into it as the
  * database would, so a second call sees what the first one did. A piece is found only in its own language, and only in
- * the status asked for. A knowledge entry gets the ID `k-new`.
+ * the status asked for. A knowledge entry gets the ID `k-new`. The inquiries service is a stand-in that does nothing,
+ * so a test reads what `answer` asked of it.
  */
 const world = ({ question = OPEN, pieces = COFFRET, config = WITH_TOKEN }: WorldOptions = {}) => {
   const stored: Doc | null = question && { ...question };
@@ -82,8 +83,9 @@ const world = ({ question = OPEN, pieces = COFFRET, config = WITH_TOKEN }: World
     if (uid === UID.knowledge) return { create: createEntry, publish: publishEntry };
     throw new Error(`These tests have no ${uid}.`);
   };
-  const strapi = fakeStrapi({ documents, config });
-  return { service: questions({ strapi }), strapi, stored, findQuestion, update, findPiece, createEntry, publishEntry };
+  const markQuestionReplied = vi.fn(async (_reference: string, _reply: Doc): Promise<void> => undefined);
+  const strapi = fakeStrapi({ documents, config, services: { inquiries: { markQuestionReplied } } });
+  return { service: questions({ strapi }), strapi, stored, findQuestion, update, findPiece, createEntry, publishEntry, markQuestionReplied };
 };
 type World = ReturnType<typeof world>;
 
@@ -104,12 +106,13 @@ const pushed = () => {
   return { url, init, body, message: body.messages[0] as { type: string; text: string } };
 };
 
-/** Nothing went out to LINE, and nothing was written: not the question, and not product knowledge. */
-const expectNothingDone = ({ update, createEntry, publishEntry }: World) => {
+/** Nothing went out to LINE, and nothing was written: not the question, not product knowledge, and not an inquiry. */
+const expectNothingDone = ({ update, createEntry, publishEntry, markQuestionReplied }: World) => {
   expect(fetchMock).not.toHaveBeenCalled();
   expect(update).not.toHaveBeenCalled();
   expect(createEntry).not.toHaveBeenCalled();
   expect(publishEntry).not.toHaveBeenCalled();
+  expect(markQuestionReplied).not.toHaveBeenCalled();
 };
 
 /** Where a mock was first called in the order of all mock calls, to say what ran before what. */
@@ -869,6 +872,142 @@ describe('questions.answer', () => {
   });
 });
 
+describe("questions.answer, the question's inquiries", () => {
+  it("marks the question's inquiries replied once the question is answered: with the staff's text, their name, and when", async () => {
+    const { service, markQuestionReplied } = world();
+
+    await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+    // The staff member's own words, and not the message LINE carried with its greeting and signature.
+    expect(markQuestionReplied).toHaveBeenCalledExactlyOnceWith('Q-4821', { replyText: TEXT, repliedBy: 'Jane', at: NOW });
+  });
+
+  it('names Maison as who replied when the answer speaks for the team', async () => {
+    const { service, markQuestionReplied } = world();
+
+    await service.answer('Q-4821', ADD_TO_KNOWLEDGE, null, NOW);
+
+    expect(markQuestionReplied).toHaveBeenCalledExactlyOnceWith('Q-4821', { replyText: TEXT, repliedBy: 'Maison', at: NOW });
+  });
+
+  it('marks them after the question itself is recorded as answered, not before', async () => {
+    const { service, update, markQuestionReplied } = world();
+
+    await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+    expect(firstCall(fetchMock)).toBeLessThan(firstCall(update));
+    expect(firstCall(update)).toBeLessThan(firstCall(markQuestionReplied));
+  });
+
+  it.each([
+    ['without adding the answer to product knowledge', ONLY_SEND],
+    ['when the answer is added to product knowledge', ADD_TO_KNOWLEDGE],
+  ])('marks them %s', async (_label, reply) => {
+    const { service, markQuestionReplied } = world();
+    expect((await service.answer('Q-4821', reply, 'Jane', NOW)).status).toBe('sent');
+    expect(markQuestionReplied).toHaveBeenCalledOnce();
+  });
+
+  it('marks them when the answer was sent but could not be added to product knowledge', async () => {
+    const { service, createEntry, markQuestionReplied } = world();
+    createEntry.mockRejectedValueOnce(new Error('database is locked'));
+
+    const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+    expect(outcome).toMatchObject({ status: 'sent', warning: true });
+    expect(markQuestionReplied).toHaveBeenCalledExactlyOnceWith('Q-4821', { replyText: TEXT, repliedBy: 'Jane', at: NOW });
+  });
+
+  it.each([
+    ['open', OPEN],
+    ['taken', TAKEN],
+  ])('marks nothing when LINE does not take the answer to the %s question: it is still waiting for one', async (_label, question) => {
+    useFetch(lineAnswers(400, { message: 'Bad request' }));
+    const { service, markQuestionReplied } = world({ question });
+
+    expect((await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW)).status).toBe('failed');
+
+    expect(markQuestionReplied).not.toHaveBeenCalled();
+  });
+
+  it('marks nothing when the question could not be recorded as answered: it still shows as open, and so must its inquiries', async () => {
+    const { service, update, markQuestionReplied } = world();
+    update.mockRejectedValueOnce(new Error('database is locked'));
+
+    const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+    expect(outcome).toMatchObject({ status: 'sent', warning: true });
+    expect(markQuestionReplied).not.toHaveBeenCalled();
+  });
+
+  it('marks nothing for a question that is answered already, or that is not there', async () => {
+    for (const question of [ANSWERED, null]) {
+      const w = world({ question });
+      await w.service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+      expect(w.markQuestionReplied).not.toHaveBeenCalled();
+    }
+  });
+
+  it('marks nothing on Let them know: the customer has only been told that someone has the question', async () => {
+    const { service, markQuestionReplied } = world();
+
+    expect((await service.notify('Q-4821', 'Jane', NOW)).status).toBe('sent');
+
+    expect(markQuestionReplied).not.toHaveBeenCalled();
+  });
+
+  describe('when marking them fails', () => {
+    it.each([
+      ['rejects with an error', () => Promise.reject(new Error('database is locked')), 'database is locked'],
+      ['throws', () => { throw new Error('database is locked'); }, 'database is locked'],
+      ['rejects with something that is not an error', () => Promise.reject('boom'), 'boom'],
+    ])('still answers sent, with the outcome it would have had, and logs a warning: it %s', async (_label, fails, reason) => {
+      const { service, markQuestionReplied, update, strapi } = world();
+      markQuestionReplied.mockImplementationOnce(fails);
+
+      const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+      expect(outcome).toEqual({
+        reference: 'Q-4821',
+        status: 'sent',
+        message: 'Sent the answer to Q-4821 on LINE. Added it to product knowledge.',
+        knowledgeDocumentId: 'k-new',
+      });
+      expect(outcome).not.toHaveProperty('warning');
+      expect(update).toHaveBeenCalledOnce();
+      expect(strapi.log.warn).toHaveBeenCalledExactlyOnceWith(`[maison] Q-4821 is answered, but its inquiries couldn't be marked replied: ${reason}`);
+      expect(strapi.log.error).not.toHaveBeenCalled();
+    });
+
+    it('still reports a knowledge entry that could not be added, as it does when nothing fails', async () => {
+      const { service, createEntry, markQuestionReplied, strapi } = world();
+      createEntry.mockRejectedValueOnce(new Error('disk is full'));
+      markQuestionReplied.mockRejectedValueOnce(new Error('database is locked'));
+
+      const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+      expect(outcome).toEqual({
+        reference: 'Q-4821',
+        status: 'sent',
+        message: "Sent the answer to Q-4821 on LINE. It couldn't be added to product knowledge: disk is full",
+        warning: true,
+      });
+      expect(strapi.log.warn).toHaveBeenCalledTimes(2);
+    });
+
+    it('takes the token out of the reason it logs', async () => {
+      const { service, markQuestionReplied, strapi } = world();
+      markQuestionReplied.mockRejectedValueOnce(new Error(`request to https://x.test/?access_token=${TOKEN} failed`));
+
+      const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Jane', NOW);
+
+      expect(outcome.status).toBe('sent');
+      expect(strapi.log.warn.mock.calls[0][0]).toContain('access_token=[token] failed');
+      expect(JSON.stringify([outcome, strapi.log.warn.mock.calls, strapi.log.error.mock.calls])).not.toContain(TOKEN);
+    });
+  });
+});
+
 describe('a second click', () => {
   it('on Let them know sends nothing more: the question is taken, so it answers already_taken, naming who took it', async () => {
     const w = world();
@@ -894,6 +1033,7 @@ describe('a second click', () => {
     expect(w.createEntry).toHaveBeenCalledOnce();
     expect(w.publishEntry).toHaveBeenCalledOnce();
     expect(w.update).toHaveBeenCalledOnce();
+    expect(w.markQuestionReplied).toHaveBeenCalledOnce();
     expect(w.stored).toMatchObject({ status: 'answered', staffName: 'Jane', answer: TEXT });
   });
 

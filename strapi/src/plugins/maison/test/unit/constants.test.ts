@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION, MAX_OPEN_QUESTIONS, PLUGIN_ID, QUESTION_REASONS, QUESTION_STATUSES, TOOL_NAMES, UID } from '../../server/src/constants';
+import {
+  ACTION,
+  ANALYSIS_STATUSES,
+  CLOSE_REASONS,
+  INQUIRY_FILTERS,
+  INQUIRY_KINDS,
+  INQUIRY_QUEUES,
+  INQUIRY_STATUSES,
+  INQUIRY_VIA,
+  LABEL_BATCH,
+  MAX_LABEL_ATTEMPTS,
+  MAX_OPEN_QUESTIONS,
+  PLUGIN_ID,
+  QUESTION_REASONS,
+  QUESTION_STATUSES,
+  SENTIMENT_LABELS,
+  TOOL_NAMES,
+  UID,
+} from '../../server/src/constants';
 
 describe('constants', () => {
   it('uses the maison plugin id everywhere', () => {
@@ -8,15 +26,15 @@ describe('constants', () => {
     for (const action of Object.values(ACTION)) expect(action.startsWith('plugin::maison.')).toBe(true);
   });
 
-  it('declares the twelve tools exactly once each', () => {
-    expect(TOOL_NAMES).toHaveLength(12);
-    expect(new Set(TOOL_NAMES).size).toBe(12);
+  it('declares the thirteen tools exactly once each', () => {
+    expect(TOOL_NAMES).toHaveLength(13);
+    expect(new Set(TOOL_NAMES).size).toBe(13);
   });
 
-  it('lists hand_off_to_staff right after my_appointments, in the order the tools are registered', () => {
+  it('lists hand_off_to_staff right after my_appointments, and log_inquiry right after it, in the order the tools are registered', () => {
     expect(TOOL_NAMES).toEqual([
       'browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge',
-      'request_appointment', 'my_appointments', 'hand_off_to_staff',
+      'request_appointment', 'my_appointments', 'hand_off_to_staff', 'log_inquiry',
       'appointment_requests', 'confirm_appointment', 'pending_confirmations', 'record_confirmation',
     ]);
   });
@@ -34,5 +52,25 @@ describe('constants', () => {
     expect(QUESTION_REASONS).toEqual(['no_answer', 'asked_for_person']);
     expect(QUESTION_STATUSES).toEqual(['open', 'taken', 'answered']);
     expect(MAX_OPEN_QUESTIONS).toBe(5);
+  });
+
+  it('declares the inquiry: its UID, its three actions, the values of its labels and workflow, and the limits on labelling', () => {
+    expect(UID.inquiry).toBe('plugin::maison.inquiry');
+    expect(ACTION.inquiriesLog).toBe('plugin::maison.inquiries.log');
+    expect(ACTION.inquiriesView).toBe('plugin::maison.inquiries.view');
+    expect(ACTION.inquiriesReply).toBe('plugin::maison.inquiries.reply');
+    expect(INQUIRY_KINDS).toEqual(['question', 'complaint', 'praise', 'other']);
+    expect(SENTIMENT_LABELS).toEqual(['positive', 'neutral', 'negative']);
+    expect(ANALYSIS_STATUSES).toEqual(['pending', 'analyzed', 'failed', 'skipped']);
+    expect(INQUIRY_QUEUES).toEqual(['needs-answer', 'complaint', 'praise', 'none']);
+    expect(INQUIRY_STATUSES).toEqual(['open', 'replied', 'closed']);
+    expect(CLOSE_REASONS).toEqual(['answered-elsewhere', 'not-needed', 'spam']);
+    expect(INQUIRY_VIA).toEqual(['concierge', 'line-chat']);
+    expect(MAX_LABEL_ATTEMPTS).toBe(5);
+    expect(LABEL_BATCH).toBe(10);
+  });
+
+  it('declares the filters the Inquiries tab shows, in the order of its pills', () => {
+    expect(INQUIRY_FILTERS).toEqual(['needs-answer', 'complaint', 'praise', 'not-labelled', 'all']);
   });
 });

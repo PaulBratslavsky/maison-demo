@@ -43,7 +43,7 @@ type HandlerResult = { isError?: boolean; content: Array<{ type: string; text?: 
 
 /**
  * What the in-admin chat offers: four catalog reads (not search_knowledge) and the two staff tools.
- * request_appointment, my_appointments and hand_off_to_staff act for a signed-in LINE customer, and a chat has an admin instead.
+ * request_appointment, my_appointments, hand_off_to_staff and log_inquiry act for a signed-in LINE customer, and a chat has an admin instead.
  * pending_confirmations and record_confirmation are for the ops agent that delivers LINE confirmations. The chat has no
  * LINE tool, and pending_confirmations returns every customer's full LINE user ID, which would reach the model and its
  * memory and notes tools. Staff see whether a confirmation was sent, with the customer masked, through appointment_requests.

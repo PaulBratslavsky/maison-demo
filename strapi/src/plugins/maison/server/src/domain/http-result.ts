@@ -2,9 +2,10 @@ import type { ErrorCode } from './tool-result';
 
 /**
  * The HTTP status of each expected failure on the REST routes.
- * 409: the same request can succeed later, once something changes (the boutique's hours, the customer's open
- * requests or questions, a confirmation). 422: it can't succeed as sent, because time only moves forward. 503: the
- * server can't check who is calling, because customer sign-in isn't configured, or because checking failed this time.
+ * 409: the request conflicts with how things stand now (the boutique's hours, the customer's open requests or
+ * questions, a confirmation, an inquiry that is closed or replied to already, or didn't fail). 422: it can't succeed as
+ * sent, because time only moves forward. 503: the server can't check who is calling, because customer sign-in isn't
+ * configured, or because checking failed this time.
  */
 const STATUS: Record<ErrorCode, number> = {
   invalid_input: 400,
@@ -13,6 +14,9 @@ const STATUS: Record<ErrorCode, number> = {
   boutique_closed: 409,
   too_many_open_requests: 409,
   too_many_open_questions: 409,
+  already_closed: 409,
+  already_replied: 409,
+  not_failed: 409,
   not_published: 409,
   in_the_past: 422,
   not_configured: 503,

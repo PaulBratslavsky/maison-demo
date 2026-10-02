@@ -9,9 +9,10 @@
   },
   "options": { "draftAndPublish": false },
   "pluginOptions": { "content-manager": { "visible": false }, "content-type-builder": { "visible": false } },
+  "config": { "attributes": { "customer": { "hidden": true } } },
   "attributes": {
     "reference": { "type": "string", "required": true },
-    "customer": { "type": "string", "required": true, "private": true, "visible": false },
+    "customer": { "type": "string", "required": true, "private": true, "visible": false, "searchable": false },
     "customerName": { "type": "string", "maxLength": 100 },
     "question": { "type": "text", "required": true, "maxLength": 1000 },
     "reason": { "type": "enumeration", "enum": ["no_answer", "asked_for_person"], "default": "no_answer" },
@@ -24,6 +25,6 @@
     "answer": { "type": "text", "maxLength": 2000 },
     "knowledgeDocumentId": { "type": "string" },
     "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed"] },
-    "lineDetail": { "type": "string", "maxLength": 500 }
+    "lineDetail": { "type": "text", "maxLength": 500 }
   }
 }

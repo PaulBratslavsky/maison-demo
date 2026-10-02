@@ -27,18 +27,30 @@ export function teaser(text: string, max = 160): string {
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }
 
+/** Cuts to at most `max` UTF-16 units: whole characters, ending with "…", one unit, when it cut. */
+const cutToUnits = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  let kept = '';
+  for (const char of text) {
+    if (kept.length + char.length > max - 1) break;
+    kept += char;
+  }
+  return `${kept}…`;
+};
+
 /**
  * Collapses whitespace and cuts to at most `max` UTF-16 units, which is what Strapi's string `maxLength` counts: an
  * emoji is two, so a field of 100 takes 50 of them. Keeps whole characters (code points), never half an emoji, and
  * ends with "…", one unit, when it cut.
  */
 export function fitUnits(text: string, max: number): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
-  if (collapsed.length <= max) return collapsed;
-  let kept = '';
-  for (const char of collapsed) {
-    if (kept.length + char.length > max - 1) break;
-    kept += char;
-  }
-  return `${kept}…`;
+  return cutToUnits(text.replace(/\s+/g, ' ').trim(), max);
+}
+
+/**
+ * Trims and cuts to at most `max` UTF-16 units like `fitUnits`, but keeps the line breaks and the spaces inside the
+ * lines, for text people read as it was written. A line break is one unit.
+ */
+export function fitLines(text: string, max: number): string {
+  return cutToUnits(text.trim(), max);
 }

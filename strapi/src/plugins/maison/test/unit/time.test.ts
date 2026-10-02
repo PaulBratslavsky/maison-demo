@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatEnDateTime, formatJaDateTime, toZonedIso, zonedDayRange } from '../../server/src/domain/time';
+import { formatEnDateTime, formatJaDateTime, isoOrNull, toZonedIso, zonedDayRange } from '../../server/src/domain/time';
 
 describe('formatJaDateTime', () => {
   it('formats a Tokyo date and time in Japanese', () => {
@@ -68,5 +68,20 @@ describe('zonedDayRange', () => {
 
   it('gives a 23-hour day when daylight saving time starts', () => {
     expect(range('2026-03-08', 'America/New_York')).toEqual(['2026-03-08T05:00:00.000Z', '2026-03-09T04:00:00.000Z']);
+  });
+});
+
+describe('isoOrNull', () => {
+  it.each([null, undefined, ''])('is null for %j: there is no date', (value) => {
+    expect(isoOrNull(value)).toBeNull();
+  });
+
+  it.each([
+    ['an ISO string already', '2026-10-03T01:12:00.000Z'],
+    ['an ISO string with an offset', '2026-10-03T10:12:00+09:00'],
+    ['a Date', new Date('2026-10-03T01:12:00.000Z')],
+    ['milliseconds since 1970', Date.parse('2026-10-03T01:12:00.000Z')],
+  ])('writes %s as an ISO string in UTC', (_label, value) => {
+    expect(isoOrNull(value)).toBe('2026-10-03T01:12:00.000Z');
   });
 });

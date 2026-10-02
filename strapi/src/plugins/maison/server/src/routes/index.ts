@@ -52,6 +52,45 @@ export default {
         handler: 'questions.answer',
         config: { policies: allow(ACTION.questionsAnswer) },
       },
+      { method: 'GET', path: '/inquiries', handler: 'inquiries.list', config: { policies: allow(ACTION.inquiriesView) } },
+      // Ahead of every route that takes a :documentId, so none of them can take "summary" or "quota" for one.
+      {
+        method: 'GET',
+        path: '/inquiries/summary',
+        handler: 'inquiries.summary',
+        config: { policies: allow(ACTION.inquiriesView) },
+      },
+      {
+        method: 'GET',
+        path: '/inquiries/quota',
+        handler: 'inquiries.quota',
+        config: { policies: allow(ACTION.inquiriesView) },
+      },
+      // Reply on LINE, Close, Change label and Label again: whoever may reply to customers works the queue.
+      {
+        method: 'POST',
+        path: '/inquiries/:documentId/reply',
+        handler: 'inquiries.reply',
+        config: { policies: allow(ACTION.inquiriesReply) },
+      },
+      {
+        method: 'POST',
+        path: '/inquiries/:documentId/close',
+        handler: 'inquiries.close',
+        config: { policies: allow(ACTION.inquiriesReply) },
+      },
+      {
+        method: 'POST',
+        path: '/inquiries/:documentId/label',
+        handler: 'inquiries.label',
+        config: { policies: allow(ACTION.inquiriesReply) },
+      },
+      {
+        method: 'POST',
+        path: '/inquiries/:documentId/label-again',
+        handler: 'inquiries.labelAgain',
+        config: { policies: allow(ACTION.inquiriesReply) },
+      },
       { method: 'POST', path: '/demo/seed', handler: 'demo.seed', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/reset', handler: 'demo.reset', config: { policies: allow(ACTION.demoManage) } },
     ],

@@ -1,6 +1,6 @@
 /**
- * LINE's Messaging API, as Strapi calls it: a push to one customer, and a customer's display name. Neither ever throws:
- * what went wrong becomes the detail, or no name.
+ * LINE's Messaging API, as Strapi calls it: a push to one customer, a customer's display name, and this month's message
+ * usage. None of them ever throws: what went wrong becomes the detail, no name, or no usage.
  */
 import { fitUnits } from './text';
 
@@ -21,6 +21,8 @@ export type LineMessage = { type: 'flex'; altText: string; contents: unknown } |
 export const PUSH_TIMEOUT_MS = 8000;
 /** LINE gets this long to give a customer's display name. A hand-off never waits longer for it. */
 export const PROFILE_TIMEOUT_MS = 3000;
+/** LINE gets this long for each of the two answers about this month's usage. The page asks for them as it polls. */
+export const USAGE_TIMEOUT_MS = 3000;
 
 /** The `message` of LINE's error body, `{ "message": "…", "details": […] }`, or '' when there's none. */
 const lineMessageOf = (body: string): string => {
@@ -80,5 +82,48 @@ export const getDisplayName = async ({ apiBaseUrl, token }: LineApi, userId: str
     return name ? fitUnits(name, 100) : null;
   } catch {
     return null;
+  }
+};
+
+/** This month's messages on the channel: how many it has sent, and the most it may send. */
+export interface MonthlyUsage {
+  used: number | null;
+  /** Null when the channel has no limit, and also when LINE gave no answer: `used` is null then too. */
+  limit: number | null;
+}
+
+const NO_USAGE: MonthlyUsage = { used: null, limit: null };
+
+/** A count LINE reports: a whole number from 0. */
+const isCount = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+
+/** LINE's answer to a GET as JSON, or null when it refuses. Rejects when there is no answer, or it isn't JSON. */
+const getJson = async ({ apiBaseUrl, token }: LineApi, path: string): Promise<unknown> => {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS),
+  });
+  return response.ok ? response.json() : null;
+};
+
+/**
+ * This month's usage on the channel, from LINE's Get number of messages sent this month and Get the target limit for
+ * additional messages, both asked at once, each within USAGE_TIMEOUT_MS. The limit is null when LINE says the channel has
+ * none (type `none`). When either call is refused, doesn't answer, or answers with something other than what LINE
+ * documents, both are null: a total with no limit beside it would read as a channel with no limit.
+ */
+export const getMonthlyUsage = async (api: LineApi): Promise<MonthlyUsage> => {
+  try {
+    const [consumption, quota] = (await Promise.all([
+      getJson(api, '/v2/bot/message/quota/consumption'),
+      getJson(api, '/v2/bot/message/quota'),
+    ])) as [{ totalUsage?: unknown } | null, { type?: unknown; value?: unknown } | null];
+    const used = consumption?.totalUsage;
+    if (!isCount(used)) return NO_USAGE;
+    if (quota?.type === 'none') return { used, limit: null };
+    if (quota?.type === 'limited' && isCount(quota.value)) return { used, limit: quota.value };
+    return NO_USAGE;
+  } catch {
+    return NO_USAGE;
   }
 };

@@ -1,6 +1,17 @@
 import { z } from '@strapi/utils';
 
-import { CATEGORIES, CREATED_VIA, KNOWLEDGE_CATEGORIES, LOCALES, OCCASIONS, QUESTION_REASONS } from '../constants';
+import {
+  CATEGORIES,
+  CLOSE_REASONS,
+  CREATED_VIA,
+  INQUIRY_FILTERS,
+  INQUIRY_KINDS,
+  KNOWLEDGE_CATEGORIES,
+  LOCALES,
+  OCCASIONS,
+  QUESTION_REASONS,
+  SENTIMENT_LABELS,
+} from '../constants';
 import { ISO_DATE, isRealIsoDate } from '../domain/hours';
 import { failure, type ServiceFailure } from '../domain/service-result';
 
@@ -177,6 +188,41 @@ export const answerInput = z
     message: 'Pick a category to add the answer to product knowledge.',
     path: ['category'],
   });
+
+/**
+ * What the app's server logs after each concierge turn. No customer field: the customer always comes from the caller's
+ * LINE sign-in. The limits are above what the inquiry holds (1,000 and 2,000), which the service cuts to, so a long turn
+ * is logged and never refused.
+ */
+export const logInquiryInput = z.object({
+  message: z.string().trim().min(1).max(4000).describe("The customer's last message."),
+  reply: z.string().max(8000).optional().describe("The concierge's final text for the turn."),
+  knowledgeFound: z.boolean().describe('Whether any search_knowledge call in the turn returned an entry.'),
+  handedOff: z.boolean().describe('Whether the turn handed the question to staff.'),
+  questionReference: questionReferenceInput.optional().describe('The question the hand-off recorded.'),
+  productSlug: slugInput.optional().describe('The product page the customer was on.'),
+  locale: localeInput,
+});
+
+/** Staff filters for inquiries, as the admin's Inquiries tab sends them. Without a filter: needs-answer. */
+export const inquiryListInput = z.object({
+  filter: z.enum(INQUIRY_FILTERS).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+/** What staff send with Close: why the inquiry needs nothing more. */
+export const closeInquiryInput = z.object({ reason: z.enum(CLOSE_REASONS) });
+
+/** What staff send with Change label: a kind, a sentiment, or both. */
+export const changeLabelInput = z
+  .object({ kind: z.enum(INQUIRY_KINDS).optional(), sentimentLabel: z.enum(SENTIMENT_LABELS).optional() })
+  .refine((input) => input.kind !== undefined || input.sentimentLabel !== undefined, { message: 'Give a kind, a sentiment, or both.' });
+
+/**
+ * What staff send with Reply on LINE: the text for the customer, trimmed, of 1 to 2,000 characters, which is what the
+ * inquiry's `replyText` holds. There is no field for who replies: the signed-in admin does.
+ */
+export const replyInquiryInput = z.object({ text: z.string().trim().min(1).max(2000) });
 
 /** Zod issues on one line, e.g. `reference: Use a reference like APT-4821.` */
 export const describeIssues = (error: z.ZodError): string =>

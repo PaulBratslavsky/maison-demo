@@ -30,6 +30,11 @@ describe('the actions bootstrap registers', () => {
     const registered = await registeredActions();
     for (const action of [ACTION.questionsAsk, ACTION.questionsRead, ACTION.questionsAnswer]) expect(registered, action).toContain(action);
   });
+
+  it('include the three inquiry actions: logging a turn, reviewing inquiries and replying to them on LINE', async () => {
+    const registered = await registeredActions();
+    for (const action of [ACTION.inquiriesLog, ACTION.inquiriesView, ACTION.inquiriesReply]) expect(registered, action).toContain(action);
+  });
 });
 
 describe("the admin panel's permissions for customer questions", () => {
