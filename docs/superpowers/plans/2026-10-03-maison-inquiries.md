@@ -13,8 +13,9 @@
 ## Global Constraints
 
 - **Local only, on new branches.** Plugin: branch `feat/maison-inquiries` from `feat/maison-follow-up`, in a new worktree `~/work/plugin-dev/plugins/strapi-store-demo-mcp-inquiries`, with `node_modules` symlinked to the main checkout's. Demo: branch `feat/maison-inquiries` from `feat/maison-follow-up` in `~/work/maison-demo`. Never push, merge or deploy ("dont deploy the branch into main unitll we review together").
-- **Nothing reaches LINE or Anthropic from tests or local checks.** Unit tests stub `fetch`. Integration suites point `lineApiBaseUrl` and `anthropicApiBaseUrl` at stand-ins on this machine.
-- **Never read, print or use a real key.** No Anthropic key is available here. Without `anthropicApiKey`, labelling sends nothing, and rows stay `pending` under **Not labelled**.
+- **Nothing reaches LINE or a paid model from tests or local checks.** Unit tests stub `fetch` and use the AI SDK's mock models. Integration suites point `lineApiBaseUrl` and `aiBaseUrl` at stand-ins on this machine. Live labelling checks run on Ollama, unless Paul runs them with his key.
+- **Never read, print or use a real key.** No Anthropic key is available here. Without AI settings (`AI_API_KEY`, or `AI_PROVIDER=openai-compatible` with `AI_BASE_URL`), labelling is off: the sweep marks new rows `skipped`, as Pulse does, and they show under **Not labelled**. Local checks use a real local model through Ollama (`openai-compatible`), so no key is needed.
+- **Model calls go through the AI SDK, as Pulse does** (`~/work/pulse/apps/cms/src/api/analysis/services/provider.ts` and `ai.ts`). Never call a model API with raw HTTP (Paul, 2 Oct 2026).
 - **The customer comes from the session, never from arguments.** Staff see it masked. The model never sees a LINE ID.
 - **A failed log never fails the customer's turn** (spec section 3).
 - **The model's labels never decide on their own:** the queue rule is code (spec section 3, "The queue rule").
@@ -379,137 +380,216 @@ Register it in `mcp/index.ts` after `hand_off_to_staff`. Add `'log_inquiry'` to 
 
 ---
 
-### Task 3: The labelling sweep
+### Task 3: The labelling sweep, as Pulse does it
+
+**Reference: Pulse** (`~/work/pulse/apps/cms`). Paul decided on 2 Oct 2026: use the AI SDK the way Pulse does, with Pulse's setting names, and never call a model API with raw HTTP. Read these before writing code:
+- `src/api/analysis/services/provider.ts`: the one place a model provider is chosen.
+- `src/api/analysis/services/ai.ts`, `analyze()` (around line 291): one `generateObject` call per item, with a zod schema and a 30 s timeout.
+- `src/api/analysis/services/sweep.ts`: every-minute sweep, in-progress guard, capped retries, `skipped` when AI is off, `humanCorrected` never overwritten.
+- `config/cron-tasks.ts`: the cron task wraps the sweep in try/catch and logs a crash.
+
+The AI SDK's Anthropic provider (`@ai-sdk/anthropic` 4.0.71, checked in `liff/node_modules`) uses Anthropic's native structured output (`output_config.format`) when the model supports it. It never forces a tool on models that refuse forced tool use. So the provider handles that API difference, and our code never builds a request itself.
 
 **Files:**
-- Create: `server/src/domain/anthropic-labels.ts`, `server/src/services/labelling.ts`
-- Modify: `server/src/config/index.ts`, `server/src/bootstrap.ts`, `server/src/services/index.ts`
-- Test: `test/unit/anthropic-labels.test.ts`, `test/unit/labelling.test.ts` (new), `test/unit/config.test.ts`, `test/integration/inquiries.test.mjs` (new; don't run it)
+- Create: `server/src/ai/provider.ts`, `server/src/services/labelling.ts`, `test/unit/ai-provider.test.ts`, `test/unit/labelling.test.ts`, `test/live/labelling.live.test.ts`, `vitest.live.config.ts`, `test/integration/inquiries.test.mjs` (don't run it)
+- Modify:
+  - `server/src/domain/inquiry-criteria.ts`: remove `LABEL_TOOL`, and the prompt's last line `Call record_labels once.`
+  - `server/src/services/inquiries.ts`: Not labelled, and `changeLabel`, as below
+  - `server/src/config/index.ts`, `server/src/bootstrap.ts`, `server/src/services/index.ts`
+  - `package.json`: the `test:live` script. The controller has already added the dependencies.
+- Test: `test/unit/inquiry-criteria.test.ts`, `test/unit/inquiries-staff.test.ts`, `test/unit/config.test.ts`, and the bootstrap test
 
 **Interfaces:**
-- Consumes: Task 1's criteria and queue rule; Task 2's rows.
+- Consumes: Task 1's criteria (`labelsSchema`, `labelSystemPrompt`, `labelUserMessage`, `PROMPT_VERSION`) and queue rule. Task 2's rows and `inquiries` service.
 - Produces:
-  - `requestLabels(api, model, input)`
-  - service `labelling` with `sweep(now?): Promise<{ labelled: number; failed: number; skipped?: 'no_key' | 'busy' }>`
-  - config `classifierModel`, `anthropicApiKey`, `anthropicApiBaseUrl`
+  - `server/src/ai/provider.ts`:
+    - `AI_PROVIDERS`, `AiProvider` and `AiSettings`
+    - `aiEnabled(settings)`, `modelIdOf(settings)`, `modelVersionOf(settings)` and `languageModelOf(settings)`
+  - The `labelling` service, with `label(input): Promise<Labels>` (throws on any failure) and `sweep(): Promise<{ labelled: number; failed: number; skipped: number; busy?: true }>`
+  - Config `aiProvider`, `aiModel`, `aiApiKey` and `aiBaseUrl`
 
-- [ ] **Step 1: Write the failing tests.**
-  - **anthropic-labels,** with fetch stubbed:
-    - **The request:** `POST <base>/v1/messages` with headers `x-api-key`, `anthropic-version: 2023-06-01` and `content-type: application/json`.
-    - **The body:** `model`, `max_tokens: 400`, `system: labelSystemPrompt()`, one user message `labelUserMessage(input)`, `tools: [LABEL_TOOL]`, `tool_choice: { type: 'tool', name: 'record_labels' }`.
-    - **A good `tool_use` block:** answers `{ ok: true, labels }`.
-    - **Failures** each answer `{ ok: false, detail }`:
-      - no `tool_use` block
-      - input `labelsSchema` refuses, with zod's message
-      - a non-2xx, with the API's `error.message`
-      - a timeout (20 s), `Anthropic didn't answer within 20 seconds.`
-      - a network error with its cause
-    - **Secrecy:** the key never appears in a detail.
+- [ ] **Step 1: Write the failing tests.** Unit tests never reach a network: they use the AI SDK's `MockLanguageModelV4` from `ai/test`, as `liff/lib/concierge.test.ts` does, injected in place of `languageModelOf`.
+  - **ai-provider:**
+    - `DEFAULT_MODEL` is Pulse's: `anthropic` gives `claude-haiku-4-5-20251001`, `openai` gives `gpt-5-mini`, `openai-compatible` gives `llama3.1`.
+    - `modelIdOf` returns `aiModel` when set, and the provider's default otherwise.
+    - `modelVersionOf` gives `<provider>/<model>`, e.g. `anthropic/claude-haiku-4-5-20251001`.
+    - `aiEnabled` is true with an API key, or with `openai-compatible` and a base URL. Otherwise it's false: no key, or a base URL with `anthropic`.
+    - `languageModelOf`:
+      - `anthropic` uses `createAnthropic({ apiKey })`, a factory and not the singleton (Pulse's comment says why).
+      - `openai` uses `createOpenAI({ apiKey })`.
+      - `openai-compatible` uses `createOpenAICompatible({ name: 'custom', baseURL, apiKey: apiKey || 'not-needed' })`, and throws a clear error without a base URL.
+      - Test this with `vi.mock` of the three packages.
+  - **labelling.label:**
+    - It calls `generateObject` with `schema: labelsSchema`, `system: labelSystemPrompt()`, `prompt: labelUserMessage({ ...input, reply: input.reply ?? '' })`, and an abort signal that times out after 30 s.
+    - It returns the parsed labels.
+    - A model that answers JSON `labelsSchema` refuses (a score of 2, a kind of "angry") makes it throw. The AI SDK raises `NoObjectGeneratedError`.
   - **labelling.sweep:**
-    - **No key:** no fetch, and it answers `{ labelled: 0, failed: 0, skipped: 'no_key' }`.
-    - **What it picks:** up to `LABEL_BATCH` rows, oldest first. These are `pending` rows, plus `failed` rows under `MAX_LABEL_ATTEMPTS`. It never picks `humanCorrected` rows.
-    - **Success:** labels, `analysisStatus: 'analyzed'`, `modelVersion`, `promptVersion: PROMPT_VERSION`, and `queue` from `queueFor` with the row's `handedOff`. Attempts are unchanged.
-    - **Failure:** `analysisStatus: 'failed'` and attempts + 1. At 5 the row is no longer picked.
-    - **Overlap:** a second `sweep` while one runs answers `skipped: 'busy'` and fetches nothing.
+    - **AI off** (`aiEnabled` false):
+      - It makes no model call.
+      - It marks every `pending` row `skipped`, as Pulse does, and answers `{ labelled: 0, failed: 0, skipped: <count> }`.
+    - **What it picks with AI on:**
+      - Up to `LABEL_BATCH` rows, oldest first.
+      - These are `pending` and `skipped` rows, plus `failed` rows under `MAX_LABEL_ATTEMPTS`.
+      - It never picks `humanCorrected` rows.
+    - **Success:**
+      - It stores the labels, `analysisStatus: 'analyzed'`, `modelVersion: modelVersionOf(settings)` and `promptVersion: PROMPT_VERSION`.
+      - It stores `queue` from `queueFor` with the row's `handedOff`.
+      - Attempts are unchanged.
+    - **Failure:**
+      - `analysisStatus: 'failed'`, and attempts + 1.
+      - One `strapi.log.warn` with the error's message, with any API key cut out.
+      - At 5 attempts the row is no longer picked.
+    - **A person wins:**
+      - Right before writing, the sweep reads the row again.
+      - If it is now `humanCorrected`, or no longer `pending`, `skipped` or `failed`, nothing is written.
+      - (A Change label made during the call must not be overwritten.)
+    - **Overlap:** a second `sweep` while one runs answers `{ labelled: 0, failed: 0, skipped: 0, busy: true }`, and calls nothing.
     - **Isolation:** one row's failure doesn't stop the others.
+  - **inquiries** (Task 2's service):
+    - **Not labelled** (the list filter and the summary count) is open rows whose `analysisStatus` is `pending`, `skipped` or `failed`, and that aren't `humanCorrected`.
+    - **`changeLabel`** sets `humanCorrected` and no longer changes `analysisStatus`. `skipped` keeps Pulse's meaning: AI was off.
+  - **inquiry-criteria:** `LABEL_TOOL` is gone. The prompt's last line is the English line `Write reason and topic in English, whatever language the customer wrote in.` (Task 1's line, now last).
   - **config:**
-    - The defaults are `classifierModel: 'claude-haiku-4-5-20251001'`, `anthropicApiKey: null` and `anthropicApiBaseUrl: 'https://api.anthropic.com'`.
-    - `''` means unset.
-    - The base URL accepts https, or `http://127.0.0.1:<port>`, and refuses a trailing slash.
+    - The defaults are `aiProvider: 'anthropic'`, `aiModel: null`, `aiApiKey: null` and `aiBaseUrl: null`. `''` and null mean unset.
+    - `aiProvider` must be one of `AI_PROVIDERS`. The error lists them, as Pulse's does.
+    - `aiBaseUrl` must be an http(s) URL without a trailing slash.
     - A key with spaces is refused, and the error message never repeats it.
+  - **bootstrap:**
+    - It registers one cron job, `maison-label-inquiries`, with rule `* * * * *`, as Pulse's `analysisSweep`.
+    - Its task catches a crash and logs it with `strapi.log.error`, as Pulse's does.
 - [ ] **Step 2: Run** them. Expected: FAIL.
-- [ ] **Step 3: `server/src/domain/anthropic-labels.ts`:**
+- [ ] **Step 3: `server/src/ai/provider.ts`,** Pulse's `provider.ts` with settings from the plugin's config instead of `process.env`. Keep Pulse's comments where they still apply:
 
 ```ts
-import { LABEL_TOOL, labelSystemPrompt, labelUserMessage, labelsSchema, type LabelInput, type Labels } from './inquiry-criteria';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
-export interface AnthropicApi {
-  apiBaseUrl: string;
-  apiKey: string;
+export const AI_PROVIDERS = ['anthropic', 'openai', 'openai-compatible'] as const;
+export type AiProvider = (typeof AI_PROVIDERS)[number];
+
+export interface AiSettings {
+  aiProvider: AiProvider;
+  aiModel: string | null;
+  aiApiKey: string | null;
+  aiBaseUrl: string | null;
 }
 
-export const LABEL_TIMEOUT_MS = 20_000;
+/** Pulse's defaults: a valid model id per provider, so the first call after setting a key doesn't 404. */
+export const DEFAULT_MODEL: Record<AiProvider, string> = {
+  anthropic: 'claude-haiku-4-5-20251001',
+  openai: 'gpt-5-mini',
+  'openai-compatible': 'llama3.1',
+};
 
-/** One call per inquiry, for every label, through a forced tool. It never throws, and never repeats the key. */
-export const requestLabels = async (
-  { apiBaseUrl, apiKey }: AnthropicApi,
-  model: string,
-  input: LabelInput
-): Promise<{ ok: true; labels: Labels } | { ok: false; detail: string }> => {
-  const redact = (text: string) => text.split(apiKey).join('[key]');
-  try {
-    const response = await fetch(`${apiBaseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        max_tokens: 400,
-        system: labelSystemPrompt(),
-        messages: [{ role: 'user', content: labelUserMessage(input) }],
-        tools: [LABEL_TOOL],
-        tool_choice: { type: 'tool', name: LABEL_TOOL.name },
-      }),
-      signal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
-    });
-    const body = (await response.json().catch(() => null)) as any;
-    if (!response.ok) return { ok: false, detail: redact(`Anthropic answered ${response.status}${body?.error?.message ? `: ${body.error.message}` : '.'}`) };
-    const call = Array.isArray(body?.content) ? body.content.find((block: any) => block?.type === 'tool_use' && block?.name === LABEL_TOOL.name) : null;
-    if (!call) return { ok: false, detail: 'Anthropic answered without the labels.' };
-    const parsed = labelsSchema.safeParse(call.input);
-    if (!parsed.success) return { ok: false, detail: redact(`The labels had the wrong shape: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`) };
-    return { ok: true, labels: parsed.data };
-  } catch (error) {
-    if ((error as Error | undefined)?.name === 'TimeoutError') return { ok: false, detail: `Anthropic didn't answer within ${LABEL_TIMEOUT_MS / 1000} seconds.` };
-    const cause = (error as { cause?: { message?: unknown } } | undefined)?.cause?.message;
-    return { ok: false, detail: redact(`Anthropic couldn't be reached: ${typeof cause === 'string' ? cause : String((error as Error | undefined)?.message ?? error)}`) };
+/** AI is optional: without a key (or a local server for openai-compatible), labelling is off, not degraded. */
+export const aiEnabled = (settings: AiSettings): boolean =>
+  Boolean(settings.aiApiKey) || (settings.aiProvider === 'openai-compatible' && Boolean(settings.aiBaseUrl));
+
+export const modelIdOf = (settings: AiSettings): string => settings.aiModel || DEFAULT_MODEL[settings.aiProvider];
+
+/** Stamped on each labelled inquiry, so a re-label can tell which model produced a label. */
+export const modelVersionOf = (settings: AiSettings): string => `${settings.aiProvider}/${modelIdOf(settings)}`;
+
+/** The model, resolved per call so a key or model change takes effect on the next sweep without a restart. */
+export const languageModelOf = (settings: AiSettings) => {
+  const id = modelIdOf(settings);
+  switch (settings.aiProvider) {
+    case 'anthropic':
+      return createAnthropic({ apiKey: settings.aiApiKey ?? undefined })(id);
+    case 'openai':
+      return createOpenAI({ apiKey: settings.aiApiKey ?? undefined })(id);
+    case 'openai-compatible':
+      if (!settings.aiBaseUrl) throw new Error("aiProvider 'openai-compatible' needs aiBaseUrl (e.g. http://127.0.0.1:11434/v1)");
+      return createOpenAICompatible({ name: 'custom', baseURL: settings.aiBaseUrl, apiKey: settings.aiApiKey || 'not-needed' })(id);
   }
 };
 ```
 
-- [ ] **Step 4: Config.**
-  - Add to `MaisonConfig` and `defaultConfig`: `classifierModel: string` (default `'claude-haiku-4-5-20251001'`), `anthropicApiKey: string | null` (default null), and `anthropicApiBaseUrl: string` (default `'https://api.anthropic.com'`).
-  - Validate them like `lineChannelAccessToken` and `lineApiBaseUrl`.
-  - In `getConfig`, empty values fall back to the defaults.
-- [ ] **Step 5: The sweep,** `server/src/services/labelling.ts`. A closure flag `sweeping` guards it. It selects with:
+- [ ] **Step 4: `server/src/services/labelling.ts`.** `label(input)` is Pulse's `analyze()` for one inquiry:
+
+```ts
+const { object } = await generateObject({
+  model: languageModelOf(settings),
+  schema: labelsSchema,
+  system: labelSystemPrompt(),
+  prompt: labelUserMessage({ ...input, reply: input.reply ?? '' }),
+  // A labelling that takes longer than this is a hung connection, not a slow model: the sweep retries with a capped attempt count.
+  abortSignal: AbortSignal.timeout(LABEL_TIMEOUT_MS),
+});
+```
+
+  - `LABEL_TIMEOUT_MS = 30_000`, as Pulse.
+  - If AI SDK 7's types recurse too deeply over the schema (TS2589), cast `schema` as Pulse does, with Pulse's comment. The SDK still checks the answer against the schema at runtime.
+  - `labelsSchema` uses `z` from `@strapi/utils`, which is zod 4.4.3. AI SDK 7 accepts zod 4 schemas.
+  - `sweep()` follows the tests. A closure flag guards it, reset in `finally`. It selects with:
 
 ```ts
 filters: {
   humanCorrected: { $ne: true },
-  $or: [{ analysisStatus: { $eq: 'pending' } }, { analysisStatus: { $eq: 'failed' }, analysisAttempts: { $lt: MAX_LABEL_ATTEMPTS } }],
+  $or: [
+    { analysisStatus: { $in: ['pending', 'skipped'] } },
+    { analysisStatus: { $eq: 'failed' }, analysisAttempts: { $lt: MAX_LABEL_ATTEMPTS } },
+  ],
 },
 sort: 'createdAt:asc',
 limit: LABEL_BATCH,
 ```
 
-  It updates each row as the tests say, and logs a summary line with `strapi.log.info` only when it labelled or failed something.
+  It logs one summary line with `strapi.log.info`, only when it labelled, failed or skipped something.
+- [ ] **Step 5: Config.**
+  - Add `aiProvider`, `aiModel`, `aiApiKey` and `aiBaseUrl` to `MaisonConfig` and `defaultConfig`.
+  - Validate them like `lineChannelAccessToken` and `lineApiBaseUrl`.
+  - In `getConfig`, empty values fall back to the defaults.
 - [ ] **Step 6: Cron.** At the end of `bootstrap`:
 
 ```ts
-  // Labels pending inquiries every minute; without an Anthropic key the sweep sends nothing.
+  // Labels inquiries every minute, as Pulse's analysisSweep does. With AI off, the sweep only marks new rows skipped.
   strapi.cron.add({
     'maison-label-inquiries': {
       task: async ({ strapi: app }) => {
-        await app.plugin(PLUGIN_ID).service('labelling').sweep();
+        try {
+          await app.plugin(PLUGIN_ID).service('labelling').sweep();
+        } catch (error) {
+          app.log.error(`[maison] The labelling sweep crashed: ${(error as Error).message}`);
+        }
       },
-      options: { rule: '*/1 * * * *' },
+      options: { rule: '* * * * *' },
     },
   });
 ```
 
-  Strapi 5 starts plugin cron jobs whether they're added before or after its own start (checked in `@strapi/core/dist/services/cron.js`: jobs are created `paused: !running`). Update the bootstrap test's fake `strapi` with `cron: { add: vi.fn() }`, and assert the job's name and rule.
+  Strapi 5 starts plugin cron jobs whether they're added before or after its own start (checked in `@strapi/core/dist/services/cron.js`: jobs are created `paused: !running`, and the cron provider always calls `start()`). Give the bootstrap test's fake `strapi` `cron: { add: vi.fn() }`.
 - [ ] **Step 7: The integration suite,** `test/integration/inquiries.test.mjs`, with its own database name:
-  - Stand-ins: a LINE stand-in, as in `questions.test.mjs`, and an Anthropic stand-in that answers `POST /v1/messages` with a `tool_use` block. It labels `{ kind: 'complaint', sentimentScore: -0.6, sentimentLabel: 'negative', answered: true, reason: 'The customer says the strap broke.', topic: 'repairs' }` when the message contains "broke", and otherwise `{ kind: 'question', …, answered: false, topic: 'delivery' }`.
-  - Config: `anthropicApiKey: 'stand-in-key'` and `anthropicApiBaseUrl` set to the stand-in.
-  - Steps:
+  - **Cron:** after `bootStrapi`, call `strapi.cron.stop()`. The harness's `strapi.load()` starts cron, and the per-minute job would race the suite's own sweeps.
+  - **Model:** `aiProvider: 'openai-compatible'`, with `aiBaseUrl` pointing at a stand-in on 127.0.0.1. The stand-in answers the OpenAI chat-completions route the provider calls (`POST /chat/completions`) with `{ choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(labels) }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }`. So the suite goes through the real AI SDK path.
+  - **Labels:**
+    - When the customer's message contains "broke": `{ kind: 'complaint', sentimentScore: -0.6, sentimentLabel: 'negative', answered: true, reason: 'The customer says the strap broke.', topic: 'repairs' }`.
+    - Otherwise: `{ kind: 'question', sentimentScore: 0, sentimentLabel: 'neutral', answered: false, reason: 'No answer was found.', topic: 'delivery' }`.
+  - **A LINE stand-in,** as in `questions.test.mjs`.
+  - **Steps:**
     1. Log three inquiries through the service: a complaint, an unanswered question, and a hand-off with a real question reference made through `questions.ask`.
     2. Run `labelling.sweep()`.
-    3. The complaint lands in the `complaint` queue. The question lands in `needs-answer`. The hand-off stays `needs-answer`, even if labelled `other`.
+    3. Check the queues:
+       - The complaint lands in `complaint`.
+       - The question lands in `needs-answer`.
+       - The hand-off stays `needs-answer`, whatever its labels.
     4. `summary()` counts them.
     5. `changeLabel` on the complaint to `praise` moves it to `praise` and sets `humanCorrected`, and a second sweep leaves it alone.
-
-  Don't run it: it runs in Task 7.
-- [ ] **Step 8: Run** the unit tests, then `npm test`, `npm run test:ts:back`. Expected: PASS.
-- [ ] **Step 9: Commit,** as `feat(inquiries): a cron sweep labels pending inquiries through a forced tool, and the queue follows the labels in code`.
+  - Don't run it: it runs in Task 7.
+- [ ] **Step 8: The live test,** `test/live/labelling.live.test.ts`:
+  - **How it runs:** `npm run test:live` runs `vitest run --config vitest.live.config.ts`, whose `include` is `test/live/**/*.live.test.ts`. `npm test` must not run it.
+  - **Settings:** it reads `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` and `AI_BASE_URL` from the environment. It is skipped unless `aiEnabled`, and never prints the key.
+  - **Five exchanges,** sent through `label()` with the real provider, 90 s timeout per test:
+    - "The strap on my bag broke after a week." gives `complaint`, sentiment `negative`.
+    - "Thank you, the weekender is beautiful." gives `praise`, sentiment `positive`.
+    - A care question, with a reply that answers it and `knowledgeFound: true`, gives `question` and `answered: true`.
+    - A delivery question, with a reply that says staff will answer and `handedOff: true`, gives `question` and `answered: false`.
+    - 「バッグのストラップが一週間で壊れました。」 gives `complaint`. Its `reason` and `topic` have no Japanese characters (`/[぀-ヿ一-鿿]/`).
+  - **Local:** `AI_PROVIDER=openai-compatible AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=<an Ollama model> npm run test:live` uses Ollama, with no key.
+  - **Anthropic:** `AI_API_KEY=… npm run test:live` uses Anthropic. Paul runs that one.
+- [ ] **Step 9: Run** the unit tests, then `npm test`, `npm run test:ts:back`, and `npm run test:live` without AI settings (expected: skipped). Expected: PASS.
+- [ ] **Step 10: Commit,** as `feat(inquiries): a cron sweep labels inquiries through the AI SDK, as Pulse does, and the queue follows the labels in code`.
 
 ---
 
@@ -711,14 +791,14 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
 
 - [ ] **Step 1:** Stop `demo-strapi-stub`. Copy the plugin from the inquiries worktree's `feat/maison-inquiries` into `strapi/src/plugins/maison`, the README's way, and check it blob by blob.
 - [ ] **Step 2: Setup.** The "Maison customer" token gets `'plugin::maison.inquiries.log'`. Update `scripts/maison-setup.test.mjs` if it pins actions.
-- [ ] **Step 3: Config.** In `strapi/config/plugins.ts`, add `anthropicApiKey: env('ANTHROPIC_API_KEY', '') || null` and `anthropicApiBaseUrl: env('MAISON_ANTHROPIC_API_BASE_URL', '') || null`, with a comment: the key labels inquiries; unset, they wait under Not labelled.
+- [ ] **Step 3: Config.** In `strapi/config/plugins.ts`, add Pulse's settings: `aiProvider: env('AI_PROVIDER', '')`, `aiModel: env('AI_MODEL', '')`, `aiApiKey: env('AI_API_KEY', '')` and `aiBaseUrl: env('AI_BASE_URL', '')`. Add a comment: these label inquiries. Unset, labelling is off, and new inquiries wait under Not labelled. `.env.example` gets the four names, with no values.
 - [ ] **Step 4: README.**
-  - Cloud: tick "MCP: log customer inquiries" on the "Maison customer" token by hand. Give staff "Review customer inquiries" and "Reply to customer inquiries on LINE". Set `ANTHROPIC_API_KEY` on the Strapi project to label.
-  - Local: an Anthropic stand-in for checks.
-- [ ] **Step 5: The stand-in.** Add `scripts/anthropic-stand-in.mjs`, on `127.0.0.1:4011`, answering `/v1/messages` as the integration suite's stand-in does. Add `npm run anthropic:stand-in` and a tiny test.
+  - Cloud: tick "MCP: log customer inquiries" on the "Maison customer" token by hand. Give staff "Review customer inquiries" and "Reply to customer inquiries on LINE". To label, set `AI_API_KEY` (an Anthropic key) in the project's environment variables, then redeploy (docs.strapi.io/cloud/projects/settings, "Variables"). `AI_PROVIDER` defaults to `anthropic`, and `AI_MODEL` to `claude-haiku-4-5-20251001`, as in Pulse.
+  - Local: labelling runs on Ollama: `AI_PROVIDER=openai-compatible`, `AI_BASE_URL=http://127.0.0.1:11434/v1`, and `AI_MODEL` set to a pulled model.
+- [ ] **Step 5: No Anthropic stand-in.** Local checks use Ollama, so the controller's early stand-in (`scripts/anthropic-stand-in.mjs`, commit 99515b1) is removed. The LINE stand-in keeps its quota routes.
 - [ ] **Step 6: Run** the demo's `npm test` and the integration suites. Expected: PASS, including `inquiries.test.mjs`.
 - [ ] **Step 7: Commit** the copy and the demo's changes, with a pathspec.
-- [ ] **Step 8: Local check.** Start both stand-ins. Start Strapi with `MAISON_LINE_API_BASE_URL`, `MAISON_ANTHROPIC_API_BASE_URL` and a fake `ANTHROPIC_API_KEY=stand-in` (only for this run). Run `npm run setup` locally, then the app.
+- [ ] **Step 8: Local check.** Start the LINE stand-in. Start Strapi with `MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010`, `AI_PROVIDER=openai-compatible`, `AI_BASE_URL=http://127.0.0.1:11434/v1` and an Ollama `AI_MODEL`. Run `npm run setup` locally, then the app. First run the live test against Ollama: from the plugin, `npm run test:live` with the same three settings.
   1. Ask the concierge three things: a policy question that knowledge answers, one it doesn't, and "the strap broke on my bag".
   2. Within a minute, `GET /maison/inquiries?filter=all` (the staff-check script) shows three labelled rows in the right queues, and the hand-off links to its Q-ref.
   3. `POST /maison/inquiries/<complaint>/reply` pushes once to the LINE stand-in.
