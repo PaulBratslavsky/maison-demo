@@ -27,6 +27,8 @@ const MAX_CHARS = 1000;
 /** The longest question hand_off_to_staff takes (its schema's limit), in UTF-16 units: how Strapi counts a string's length. */
 const MAX_QUESTION = 1000;
 const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 left a long search no room to answer
+/** How long the end-of-turn log may take: Strapi is close, and the customer's stream waits for it to finish. */
+const LOG_TIMEOUT_MS = 5000;
 /** How many days the calendar in the instructions covers, today first. */
 const CALENDAR_DAYS = 14;
 const WEEKDAY_NAMES = {
@@ -244,11 +246,14 @@ const recordedResult = (question: RecordedQuestion) => {
   return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
 };
 
-/** What a hand-off that recorded nothing says, for the log: Strapi's refusal as it gave it, or that its answer has no reference. */
-const whyNothingWasRecorded = (answer: unknown): string => {
+/** Strapi's refusal as it gave it, for the log: the first text part of an error result, cut to 300. None for any other answer, and for a refusal with no text. */
+const refusalTextOf = (answer: unknown): string | undefined => {
   const item = isObject(answer) && answer.isError === true && Array.isArray(answer.content) ? answer.content.find((part) => isObject(part) && part.type === 'text') : undefined;
-  return isObject(item) && typeof item.text === 'string' ? item.text.slice(0, 300) : 'its answer has no reference';
+  return isObject(item) && typeof item.text === 'string' ? item.text.slice(0, 300) : undefined;
 };
+
+/** What a hand-off that recorded nothing says, for the log: Strapi's refusal as it gave it, or that its answer has no reference. */
+const whyNothingWasRecorded = (answer: unknown): string => refusalTextOf(answer) ?? 'its answer has no reference';
 
 /** Whether a search_knowledge result came back whole and found nothing: not a refusal, and its `entries` an empty list. */
 const foundNothing = (result: unknown): result is Record<string, unknown> & { structuredContent: Record<string, unknown> } =>
@@ -332,6 +337,30 @@ export const withAutoHandOff = <TOOLS extends ToolSet>(tools: TOOLS, context: Au
   return { ...tools, search_knowledge: { ...searchTool, execute: searchAndHandOff }, hand_off_to_staff: { ...handOffTool, execute: handOffOnce } } as TOOLS;
 };
 
+/** What a finished turn did, for the inquiry it logs: whether knowledge answered, and the question a hand-off recorded. */
+export const turnFactsOf = (
+  toolResults: ReadonlyArray<{ toolName: string; output: unknown }>
+): { knowledgeFound: boolean; handedOff: boolean; questionReference: string | null } => {
+  let knowledgeFound = false;
+  let questionReference: string | null = null;
+  for (const { toolName, output } of toolResults) {
+    if (toolName === 'search_knowledge' && isObject(output) && output.isError !== true && isObject(output.structuredContent)) {
+      const { entries, handOff } = output.structuredContent;
+      if (Array.isArray(entries) && entries.length > 0) knowledgeFound = true;
+      if (isObject(handOff) && typeof handOff.reference === 'string' && handOff.reference !== '') questionReference ??= handOff.reference;
+    }
+    if (toolName === 'hand_off_to_staff') questionReference ??= recordedQuestionOf(output)?.reference ?? null;
+  }
+  return { knowledgeFound, handedOff: questionReference !== null, questionReference };
+};
+
+/** The concierge's words for the turn: every text part of every step, as the customer read them. */
+export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string }>): string =>
+  content
+    .flatMap((part) => (part.type === 'text' && typeof part.text === 'string' ? [part.text] : []))
+    .join('\n\n')
+    .trim();
+
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
 const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string; product?: unknown } | null => {
   try {
@@ -399,9 +428,41 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
 
   try {
     const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
+    // log_inquiry is the app's own call, made once a turn is over. The model is never offered it: the log says what happened, not what the model says happened.
+    const { log_inquiry: logTool, ...mcpTools } = await mcp.tools();
+    const question = lastQuestionOf(messages);
     // The Maison tools, with the chat's locale, and with the hand-off an empty knowledge search makes on its own.
-    const maisonTools = withAutoHandOff(await withConversationLocale(await mcp.tools(), locale), { question: lastQuestionOf(messages), piece, locale });
+    const maisonTools = withAutoHandOff(await withConversationLocale(mcpTools, locale), { question, piece, locale });
     const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now) };
+    /**
+     * Logs the finished turn in Strapi as an inquiry, for the staff's Inquiries tab. Nothing is logged without the tool (a
+     * token without the permission) or without a question to log. A log that fails, is refused or runs past LOG_TIMEOUT_MS
+     * never changes the customer's turn: the reply is already written, so the log only warns, and this never throws.
+     */
+    const logTurn = async (event: { content: Parameters<typeof turnReplyOf>[0]; toolResults: Parameters<typeof turnFactsOf>[0] }) => {
+      if (!logTool?.execute || question === '') return;
+      let why: string | undefined;
+      try {
+        const { knowledgeFound, handedOff, questionReference } = turnFactsOf(event.toolResults);
+        const answer = await logTool.execute(
+          {
+            message: question,
+            reply: turnReplyOf(event.content),
+            knowledgeFound,
+            handedOff,
+            ...(questionReference ? { questionReference } : {}),
+            ...(piece ? { productSlug: piece } : {}),
+            locale,
+          },
+          // The call's own limit, not the request's signal: a customer who closes the chat after the last word doesn't cut the log.
+          { toolCallId: 'log-inquiry', messages: [], context: undefined, abortSignal: AbortSignal.timeout(LOG_TIMEOUT_MS) }
+        );
+        if (isObject(answer) && answer.isError === true) why = refusalTextOf(answer) ?? 'its answer gives no reason';
+      } catch (error) {
+        why = error instanceof Error ? error.message : String(error);
+      }
+      if (why !== undefined) console.warn("[concierge] The turn couldn't be logged:", why);
+    };
     const result = streamText({
       model: deps.model,
       instructions: conciergeInstructions(locale, now, piece),
@@ -411,8 +472,12 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
-      // onEnd is skipped on abort, and when no step completes, so close in all three.
-      onEnd: close,
+      // onEnd is skipped on abort, and when no step completes, so close in all three. Only a finished turn is logged, and
+      // before the client closes: closing it first would cut the log short.
+      onEnd: async (event) => {
+        await logTurn(event);
+        await close();
+      },
       onAbort: close,
       onError: async ({ error }) => {
         // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).

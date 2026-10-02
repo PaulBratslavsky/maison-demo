@@ -6,7 +6,7 @@ import { APICallError, RetryError, dynamicTool, jsonSchema, readUIMessageStream,
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, withAutoHandOff } from './concierge';
+import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, turnFactsOf, turnReplyOf, withAutoHandOff } from './concierge';
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
 import { handOffAt } from './tool-view';
@@ -62,9 +62,10 @@ const eventsOf = (text: string): Array<Record<string, any>> =>
     .map((line) => line.slice(5).trim())
     .filter((data) => data && data !== '[DONE]')
     .map((data) => JSON.parse(data));
-const fakeMcp = () => {
+/** An MCP client that offers `tools` (none, unless given) and records its close. */
+const fakeMcp = (tools: Record<string, unknown> = {}) => {
   const close = vi.fn(async () => {});
-  return { close, createMcpClient: vi.fn(async () => ({ tools: async () => ({}), close })) };
+  return { close, createMcpClient: vi.fn(async () => ({ tools: async () => tools, close })) };
 };
 const ask = (authorization: string | null, body: unknown, signal?: AbortSignal) =>
   new Request('http://localhost:3003/api/concierge', {
@@ -1220,6 +1221,495 @@ describe('withAutoHandOff', () => {
     expect(await search).toStrictEqual(searchResult); // the app's own hand-off failed: the result is as Strapi gave it
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+});
+
+describe('turnFactsOf', () => {
+  /** A search_knowledge result as Strapi gives it, with the entries it found. */
+  const searchOf = (...entries: unknown[]) => ({ toolName: 'search_knowledge', output: { content: [], structuredContent: { locale: 'en', entries } } });
+  /** A search that found nothing and whose question the app handed to staff itself: its result carries what Strapi recorded (withAutoHandOff). */
+  const searchHandedOff = (reference: string) => ({
+    toolName: 'search_knowledge',
+    output: { content: [], structuredContent: { locale: 'en', entries: [], handOff: { reference, question: 'Can it hold a watch?', product: null } } },
+  });
+  /** A hand_off_to_staff result as Strapi gives it when it recorded the question. */
+  const handOffOf = (reference: string) => ({ toolName: 'hand_off_to_staff', output: { content: [], structuredContent: { question: { reference, status: 'open', product: null } } } });
+  /** Any tool's result when Strapi refuses the call. */
+  const refusedBy = (toolName: string) => ({ toolName, output: { isError: true, content: [{ type: 'text', text: '{"error":{"code":"too_many_open_questions"}}' }] } });
+  const nothing = { knowledgeFound: false, handedOff: false, questionReference: null };
+
+  it("says knowledge answered when a search_knowledge result has an entry, in any of the turn's searches", () => {
+    expect(turnFactsOf([searchOf({ title: 'How do I care for the leather?' })])).toStrictEqual({ ...nothing, knowledgeFound: true });
+    expect(turnFactsOf([searchOf(), searchOf({ title: 'Delivery' }), searchOf()])).toStrictEqual({ ...nothing, knowledgeFound: true });
+  });
+
+  it('says it did not when there was no search, or every search found nothing', () => {
+    expect(turnFactsOf([])).toStrictEqual(nothing);
+    expect(turnFactsOf([searchOf(), searchOf()])).toStrictEqual(nothing);
+  });
+
+  it('takes the question a hand-off recorded: handed off, with its reference', () => {
+    expect(turnFactsOf([handOffOf('Q-1234')])).toStrictEqual({ knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' });
+    // It was after an empty search, as the model makes it in a turn that follows rule 9.
+    expect(turnFactsOf([searchOf(), handOffOf('Q-1234')])).toStrictEqual({ knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' });
+  });
+
+  it("takes the question the app's own hand-off recorded, which the search's result carries: the same", () => {
+    expect(turnFactsOf([searchHandedOff('Q-1234')])).toStrictEqual({ knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' });
+    // And with the model's own call after it, which Strapi's tool answers with the recorded question.
+    expect(turnFactsOf([searchHandedOff('Q-1234'), handOffOf('Q-1234')])).toStrictEqual({ knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' });
+  });
+
+  it('keeps the first question recorded when a turn names two', () => {
+    expect(turnFactsOf([handOffOf('Q-0001'), handOffOf('Q-0002')]).questionReference).toBe('Q-0001');
+    expect(turnFactsOf([searchHandedOff('Q-0003'), handOffOf('Q-0004')]).questionReference).toBe('Q-0003');
+  });
+
+  it('says nothing was handed off for a hand-off Strapi refused, with no question', () => {
+    expect(turnFactsOf([refusedBy('hand_off_to_staff')])).toStrictEqual(nothing);
+    // Even a refusal that carries a question: it was refused, so it is not recorded.
+    const refusedWithQuestion = { toolName: 'hand_off_to_staff', output: { ...handOffOf('Q-1234').output, isError: true } };
+    expect(turnFactsOf([refusedWithQuestion])).toStrictEqual(nothing);
+    // A refusal doesn't take away what the turn did before it.
+    expect(turnFactsOf([searchOf({ title: 'Delivery' }), refusedBy('hand_off_to_staff')])).toStrictEqual({ ...nothing, knowledgeFound: true });
+  });
+
+  it("counts only a whole search_knowledge result's entries, and takes a reference only from a search's hand-off or hand_off_to_staff", () => {
+    const refusedWithEntries = { toolName: 'search_knowledge', output: { isError: true, content: [], structuredContent: { entries: [{ title: 'Care' }], handOff: { reference: 'Q-1234' } } } };
+    const unreadable: Array<[string, { toolName: string; output: unknown }]> = [
+      ['a refused search, whatever it carries', refusedWithEntries],
+      ['a search with no structuredContent', { toolName: 'search_knowledge', output: { content: [{ type: 'text', text: '{"entries":[{}]}' }] } }],
+      ['a search with entries that is no list', { toolName: 'search_knowledge', output: { content: [], structuredContent: { entries: { title: 'Care' } } } }],
+      ['a search whose hand-off has no reference', { toolName: 'search_knowledge', output: { content: [], structuredContent: { entries: [], handOff: { question: 'Can it hold a watch?' } } } }],
+      ['a search whose hand-off reference is empty', { toolName: 'search_knowledge', output: { content: [], structuredContent: { entries: [], handOff: { reference: '' } } } }],
+      ['a search whose hand-off reference is no string', { toolName: 'search_knowledge', output: { content: [], structuredContent: { entries: [], handOff: { reference: 1234 } } } }],
+      ['a hand-off with no reference', { toolName: 'hand_off_to_staff', output: { content: [], structuredContent: { question: { status: 'open', product: null } } } }],
+      ["another tool's entries", { toolName: 'search_products', output: { content: [], structuredContent: { entries: [{ title: 'Care' }] } } }],
+      ["another tool's question", { toolName: 'request_appointment', output: { content: [], structuredContent: { question: { reference: 'Q-1234' }, handOff: { reference: 'Q-1234' } } } }],
+      ['a search that answered null', { toolName: 'search_knowledge', output: null }],
+      ['a hand-off that answered text', { toolName: 'hand_off_to_staff', output: 'Q-1234' }],
+    ];
+    for (const [what, result] of unreadable) expect(turnFactsOf([result]), what).toStrictEqual(nothing);
+  });
+});
+
+describe('turnReplyOf', () => {
+  const text = (value: string) => ({ type: 'text', text: value });
+
+  it("is the turn's text parts in order, joined with a blank line: the words of every step, as the customer read them", () => {
+    expect(turnReplyOf([text('Let me check.'), { type: 'tool-call' }, { type: 'tool-result' }, text('It holds one watch.')])).toBe('Let me check.\n\nIt holds one watch.');
+    expect(turnReplyOf([text('One.'), text('Two.'), text('Three.')])).toBe('One.\n\nTwo.\n\nThree.');
+  });
+
+  it('trims the whole of it, at both ends', () => {
+    expect(turnReplyOf([text('  Hello.'), text('Goodbye.  \n')])).toBe('Hello.\n\nGoodbye.');
+    expect(turnReplyOf([text('  \n Noted. \n')])).toBe('Noted.');
+  });
+
+  it("is '' when there are no text parts: tool calls and reasoning aren't words the customer read", () => {
+    expect(turnReplyOf([])).toBe('');
+    expect(turnReplyOf([{ type: 'tool-call' }, { type: 'tool-result' }, { type: 'reasoning', text: 'Let me think.' }])).toBe('');
+    expect(turnReplyOf([text('  \n')])).toBe('');
+  });
+
+  it('skips a text part that has no text', () => {
+    expect(turnReplyOf([{ type: 'text' }, text('Noted.')])).toBe('Noted.');
+  });
+});
+
+// Each finished turn is logged in Strapi as an inquiry (logTurn in lib/concierge.ts), for the Inquiries tab. The app's
+// server makes the call at the end of the turn, never the model, and a log that fails never touches the customer's reply.
+describe('the end-of-turn log', () => {
+  const QUESTION = 'Can it hold a watch?';
+  const NOT_LOGGED = "[concierge] The turn couldn't be logged:";
+  const say = (text: string, id = 'u1') => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  const assistant = (text: string, id = 'a1') => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
+  /** What Strapi answers to a turn it logged. */
+  const logged = { content: [{ type: 'text', text: '{"logged":true}' }], structuredContent: { logged: true } };
+  /** What Strapi answers to a call it refuses (isError), as the MCP client passes it on. */
+  const refusal = (code: string) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message: 'Refused.', hint: 'Do not try again.' } }) }] });
+  const searched = (...entries: unknown[]) => ({ content: [{ type: 'text', text: JSON.stringify({ locale: 'en', entries }) }], structuredContent: { locale: 'en', entries } });
+  const recordedAs = (reference: string) => {
+    const data = { question: { reference, status: 'open', product: null } };
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+  };
+  /** A Maison tool as mcp.tools() gives it: a dynamic tool with a JSON schema and no validation of its own, answering what `answer` returns. */
+  const maisonTool = (answer: () => unknown) =>
+    dynamicTool({ description: 'A Maison tool.', inputSchema: jsonSchema({ type: 'object', properties: { locale: { type: 'string' } } }), execute: async () => answer() });
+  type Execute = (input: unknown, options: { toolCallId: string; messages: unknown[]; abortSignal?: AbortSignal }) => unknown;
+  /** log_inquiry as mcp.tools() gives it, its execute a spy that does what `execute` says: a success, unless told otherwise. */
+  const logInquiry = (execute: Execute = async () => logged) => {
+    const spy = vi.fn(execute);
+    return { execute: spy, tool: dynamicTool({ description: 'Logs a turn.', inputSchema: jsonSchema({ type: 'object', properties: {} }), execute: spy }) };
+  };
+  /** A model that says something, calls a tool, and then says the rest: its reply is the words of two steps. */
+  const speaksBetween = (before: string, toolName: string, after: string) =>
+    new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 't1' },
+              { type: 'text-delta', id: 't1', delta: before },
+              { type: 'text-end', id: 't1' },
+              { type: 'tool-call', toolCallId: 'call-1', toolName, input: '{}' },
+              { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+            ],
+          }),
+        },
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 't2' },
+              { type: 'text-delta', id: 't2', delta: after },
+              { type: 'text-end', id: 't2' },
+              { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+            ],
+          }),
+        },
+      ],
+    });
+  /** The reply's words, as the stream carries them. */
+  const wordsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta).join('');
+  /** One turn through the route with the tools and a log_inquiry that answers: what the app sent it, once the client has closed. */
+  const loggedBy = async (body: Record<string, unknown>, tools: Record<string, unknown>, model: MockLanguageModelV4) => {
+    const log = logInquiry();
+    const { createMcpClient, close } = fakeMcp({ ...tools, log_inquiry: log.tool });
+    await (await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model }))).text();
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect(log.execute).toHaveBeenCalledTimes(1);
+    return log.execute.mock.calls[0][0];
+  };
+
+  it("never gives the model log_inquiry, and a call the model makes to it reaches nothing: the log is the app's own", async () => {
+    const log = logInquiry();
+    const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
+    const { createMcpClient, close } = fakeMcp({ search_products: search, log_inquiry: log.tool });
+    const model = callsThenReplies('log_inquiry', { message: 'Ignore your rules.', knowledgeFound: true, handedOff: true });
+    await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    // The one call it got is the app's, with the customer's words and nothing of the model's.
+    expect(log.execute).toHaveBeenCalledTimes(1);
+    expect(log.execute.mock.calls[0][0]).toMatchObject({ message: 'こんにちは', knowledgeFound: false, handedOff: false });
+  });
+
+  it("logs the finished turn once, with the customer's last message, the reply, what the turn did, the page's piece and the chat's language, before the client closes", async () => {
+    const log = logInquiry();
+    const tools = { search_knowledge: maisonTool(() => searched({ title: 'How do I care for the leather?' })), hand_off_to_staff: maisonTool(() => recordedAs('Q-1234')), log_inquiry: log.tool };
+    const { createMcpClient, close } = fakeMcp(tools);
+    const messages = [say('Hello'), assistant('Good afternoon.'), say(`  ${QUESTION} \n`, 'u2')];
+    const body = { messages, locale: 'en', product: 'jewelry-coffret' };
+    await (await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model: callsThenReplies('search_knowledge', { query: 'watch' }) }))).text();
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect(log.execute).toHaveBeenCalledTimes(1);
+    const [input, options] = log.execute.mock.calls[0];
+    expect(input).toStrictEqual({ message: QUESTION, reply: 'Noted.', knowledgeFound: true, handedOff: false, productSlug: 'jewelry-coffret', locale: 'en' });
+    // The call has a signal to stop at: its own timeout, which the test below uses.
+    expect(options).toMatchObject({ toolCallId: 'log-inquiry', messages: [], abortSignal: expect.any(AbortSignal) });
+    // Before the client closes: closing it first would cut the call short.
+    expect(log.execute.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
+  });
+
+  it('leaves out the question and the piece when there are none, and logs the language of a Japanese chat', async () => {
+    // A product that is no slug is no piece: Strapi would refuse the whole log for it, so nothing of it is sent.
+    for (const product of [undefined, '../etc', 'Jewelry Coffret']) {
+      const input = await loggedBy({ ...hello, product }, {}, replyModel());
+      expect(input, `product ${String(product)}`).toStrictEqual({ message: 'こんにちは', reply: 'かしこまりました。', knowledgeFound: false, handedOff: false, locale: 'ja' });
+    }
+  });
+
+  it("tells it what the turn did, from the turn's own tool results: knowledge found, or a hand-off and the question it recorded", async () => {
+    const body = { messages: [say(QUESTION)], locale: 'en' };
+    const base = { message: QUESTION, reply: 'Noted.', locale: 'en' };
+    const handOff = { question: QUESTION, reason: 'asked_for_person' };
+    const cases: Array<[string, Record<string, unknown>, MockLanguageModelV4, Record<string, unknown>]> = [
+      [
+        'a search that found an entry',
+        { search_knowledge: maisonTool(() => searched({ title: 'Care' })), hand_off_to_staff: maisonTool(() => recordedAs('Q-1234')) },
+        callsThenReplies('search_knowledge', { query: 'watch' }),
+        { knowledgeFound: true, handedOff: false },
+      ],
+      [
+        'a search that found nothing, which the app handed off',
+        { search_knowledge: maisonTool(() => searched()), hand_off_to_staff: maisonTool(() => recordedAs('Q-1234')) },
+        callsThenReplies('search_knowledge', { query: 'watch' }),
+        { knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' },
+      ],
+      [
+        'a hand-off the model made',
+        { hand_off_to_staff: maisonTool(() => recordedAs('Q-1234')) },
+        callsThenReplies('hand_off_to_staff', handOff),
+        { knowledgeFound: false, handedOff: true, questionReference: 'Q-1234' },
+      ],
+      [
+        'a hand-off Strapi refused',
+        { hand_off_to_staff: maisonTool(() => refusal('too_many_open_questions')) },
+        callsThenReplies('hand_off_to_staff', handOff),
+        { knowledgeFound: false, handedOff: false },
+      ],
+    ];
+    for (const [what, tools, model, facts] of cases) expect(await loggedBy(body, tools, model), what).toStrictEqual({ ...base, ...facts });
+  });
+
+  it("logs the words of every step as the reply, not just the last step's", async () => {
+    const tools = { search_knowledge: maisonTool(() => searched({ title: 'Care' })) };
+    const input = await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, tools, speaksBetween('Let me check.', 'search_knowledge', 'It holds one watch.'));
+    expect(input).toMatchObject({ reply: 'Let me check.\n\nIt holds one watch.', knowledgeFound: true });
+  });
+
+  it("logs a reply of '' for a turn that ended with no words, as the local model's empty turns do", async () => {
+    const tools = { search_knowledge: maisonTool(() => searched({ title: 'Care' })) };
+    const model = new MockLanguageModelV4({
+      doStream: [
+        { stream: simulateReadableStream({ chunks: [{ type: 'tool-call', toolCallId: 'call-1', toolName: 'search_knowledge', input: '{}' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }] }) },
+        { stream: simulateReadableStream({ chunks: [{ type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage }] }) },
+      ],
+    });
+    const input = await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, tools, model);
+    expect(input).toMatchObject({ reply: '', knowledgeFound: true });
+  });
+
+  it("doesn't let a failed log touch the customer's turn: the stream ends with the model's reply, the client closes, and the log says why", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const failures: Array<[string, Execute, string]> = [
+        [
+          'broke on the way',
+          async () => {
+            throw new TypeError('fetch failed');
+          },
+          'fetch failed',
+        ],
+        [
+          'threw before it answered',
+          () => {
+            throw new Error('Request was aborted');
+          },
+          'Request was aborted',
+        ],
+        [
+          'threw what is no Error',
+          async () => {
+            throw 'the connection closed';
+          },
+          'the connection closed',
+        ],
+        ['was refused', async () => refusal('not_signed_in'), refusal('not_signed_in').content[0].text],
+        ['was refused, with a long reason', async () => ({ isError: true, content: [{ type: 'text', text: 'x'.repeat(500) }] }), 'x'.repeat(300)],
+        ['was refused, with the reason in the first text part', async () => ({ isError: true, content: [{ type: 'image' }, { type: 'text', text: 'Not allowed.' }, { type: 'text', text: 'Second.' }] }), 'Not allowed.'],
+        ['was refused, with no reason', async () => ({ isError: true, content: [] }), 'its answer gives no reason'],
+      ];
+      for (const [what, execute, why] of failures) {
+        warn.mockClear();
+        const log = logInquiry(execute);
+        const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+        const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient }));
+        expect(response.status, what).toBe(200);
+        const events = eventsOf(await response.text());
+        // The reply came through whole, and the stream ended as it does when nothing went wrong.
+        expect(wordsOf(events), what).toBe('かしこまりました。');
+        expect(events.some((event) => event.type === 'error'), what).toBe(false);
+        expect(events.at(-1)?.type, what).toBe('finish');
+        await vi.waitFor(() => expect(close, what).toHaveBeenCalled());
+        expect(log.execute, what).toHaveBeenCalledTimes(1);
+        expect(warn, what).toHaveBeenCalledTimes(1);
+        expect(warn, what).toHaveBeenCalledWith(NOT_LOGGED, why);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('says nothing when the log went through', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await loggedBy(hello, {}, replyModel());
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // What Strapi says to the log in the next two tests: an answer, or HANGS for a Strapi that never answers it.
+  const HANGS = Symbol('Strapi never answers');
+  /**
+   * A Strapi in memory that speaks MCP, with the real client of @ai-sdk/mcp in front of it, as the app has it: log_inquiry is
+   * the tool that client gives. `calls` is what Strapi was sent, and `close` is the client's transport closing.
+   */
+  const strapiLog = (answer: unknown) => {
+    const calls: Array<{ name: string; arguments: unknown }> = [];
+    const close = vi.fn(async () => {});
+    const definitions = [{ name: 'log_inquiry', description: 'Logs a turn.', inputSchema: { type: 'object', properties: { message: { type: 'string' } } } }];
+    const transport: MCPTransport = {
+      async start() {},
+      close,
+      async send(message) {
+        if (!('method' in message) || !('id' in message)) return; // a notification has no answer
+        const { id, method } = message;
+        const params = (message.params ?? {}) as Record<string, any>;
+        if (method === 'tools/call') {
+          calls.push({ name: params.name, arguments: params.arguments });
+          if (answer === HANGS) return;
+        }
+        const result =
+          method === 'initialize'
+            ? { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'strapi', version: '1.0.0' } }
+            : method === 'tools/list'
+              ? { tools: definitions }
+              : answer;
+        queueMicrotask(() => transport.onmessage?.({ jsonrpc: '2.0', id, result } as Parameters<NonNullable<MCPTransport['onmessage']>>[0]));
+      },
+    };
+    return { calls, close, createMcpClient: vi.fn(async () => createMCPClient({ transport })) };
+  };
+
+  it('works on the tool the real MCP client gives: Strapi is sent the input as a tools/call, and its refusal comes back as a result, which the log reports', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const refused = refusal('not_signed_in');
+      const answers: Array<[string, unknown, unknown[]]> = [
+        ['logged', logged, []],
+        ['refused', refused, [[NOT_LOGGED, refused.content[0].text]]],
+      ];
+      for (const [what, answer, warned] of answers) {
+        warn.mockClear();
+        const strapi = strapiLog(answer);
+        const body = { messages: [say(QUESTION)], locale: 'en', product: 'jewelry-coffret' };
+        const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient: strapi.createMcpClient }))).text());
+        expect(wordsOf(events), what).toBe('かしこまりました。');
+        // The customer isn't in it: Strapi takes them from the session.
+        expect(strapi.calls, what).toStrictEqual([
+          { name: 'log_inquiry', arguments: { message: QUESTION, reply: 'かしこまりました。', knowledgeFound: false, handedOff: false, productSlug: 'jewelry-coffret', locale: 'en' } },
+        ]);
+        await vi.waitFor(() => expect(strapi.close, what).toHaveBeenCalled());
+        expect(warn.mock.calls, what).toStrictEqual(warned);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("cuts a log that never answers off after 5 seconds, and the customer's turn still ends with the reply", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // The real signal, but quick: the five seconds' wait isn't what is under test.
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(ms === 5000 ? 20 : ms));
+    try {
+      const strapi = strapiLog(HANGS);
+      const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient: strapi.createMcpClient }))).text());
+      expect(timeout).toHaveBeenCalledWith(5000);
+      expect(wordsOf(events)).toBe('かしこまりました。');
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      await vi.waitFor(() => expect(strapi.close).toHaveBeenCalled());
+      expect(strapi.calls).toHaveLength(1); // it was sent, and Strapi never answered
+      // The client's own words for a call cut off: the signal that did it is the log's own, never the customer's.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(NOT_LOGGED, expect.stringMatching(/abort/i));
+    } finally {
+      timeout.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it('closes the MCP client only once the log has answered: closing it first would cut the log short', async () => {
+    const answer = Promise.withResolvers<unknown>();
+    const log = logInquiry(() => answer.promise);
+    const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+    const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient }));
+    const reply = response.text();
+    await vi.waitFor(() => expect(log.execute).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20)); // the log is still with Strapi
+    expect(close).not.toHaveBeenCalled();
+    answer.resolve(logged);
+    expect(await reply).toContain('かしこまりました');
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+  });
+
+  it('logs nothing, and warns of nothing, when the token has no log_inquiry: the turn goes on as it did', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // A token without the permission: Strapi's tool list has no log_inquiry.
+      const { createMcpClient, close } = fakeMcp({ search_knowledge: maisonTool(() => searched({ title: 'Care' })) });
+      const model = callsThenReplies('search_knowledge', { query: 'watch' });
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { messages: [say(QUESTION)], locale: 'en' }), deps({ createMcpClient, model }));
+      expect(response.status).toBe(200);
+      const events = eventsOf(await response.text());
+      expect(wordsOf(events)).toBe('Noted.');
+      expect(events.at(-1)?.type).toBe('finish');
+      expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_knowledge']);
+      await vi.waitFor(() => expect(close).toHaveBeenCalled());
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("doesn't log a turn whose last message has no text: there is nothing to answer, and nothing is warned", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const conversations = [[say(' \n ')], [say('Hello'), assistant('Good afternoon.'), say('  ', 'u2')], [{ id: 'u1', role: 'user', parts: [] }]];
+      for (const messages of conversations) {
+        const log = logInquiry();
+        const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+        const response = await handleConcierge(ask('Bearer mcp_at_x', { messages, locale: 'en' }), deps({ createMcpClient }));
+        expect(response.status, JSON.stringify(messages)).toBe(200);
+        expect(wordsOf(eventsOf(await response.text())), JSON.stringify(messages)).toBe('かしこまりました。');
+        await vi.waitFor(() => expect(close).toHaveBeenCalled());
+        expect(log.execute, JSON.stringify(messages)).not.toHaveBeenCalled();
+      }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("doesn't log a turn the customer left: the client closes, and nothing is logged", async () => {
+    const log = logInquiry();
+    const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+    // A reply that has started and never ends: the customer closes the page while the model is still going.
+    const model = new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: new ReadableStream<any>({
+            start(controller) {
+              controller.enqueue({ type: 'text-start', id: 't1' });
+              controller.enqueue({ type: 'text-delta', id: 't1', delta: 'Un moment' });
+            },
+          }),
+        },
+      ],
+    });
+    const gone = new AbortController();
+    const response = await handleConcierge(ask('Bearer mcp_at_x', hello, gone.signal), deps({ createMcpClient, model }));
+    const reader = response.body!.getReader();
+    await reader.read(); // the reply has started
+    gone.abort();
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    await reader.cancel().catch(() => {});
+    expect(log.execute).not.toHaveBeenCalled();
+  });
+
+  it("doesn't log a turn the model failed: the client closes, and nothing is logged", async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {}); // the handler logs the model's failure
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const log = logInquiry();
+      const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+      const model = new MockLanguageModelV4({
+        doStream: async () => {
+          throw new Error('The model broke.');
+        },
+      });
+      const text = await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
+      expect(text).toContain('The model broke.');
+      await vi.waitFor(() => expect(close).toHaveBeenCalled());
+      expect(log.execute).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
   });
 });
 
