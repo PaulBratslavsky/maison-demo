@@ -122,6 +122,10 @@ coverage
 ############################
 
 .env
+# Any other env file too, such as one with Strapi Cloud's settings: the Strapi Cloud CLI uploads this folder minus what
+# this file ignores (it doesn't read the repo root's .gitignore).
+.env.*
+!.env.example
 license.txt
 exports
 .strapi

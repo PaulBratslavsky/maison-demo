@@ -41,7 +41,7 @@ const fakeStrapi = async () => {
 // The script reads STRAPI_URL when it loads, so the fake Strapi comes first.
 const strapi = await fakeStrapi();
 process.env.STRAPI_URL = strapi.url;
-const { call, grantPublicReads, writeEnv } = await import(SETUP);
+const { call, grantPublicReads, outputPaths, writeEnv } = await import(SETUP);
 
 const node = promisify(execFile);
 
@@ -219,4 +219,19 @@ test("checks the role after the update: it fails, naming the action, if the Home
   await assert.rejects(grantPublicReads(authGone.api), {
     message: `The Public role isn't as expected after the update: it no longer allows ${AUTH[0]}. Check it under Settings > Roles > Public.`,
   });
+});
+
+test("writes the app's settings to liff/.env and the ops token to strapi/.tmp, unless told where, as for Strapi Cloud", () => {
+  assert.deepEqual(outputPaths({}), {
+    liffEnv: join(ROOT, 'liff', '.env'),
+    opsTokenFile: join(ROOT, 'strapi', '.tmp', 'maison-ops-token'),
+  });
+  // Empty counts as unset, as everywhere in .env files.
+  assert.deepEqual(outputPaths({ MAISON_SETUP_LIFF_ENV: '', MAISON_SETUP_OPS_TOKEN_FILE: '' }), outputPaths({}));
+  // From the repo root, so a run against Strapi Cloud never overwrites the laptop's own files.
+  assert.deepEqual(outputPaths({ MAISON_SETUP_LIFF_ENV: 'liff/.env.cloud', MAISON_SETUP_OPS_TOKEN_FILE: '.tmp/maison-ops-token.cloud' }), {
+    liffEnv: join(ROOT, 'liff', '.env.cloud'),
+    opsTokenFile: join(ROOT, '.tmp', 'maison-ops-token.cloud'),
+  });
+  assert.equal(outputPaths({ MAISON_SETUP_LIFF_ENV: '/elsewhere/.env.cloud' }).liffEnv, '/elsewhere/.env.cloud');
 });

@@ -6,15 +6,26 @@
 //   4. (re)creates the OAuth client "Maison app" (customer sign-in with LINE, mapped to "Maison customer").
 //      oauth-mcp-manager allows one active LINE client, so any other active one is deactivated first.
 //   5. writes the app's Strapi URL and client ID to liff/.env, and the ops token to strapi/.tmp/maison-ops-token
+//      (MAISON_SETUP_LIFF_ENV and MAISON_SETUP_OPS_TOKEN_FILE write them elsewhere, for a Strapi such as Strapi Cloud)
 // Usage from the repo root: npm run setup (Strapi at STRAPI_URL, or on PORT from strapi/.env).
 // Never prints a secret. Importing this file runs nothing (scripts/maison-setup.test.mjs imports it).
 import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { writeEnv as writeEnvKeys } from '../../scripts/line-mode.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * Where setup writes the app's settings and the ops token, from the repo root: the laptop's own files, unless
+ * MAISON_SETUP_LIFF_ENV and MAISON_SETUP_OPS_TOKEN_FILE say otherwise, so a run against another Strapi (Strapi Cloud)
+ * never overwrites them. Empty counts as unset.
+ */
+export const outputPaths = (env = process.env) => ({
+  liffEnv: resolve(root, env.MAISON_SETUP_LIFF_ENV || join('liff', '.env')),
+  opsTokenFile: resolve(root, env.MAISON_SETUP_OPS_TOKEN_FILE || join('strapi', '.tmp', 'maison-ops-token')),
+});
 // `||`, not `??`: a key left empty in .env counts as unset.
 const STRAPI_URL = (process.env.STRAPI_URL || `http://localhost:${process.env.PORT || 1338}`).replace(/\/+$/, '');
 const email = process.env.DEMO_ADMIN_EMAIL;
@@ -212,18 +223,18 @@ const main = async () => {
 
   // 5. Where the app and an ops agent find them.
   // In LINE mode the browser reaches Strapi through the app's own public origin, PUBLIC_URL, which proxies it.
-  writeEnv(join(root, 'liff', '.env'), {
+  const { liffEnv, opsTokenFile } = outputPaths();
+  writeEnv(liffEnv, {
     NEXT_PUBLIC_STRAPI_URL: process.env.PUBLIC_URL || STRAPI_URL,
     NEXT_PUBLIC_MAISON_CLIENT_ID: app.clientId,
   });
-  mkdirSync(join(root, 'strapi', '.tmp'), { recursive: true });
-  const opsTokenFile = join(root, 'strapi', '.tmp', 'maison-ops-token');
+  mkdirSync(dirname(opsTokenFile), { recursive: true });
   // `mode` applies only when the file is created, so tighten one left by an earlier run before writing into it.
   if (existsSync(opsTokenFile)) chmodSync(opsTokenFile, 0o600);
   writeFileSync(opsTokenFile, `${ops.accessKey}\n`, { mode: 0o600 });
 
-  console.log(`Created the "Maison app" client ${app.clientId} and wrote it to liff/.env (restart the app to pick it up).`);
-  console.log('Wrote the "Maison ops" token to strapi/.tmp/maison-ops-token (README: "Ops tools for an agent").');
+  console.log(`Created the "Maison app" client ${app.clientId} and wrote it to ${relative(root, liffEnv)} (restart the app to pick it up).`);
+  console.log(`Wrote the "Maison ops" token to ${relative(root, opsTokenFile)} (README: "Ops tools for an agent").`);
 };
 
 // Only when run as a script (npm run setup), not when imported.
