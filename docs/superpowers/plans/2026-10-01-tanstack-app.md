@@ -86,6 +86,7 @@ The migration lands in stages that each run: first the old data path inside Star
 - Modify: `scripts/maison-setup.test.mjs`
 - Modify: `liff/.env.example`
 - Modify: `README.md` (settings names only)
+- Modify: `strapi/config/plugins.ts` (one comment: Maison's `lineChannelAccessToken` names option A's `NEXT_PUBLIC_DEMO_LINE_USER_ID`)
 
 **Interfaces:**
 - Produces: `migrateEnvKeys(file: string): { migrated: string[] }`, exported from `scripts/line-mode.mjs`. It copies each old key's value to its new name when the new name is missing, never prints a value, and keeps the old line (removed in Task 7).
@@ -132,11 +133,11 @@ test('mode:line and mode:local write the VITE_ names', () => {
   - `strapi/scripts/maison-setup.mjs` writes `{ STRAPI_URL, MAISON_CLIENT_ID: app.clientId }` to `liff/.env` instead of the two `NEXT_PUBLIC_` keys.
   - Update the setup test that pins the written keys.
   - Note: `strapi develop` restarts when this file changes. That is expected in this task.
-- [ ] **Step 5: Update the rest.** `liff/.env.example` uses the new names. In the README, the settings table and every mention use the new names.
+- [ ] **Step 5: Update the rest.** `liff/.env.example` uses the new names. In the README, the settings table and every mention use the new names, option A's `NEXT_PUBLIC_DEMO_LINE_USER_ID` included. So does the comment above Maison's `lineChannelAccessToken` in `strapi/config/plugins.ts` (saving it restarts `strapi develop` too).
 - [ ] **Step 6: Run** the root `npm test`. Expected: PASS, with the counts in the report.
 - [ ] **Step 7: Commit.**
 ```bash
-files=(scripts/line-mode.mjs scripts/line-mode.test.mjs strapi/scripts/maison-setup.mjs scripts/maison-setup.test.mjs liff/.env.example README.md)
+files=(scripts/line-mode.mjs scripts/line-mode.test.mjs strapi/scripts/maison-setup.mjs scripts/maison-setup.test.mjs liff/.env.example README.md strapi/config/plugins.ts)
 git add -- "${files[@]}" && git commit -m "chore: settings for Vite — VITE_* for the browser, server-only MAISON_CLIENT_ID, a one-time .env migration"
 ```
 
