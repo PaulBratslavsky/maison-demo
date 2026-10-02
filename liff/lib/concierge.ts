@@ -66,7 +66,7 @@ Rules:
 6. If a tool returns an error, follow its hint. not_found means a slug was wrong: look it up with the tool the hint names, never guess. An input validation error means fix the arguments and call again. Otherwise ask the customer.
 7. ${locale === 'ja' ? 'Reply in polite Japanese (keigo).' : 'Reply in English.'} Pass locale "${locale}" to every tool that takes one, so names match your reply and the app's cards. Keep replies to two or three short sentences of plain text: no markdown, no bold, no numbered or bulleted lists. The app shows product cards, so don't repeat their details.
 8. Suggest at most three products at a time.
-9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded for it, in this reply or an earlier one, and never promise a time yourself.
+9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff, or search_knowledge's own hand-off, succeeded for it, in this reply or an earlier one, and never promise a time yourself.
 10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.`;
   return piece
     ? `${instructions}\n\nThe customer is on the page of the piece with slug "${piece}". Unless they name another piece, "it" and "this" mean that piece: use that slug with view_product, as productSlugs for search_knowledge, and as productSlug for hand_off_to_staff.`
@@ -197,11 +197,26 @@ const lastQuestionOf = (messages: UIMessage[]): string => {
 export interface AutoHandOffContext {
   /** The customer's last message (lastQuestionOf): the question, as they wrote it. */
   question: string;
-  /** The piece whose page the customer asked from (pieceSlugOf), or null. */
+  /** The piece whose page the customer asked from (pieceSlugOf), or null. It is what the question is about unless the search names another (pieceOfSearch). */
   piece: string | null;
   /** The chat's language: the question's. */
   locale: 'ja' | 'en';
 }
+
+/**
+ * The piece a question is about, for the hand-off an empty search makes: the one the search was about, which isn't always
+ * the page's (a customer on one piece's page may ask about another, and staff see, and an answer saved to knowledge is
+ * tagged to, the piece recorded here). `input` is what the model sent search_knowledge, and `page` the piece whose page
+ * the customer asked from. A value in productSlugs that isn't a slug names no piece, and a piece named twice is one.
+ * - The search names exactly one piece: that one.
+ * - It names none, or its pieces include the page's: the page's piece (none, on no page).
+ * - Otherwise (it names several, and the page's isn't among them): none, since there's no telling which one it is about.
+ */
+const pieceOfSearch = (input: unknown, page: string | null): string | null => {
+  const named = [...new Set((isObject(input) && Array.isArray(input.productSlugs) ? input.productSlugs : []).flatMap((slug) => pieceSlugOf(slug) ?? []))];
+  if (named.length === 1) return named[0];
+  return named.length === 0 || (page !== null && named.includes(page)) ? page : null;
+};
 
 /** The question Strapi recorded, as hand_off_to_staff answers it. */
 interface RecordedQuestion {
@@ -244,10 +259,11 @@ const foundNothing = (result: unknown): result is Record<string, unknown> & { st
  * model to call hand_off_to_staff when search_knowledge finds nothing, but the local model searched, found nothing,
  * skipped the call and wrote that the question was with the advisors: nothing was recorded, so its words were false. So:
  * - A search that comes back whole with no entries makes the call itself, for the customer's last message (their own
- *   words, not the model's), reason "no_answer", about the page's piece or else the search's first product. When Strapi
- *   records it, the search's result carries what it recorded (structuredContent.handOff, which the chat shows as the
- *   hand-off note, lib/tool-view.ts) and a sentence that tells the model. When the call fails, the result is as Strapi
- *   gave it and the chat shows its plain note. Nothing in the chat says why, so the log does.
+ *   words, not the model's), reason "no_answer", about the piece the search was about (pieceOfSearch: the one it names,
+ *   else the page's). When Strapi records it, the search's result carries what it recorded (structuredContent.handOff,
+ *   which the chat shows as the hand-off note, lib/tool-view.ts) and a sentence that tells the model. When the call
+ *   fails, the result is as Strapi gave it and the chat shows its plain note. Nothing in the chat says why, so the log
+ *   does, unless the customer closed the chat meanwhile: the call was cut short then, and nothing failed.
  * - hand_off_to_staff records once a request: after a question is recorded, by the model's call or the app's, a later
  *   call is answered with it and doesn't reach Strapi. A call that failed doesn't count, so a retry does. The calls run
  *   one at a time, so the model's call and the app's, made in the same step, can't both record.
@@ -274,19 +290,23 @@ export const withAutoHandOff = <TOOLS extends ToolSet>(tools: TOOLS, context: Au
   const searchAndHandOff = async (input: unknown, options: Options) => {
     const result = await runSearch(input, options);
     if (!foundNothing(result) || context.question === '') return result;
+    /** Logs a failed hand-off, unless the customer closed the chat meanwhile: the call was cut short then, and nothing failed. */
+    const logFailure = (what: string) => {
+      if (!options?.abortSignal?.aborted) console.warn(`[concierge] The hand-off for a search that found nothing ${what}`);
+    };
     return oneAtATime(async () => {
       if (recorded) return result;
-      const productSlug = context.piece ?? (isObject(input) && Array.isArray(input.productSlugs) ? pieceSlugOf(input.productSlugs[0]) : null);
+      const productSlug = pieceOfSearch(input, context.piece);
       let answer: unknown;
       try {
         answer = await runHandOff({ question: context.question, reason: 'no_answer', ...(productSlug ? { productSlug } : {}), locale: context.locale }, options);
       } catch (error) {
-        console.warn(`[concierge] The hand-off for a search that found nothing broke on the way: ${error instanceof Error ? error.message : String(error)}`);
+        logFailure(`broke on the way: ${error instanceof Error ? error.message : String(error)}`);
         return result;
       }
       const question = recordedQuestionOf(answer);
       if (!question) {
-        console.warn(`[concierge] The hand-off for a search that found nothing recorded nothing: ${whyNothingWasRecorded(answer)}`);
+        logFailure(`recorded nothing: ${whyNothingWasRecorded(answer)}`);
         return result;
       }
       recorded = question;

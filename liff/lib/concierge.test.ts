@@ -2,13 +2,14 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { createMCPClient, type MCPTransport } from '@ai-sdk/mcp';
-import { APICallError, RetryError, dynamicTool, jsonSchema, simulateReadableStream, tool } from 'ai';
+import { APICallError, RetryError, dynamicTool, jsonSchema, readUIMessageStream, simulateReadableStream, tool, type UIMessage, type UIMessageChunk } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, withAutoHandOff } from './concierge';
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
+import { handOffAt } from './tool-view';
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
@@ -65,11 +66,12 @@ const fakeMcp = () => {
   const close = vi.fn(async () => {});
   return { close, createMcpClient: vi.fn(async () => ({ tools: async () => ({}), close })) };
 };
-const ask = (authorization: string | null, body: unknown) =>
+const ask = (authorization: string | null, body: unknown, signal?: AbortSignal) =>
   new Request('http://localhost:3003/api/concierge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(authorization ? { Authorization: authorization } : {}) },
     body: JSON.stringify(body),
+    signal,
   });
 const hello = { messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'こんにちは' }] }], locale: 'ja' };
 const deps = (overrides: Record<string, unknown>) =>
@@ -698,14 +700,26 @@ describe('a knowledge search that finds nothing', () => {
   const outputsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'tool-output-available').map((event) => event.output);
   /** The question's reference in a result: the search's `handOff`, or the hand-off's own `question`. */
   const referenceIn = (output: any): string | undefined => output?.structuredContent?.handOff?.reference ?? output?.structuredContent?.question?.reference;
+  /** The reply's message as the page rebuilds it from the stream (readUIMessageStream: the chat reads with the same processUIMessageStream), tool parts included. */
+  const messageOf = async (events: Array<Record<string, any>>): Promise<UIMessage> => {
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const event of events) controller.enqueue(event as UIMessageChunk);
+        controller.close();
+      },
+    });
+    let message: UIMessage | undefined;
+    for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+    return message as UIMessage;
+  };
 
   it("hands the question to staff itself: once, with the customer's last message as the question, reason no_answer, the page's piece and the chat's language", async () => {
     const { received, createMcpClient } = strapi();
     const messages = [say('Hello'), assistant('Good afternoon.'), say(`  ${QUESTION} \n`, 'u2')];
-    const model = makesCalls([searchFor({ query: 'watch storage', productSlugs: ['weekender-50'] })]);
+    const model = makesCalls([searchFor({ query: 'watch storage', productSlugs: ['jewelry-coffret'] })]);
     await converse({ messages, locale: 'en', product: 'jewelry-coffret' }, { createMcpClient, model });
     expect(received).toStrictEqual([
-      { name: 'search_knowledge', input: { query: 'watch storage', productSlugs: ['weekender-50'], locale: 'en' } },
+      { name: 'search_knowledge', input: { query: 'watch storage', productSlugs: ['jewelry-coffret'], locale: 'en' } },
       { name: 'hand_off_to_staff', input: { question: QUESTION, reason: 'no_answer', productSlug: 'jewelry-coffret', locale: 'en' } },
     ]);
   });
@@ -717,22 +731,53 @@ describe('a knowledge search that finds nothing', () => {
     expect(handOffsOf(received)).toStrictEqual([{ question, reason: 'no_answer', locale: 'ja' }]);
   });
 
-  it("names the piece it is about: the page's piece, else the search's first product, else none", async () => {
-    const cases = [
-      { piece: 'jewelry-coffret', productSlugs: ['weekender-50', 'voyage-trunk'], slug: 'jewelry-coffret' },
-      { piece: 'jewelry-coffret', productSlugs: undefined, slug: 'jewelry-coffret' },
-      { piece: undefined, productSlugs: ['weekender-50', 'voyage-trunk'], slug: 'weekender-50' },
-      { piece: '../etc', productSlugs: ['weekender-50'], slug: 'weekender-50' }, // not a slug: the page's value is ignored
-      { piece: undefined, productSlugs: [], slug: undefined },
-      { piece: undefined, productSlugs: undefined, slug: undefined },
+  // Which piece the app records is the piece the search was about, which is not always the page's: a customer on the
+  // Jewelry Coffret's page may ask about the Weekender, and staff must see the Weekender, and the answer saved to knowledge
+  // must be tagged to it. The rule: the one piece the search names; else the page's piece when the search names none or
+  // includes it; else none.
+  /** What the app sent hand_off_to_staff for a search of `productSlugs` (undefined: not sent) by a customer on the page of `page`. */
+  const handOffFrom = async (page: unknown, productSlugs: unknown) => {
+    const { received, createMcpClient } = strapi();
+    const model = makesCalls([searchFor({ query: 'watch', ...(productSlugs === undefined ? {} : { productSlugs }) })]);
+    await converse({ messages: [say(QUESTION)], locale: 'en', product: page }, { createMcpClient, model });
+    return handOffsOf(received);
+  };
+  /** The one hand-off the app should send, about `slug`: left out when there's none, not sent as undefined or "". */
+  const aboutPiece = (slug?: string) => [{ question: QUESTION, reason: 'no_answer', ...(slug ? { productSlug: slug } : {}), locale: 'en' }];
+
+  it('records the piece the search names when it names exactly one, whatever page the customer is on', async () => {
+    const cases: Array<[string, unknown, unknown, string]> = [
+      ["on another piece's page", 'jewelry-coffret', ['weekender-50'], 'weekender-50'],
+      ['on no page', undefined, ['weekender-50'], 'weekender-50'],
+      ["on that piece's own page", 'jewelry-coffret', ['jewelry-coffret'], 'jewelry-coffret'],
+      ['named twice, which is one piece', 'jewelry-coffret', ['weekender-50', 'weekender-50'], 'weekender-50'],
+      ['on a page whose value is no slug', '../etc', ['weekender-50'], 'weekender-50'],
     ];
-    for (const { piece, productSlugs, slug } of cases) {
-      const { received, createMcpClient } = strapi();
-      const model = makesCalls([searchFor({ query: 'watch', ...(productSlugs ? { productSlugs } : {}) })]);
-      await converse({ messages: [say(QUESTION)], locale: 'en', product: piece }, { createMcpClient, model });
-      // Left out when there's none, not sent as undefined or "".
-      expect(handOffsOf(received), JSON.stringify({ piece, productSlugs })).toStrictEqual([{ question: QUESTION, reason: 'no_answer', ...(slug ? { productSlug: slug } : {}), locale: 'en' }]);
-    }
+    for (const [what, page, productSlugs, slug] of cases) expect(await handOffFrom(page, productSlugs), what).toStrictEqual(aboutPiece(slug));
+  });
+
+  it("records the page's piece when the search names no piece, or its slugs include the page's piece", async () => {
+    const cases: Array<[string, unknown]> = [
+      ['no productSlugs', undefined],
+      ['an empty list', []],
+      ["null, which the local model sends for what it isn't using", null],
+      ['a value that is no slug, which names no piece', ['../etc']],
+      ["several pieces, the page's first", ['jewelry-coffret', 'weekender-50']],
+      ["several pieces, the page's last", ['weekender-50', 'voyage-trunk', 'jewelry-coffret']],
+    ];
+    for (const [what, productSlugs] of cases) expect(await handOffFrom('jewelry-coffret', productSlugs), what).toStrictEqual(aboutPiece('jewelry-coffret'));
+  });
+
+  it("records no piece when the search names several and none is the page's, or it names none and there is no page", async () => {
+    const cases: Array<[string, unknown, unknown]> = [
+      ["several pieces, none the page's", 'jewelry-coffret', ['weekender-50', 'voyage-trunk']],
+      ['several pieces, on no page', undefined, ['weekender-50', 'voyage-trunk']],
+      ['several pieces, on a page whose value is no slug', '../etc', ['weekender-50', 'voyage-trunk']],
+      ['an empty list, on no page', undefined, []],
+      ['no productSlugs, on no page', undefined, undefined],
+      ['no productSlugs, on a page whose value is no slug', '../etc', undefined],
+    ];
+    for (const [what, page, productSlugs] of cases) expect(await handOffFrom(page, productSlugs), what).toStrictEqual(aboutPiece());
   });
 
   it("adds what Strapi recorded to the search's result, and a sentence for the model, and changes nothing else in it", async () => {
@@ -813,6 +858,14 @@ describe('a knowledge search that finds nothing', () => {
     ];
     await converse({ messages: earlier, locale: 'en' }, { createMcpClient, model: next });
     expect(JSON.stringify(next.doStreamCalls[0].prompt)).toContain(told('Q-4821'));
+
+    // Written and read joined: the page rebuilds the reply's message from the very stream this route wrote, and its note is the recorded one, under the search.
+    const { parts } = await messageOf(events);
+    expect(handOffAt(parts)).toStrictEqual({
+      index: parts.findIndex((part) => part.type === 'dynamic-tool' && part.toolName === 'search_knowledge'),
+      kind: 'recorded',
+      recorded: { reference: 'Q-4821', question: QUESTION },
+    });
   });
 
   it("doesn't hand off when the search found an entry, and leaves its result as it is", async () => {
@@ -883,6 +936,25 @@ describe('a knowledge search that finds nothing', () => {
         const { createMcpClient } = strapi({ search });
         await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient, model: makesCalls([searchFor()], [handOffFor()]) });
       }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("doesn't log the hand-off as a failure when the customer closed the chat while it was with Strapi: the call was cut short, and the app didn't fail", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const gone = new AbortController();
+      const { received, createMcpClient } = strapi({
+        handOff: () => {
+          gone.abort(); // the chat closes, and the MCP client cuts the call short
+          throw new TypeError('Request was aborted');
+        },
+      });
+      const request = ask('Bearer mcp_at_x', { messages: [say(QUESTION)], locale: 'en' }, gone.signal);
+      await (await handleConcierge(request, deps({ createMcpClient, model: makesCalls([searchFor()]) }))).text();
+      expect(handOffsOf(received)).toHaveLength(1); // it was tried
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -1093,6 +1165,39 @@ describe('withAutoHandOff', () => {
     expect(received).toHaveLength(1);
   });
 
+  it("logs a failed hand-off only while the request is still going: after the customer's abort, whichever way it failed, it says nothing", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const broke = () => {
+        throw new TypeError('Request was aborted');
+      };
+      const failures: Array<[string, () => unknown]> = [
+        ['broke on the way', broke],
+        ['refused', () => ({ isError: true, content: [{ type: 'text', text: '{"error":{"code":"unavailable"}}' }] })],
+        ['no reference', () => ({ content: [], structuredContent: { question: { status: 'open', product: null } } })],
+      ];
+      for (const [what, answer] of failures) {
+        for (const aborted of [false, true]) {
+          warn.mockClear();
+          const gone = new AbortController();
+          const tools = {
+            search_knowledge: maisonTool(() => searchResult),
+            hand_off_to_staff: maisonTool(() => {
+              if (aborted) gone.abort(); // the customer closes the chat while the hand-off is with Strapi
+              return answer();
+            }),
+          };
+          const wrapped = withAutoHandOff(tools, context) as any;
+          // Whichever way it failed, the search's result is as Strapi gave it.
+          expect(await wrapped.search_knowledge.execute({ query: 'watch' }, { ...options, abortSignal: gone.signal }), what).toStrictEqual(searchResult);
+          expect(warn, `${what}, ${aborted ? 'after the abort' : 'with the request going'}`).toHaveBeenCalledTimes(aborted ? 0 : 1);
+        }
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("lets the model's own hand-off go to Strapi when the app's, which it waited for, failed", async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const first = Promise.withResolvers<unknown>();
@@ -1285,14 +1390,14 @@ describe('conciergeInstructions', () => {
   });
 
   // Rules 9 and 10, word for word: the policy question and what follows when no entry answers it, and the request for a person.
-  const RULE_9 = `9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded for it, in this reply or an earlier one, and never promise a time yourself.`;
+  const RULE_9 = `9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff, or search_knowledge's own hand-off, succeeded for it, in this reply or an earlier one, and never promise a time yourself.`;
   const RULE_10 = `10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.`;
 
   it('sends questions about policies to search_knowledge, and the ones it has no answer to, or a request for a person, to hand_off_to_staff, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
       expect(text, locale).toContain(`\n${RULE_9}\n${RULE_10}`);
-      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is: in this reply or an earlier one.
+      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is (by hand_off_to_staff, or search_knowledge's own hand-off): in this reply or an earlier one.
       expect(text, locale).not.toMatch(/answers questions like this in the LINE chat/);
       expect(text, locale).not.toMatch(/button below/);
       expect(text, locale).not.toMatch(/Don't mention the LINE chat yourself/);
