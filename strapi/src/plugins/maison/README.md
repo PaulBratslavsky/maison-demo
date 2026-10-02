@@ -71,7 +71,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `timezone` | `Asia/Tokyo` | Opening-hours checks, the times in messages, and the day of the `date` filter |
 | `defaultLocale` | `ja` | Content language when a tool call doesn't pass `locale` (`ja` or `en`) |
 | `maxOpenRequestsPerCustomer` | `3` | Unconfirmed future requests a customer may have |
-| `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation |
+| `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation, in the visit's language |
 | `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
 | `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
 | `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
@@ -84,7 +84,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `search_products` | MCP: browse the catalog | Products by collection, category, gift occasion, price, personalization and boutique stock |
 | `view_product` | MCP: browse the catalog | One product: story, dimensions, personalization, stock per boutique |
 | `find_boutiques` | MCP: browse the catalog | Boutiques, opening hours, open on a date, stock for chosen products |
-| `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale` |
+| `request_appointment` | MCP: request and view own appointments | Creates a **draft** visit request for the signed-in customer, and names the boutique and products in the customer's `locale`, which the visit keeps for its LINE confirmation |
 | `my_appointments` | MCP: request and view own appointments | The signed-in customer's own requests and confirmations |
 | `appointment_requests` | MCP: review appointment requests | Requests for staff, by default the ones still waiting. Customers are masked. |
 | `confirm_appointment` | MCP: confirm appointment requests | Confirms a request by publishing it, which sends the customer's LINE confirmation, once |
@@ -122,7 +122,7 @@ Each route takes its tool's input, checks it with the same schema (`server/src/m
 - **Query parameters** have the tool's argument names, limits and checks: `?occasion=travel&maxPriceJpy=400000&locale=en`.
 - **A list repeats its parameter:** `?productSlugs=weekender-50&productSlugs=passport-cover`. One is a list of one. A comma-separated list isn't split, so it fails the slug check.
 - **`locale`** is `ja` or `en`, and defaults to `defaultLocale`, as on the tools. A booking takes it in the body.
-- **The booking body** is `request_appointment`'s input, as JSON: `boutique`, `productSlugs`, `requestedFor`, and an optional `note` and `locale`. The `locale` picks the language of the boutique and product names in the answer. Any other field is ignored, a customer included.
+- **The booking body** is `request_appointment`'s input, as JSON: `boutique`, `productSlugs`, `requestedFor`, and an optional `note` and `locale`. The `locale` picks the language of the boutique and product names in the answer, and of the visit's LINE confirmation. Any other field is ignored, a customer included.
 - **A booking** answers 201 with `{ "appointment": … }`. The requests board shows it as made via `web`.
 
 ```bash
@@ -257,6 +257,11 @@ Strapi sends the customer the LINE confirmation when staff confirm a visit, whic
 Each of them publishes the appointment. Once that publish has gone through, Strapi pushes the visit's flex message to the customer with LINE's push API, `POST /v2/bot/message/push`. It's the message `pending_confirmations` lists for the visit, built by the same code. Sending never makes the publish fail.
 - **Confirm and `confirm_appointment`** wait for LINE's answer, 8 seconds at most, so their answer and the board's next refresh show how it went.
 - **Publish in the Content Manager**, and its bulk Publish, run inside a database transaction. Strapi sends once that transaction commits, and the publish doesn't wait for LINE: the board shows the outcome on its next refresh. A publish that's rolled back sends nothing.
+
+**The message is in the language the customer booked in.** That's the appointment's `language`, `ja` or `en`, which the booking's `locale` sets, on `request_appointment` or the REST booking. A customer app passes the language its customer is using. A booking without a `locale` gets `defaultLocale`, and a visit without a `language`, such as one booked before appointments kept it, is Japanese.
+- The message's words, the house name and the date follow it: `10月10日(土) 14:00` in Japanese, `Sat 10 Oct, 14:00` in English.
+- So do the boutique's name and address and the pieces' names. They come from the published versions of the boutique and products in that language, field by field, with the default locale's value where one is missing or empty.
+- `pending_confirmations` lists it in that language too.
 
 Strapi records each attempt as a Maison notification, with `recordedBy` set to `strapi`:
 - **sent**, with LINE's answer. LINE also answers 200 for a customer it can't deliver to, such as one who has blocked the account, so `sent` means LINE took the message.

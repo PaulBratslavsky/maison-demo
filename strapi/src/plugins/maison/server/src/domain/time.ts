@@ -13,6 +13,22 @@ export function formatJaDateTime(date: Date, timeZone: string): string {
   return `${get('month')}月${get('day')}日(${get('weekday')}) ${get('hour')}:${get('minute')}`;
 }
 
+/** e.g. "Sat 10 Oct, 14:00": the weekday, day, month and 24-hour time in `timeZone`, with no year, as formatJaDateTime. */
+export function formatEnDateTime(date: Date, timeZone: string): string {
+  // Put together from en-US's parts: its three-letter names don't change, where en-GB writes September "Sept".
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('weekday')} ${get('day')} ${get('month')}, ${get('hour')}:${get('minute')}`;
+}
+
 const pad = (value: number) => String(value).padStart(2, '0');
 
 /** e.g. "2026-10-10T14:00:00+09:00": wall-clock time in `timeZone`, with that zone's UTC offset at that instant. */

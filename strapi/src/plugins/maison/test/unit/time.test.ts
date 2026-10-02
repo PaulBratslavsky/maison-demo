@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatJaDateTime, toZonedIso, zonedDayRange } from '../../server/src/domain/time';
+import { formatEnDateTime, formatJaDateTime, toZonedIso, zonedDayRange } from '../../server/src/domain/time';
 
 describe('formatJaDateTime', () => {
   it('formats a Tokyo date and time in Japanese', () => {
@@ -8,6 +8,29 @@ describe('formatJaDateTime', () => {
 
   it('pads minutes and uses 24-hour time', () => {
     expect(formatJaDateTime(new Date('2026-10-14T09:05:00Z'), 'Asia/Tokyo')).toBe('10月14日(水) 18:05');
+  });
+});
+
+describe('formatEnDateTime', () => {
+  it('formats a Tokyo date and time in English: the weekday, day, month and time, without a year', () => {
+    expect(formatEnDateTime(new Date('2026-10-10T05:00:00Z'), 'Asia/Tokyo')).toBe('Sat 10 Oct, 14:00');
+  });
+
+  it('pads minutes and uses 24-hour time', () => {
+    expect(formatEnDateTime(new Date('2026-10-14T09:05:00Z'), 'Asia/Tokyo')).toBe('Wed 14 Oct, 18:05');
+  });
+
+  it("gives Tokyo's day, not UTC's, across a date boundary", () => {
+    // 15:30 on Friday 9 October in UTC is already Saturday in Tokyo.
+    expect(formatEnDateTime(new Date('2026-10-09T15:30:00Z'), 'Asia/Tokyo')).toBe('Sat 10 Oct, 00:30');
+  });
+
+  it('crosses into the next month at midnight, which it writes as 00:00, with no leading zero on the day', () => {
+    expect(formatEnDateTime(new Date('2026-10-31T15:00:00Z'), 'Asia/Tokyo')).toBe('Sun 1 Nov, 00:00');
+  });
+
+  it('names every month in three letters, September included', () => {
+    expect(formatEnDateTime(new Date('2026-09-09T05:00:00Z'), 'Asia/Tokyo')).toBe('Wed 9 Sep, 14:00');
   });
 });
 

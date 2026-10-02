@@ -4,7 +4,7 @@ import { getConfig } from '../config';
 import { PLUGIN_ID, UID } from '../constants';
 import type { FlexMessage } from '../domain/flex-message';
 import { toZonedIso } from '../domain/time';
-import { CONFIRMATION_POPULATE, confirmationFor, type Outcome } from './confirmations';
+import { CONFIRMATION_POPULATE, confirmationFor, inVisitLanguage, type Outcome } from './confirmations';
 
 type Doc = Record<string, any>;
 
@@ -37,7 +37,11 @@ export interface SendOutcome {
   message: string;
 }
 
-/** LINE gets this long to answer a push, so a publish waits for its confirmation this long at most. */
+/**
+ * LINE gets this long to answer a push. A publish outside a transaction (Confirm, confirm_appointment) waits for its
+ * confirmation this long at most; one inside a transaction (the Content Manager's Publish) doesn't wait, and sends
+ * after the commit.
+ */
 export const PUSH_TIMEOUT_MS = 8000;
 
 const NO_TOKEN = "LINE_CHANNEL_ACCESS_TOKEN isn't set: confirmations aren't sent from Strapi.";
@@ -162,7 +166,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     if (!token) return notConfigured(reference, NO_TOKEN);
     if (!liffUrl) return notConfigured(reference, NO_LIFF_URL);
 
-    const confirmation = confirmationFor(published, { liffUrl, timezone, houseName });
+    // In the visit's language, with the names pending_confirmations uses too.
+    const [visit] = await inVisitLanguage(strapi, [published]);
+    const confirmation = confirmationFor(visit, { liffUrl, timezone, houseName });
     if (!confirmation) return finish(reference, 'failed', "The appointment has no valid LINE customer, so it can't be confirmed over LINE.", token);
     const { status, detail } = await push({ apiBaseUrl: lineApiBaseUrl, token }, confirmation.lineUserId, confirmation.message);
     return finish(reference, status, detail, token);

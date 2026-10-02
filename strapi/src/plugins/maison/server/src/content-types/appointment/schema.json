@@ -11,6 +11,7 @@
     "products": { "type": "relation", "relation": "manyToMany", "target": "plugin::maison.product", "inversedBy": "appointments" },
     "requestedFor": { "type": "datetime", "required": true },
     "customerNote": { "type": "text", "maxLength": 500 },
-    "createdVia": { "type": "enumeration", "enum": ["concierge", "app", "web"], "default": "app" }
+    "createdVia": { "type": "enumeration", "enum": ["concierge", "app", "web"], "default": "app" },
+    "language": { "type": "enumeration", "enum": ["ja", "en"], "default": "ja" }
   }
 }

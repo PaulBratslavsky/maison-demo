@@ -57,6 +57,18 @@ describe('appointments service', () => {
     assert.deepEqual(unnamed.value.products, [{ slug: 'weekender-50', name: 'ウィークエンダー 50' }]);
   });
 
+  it("keeps the language the customer booked in, for the visit's LINE confirmation, and Japanese without one", async () => {
+    const subject = `line:U${'d'.repeat(32)}`; // a customer of its own, so the other tests' open requests stay as they are
+    const english = await request({ subject, locale: 'en', requestedFor: '2026-10-18T14:00:00+09:00' });
+    assert.equal(english.ok, true, JSON.stringify(english));
+    const unnamed = await request({ subject, requestedFor: '2026-10-18T15:00:00+09:00' });
+    assert.equal(unnamed.ok, true, JSON.stringify(unnamed));
+
+    const languageOf = async (reference) => (await strapi.documents(UID).findFirst({ status: 'draft', filters: { reference } })).language;
+    assert.equal(await languageOf(english.value.reference), 'en');
+    assert.equal(await languageOf(unnamed.value.reference), 'ja', 'the default locale, ja');
+  });
+
   it('rejects unknown slugs and times that are too soon or outside opening hours', async () => {
     assert.equal((await request({ boutique: 'kyoto' })).code, 'not_found');
     assert.equal((await request({ productSlugs: ['weekender-50', 'no-such-piece'] })).code, 'not_found');

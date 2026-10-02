@@ -16,4 +16,19 @@ describe('LINE Bot MCP contract', () => {
     const result = flexMessageSchema.safeParse(message);
     expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
   });
+
+  it('builds an English message that push_flex_message accepts', () => {
+    const message = buildConfirmationMessage({
+      language: 'en',
+      houseName: 'Maison',
+      reference: 'APT-4821',
+      boutiqueName: 'Ginza Flagship',
+      boutiqueAddress: '',
+      requestedForText: 'Sat 10 Oct, 14:00',
+      productNames: ['Weekender 50', 'Passport Cover', 'Luggage Tag Duo', 'Carnet Wallet', 'Watch Roll Trois'],
+      appLink: 'https://liff.line.me/1234567890-AbCdEfGh/visits/APT-4821',
+    });
+    const result = flexMessageSchema.safeParse(message);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+  });
 });

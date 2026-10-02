@@ -125,6 +125,32 @@ describe('LINE confirmations sent by Strapi', () => {
     assert.equal(confirmed.value.appointment.confirmationSent, true, "confirm's answer already shows it as sent");
   });
 
+  it("confirming a visit booked in English pushes its confirmation in English, with the seed's English names", async () => {
+    const subject = `line:U${'c'.repeat(32)}`; // a customer of its own, so the other tests' open requests stay as they are
+    const booked = await strapi.plugin('maison').service('appointments').request({
+      subject, boutique: 'ginza', productSlugs: ['weekender-50'], requestedFor: visit(10, '16:00'), createdVia: 'app', locale: 'en',
+    });
+    assert.equal(booked.ok, true, JSON.stringify(booked));
+    const { reference } = booked.value;
+    const confirmed = await strapi.plugin('maison').service('appointments').confirm(reference);
+    assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+
+    const pushes = pushesFor(reference);
+    assert.equal(pushes.length, 1, JSON.stringify(pushes));
+    const [push] = pushes;
+    assert.equal(push.body.to, subject.slice('line:'.length));
+    const [message] = push.body.messages;
+    assert.equal(message.type, 'flex');
+    assert.equal(message.altText, `Your visit is confirmed (${reference})`);
+    const bubble = JSON.stringify(message.contents);
+    for (const text of ['Maison', 'Your visit is confirmed', 'Ginza Flagship', '1-2-3 Ginza, Chuo-ku, Tokyo (demo)', 'Weekender 50', 'View your visit']) {
+      assert.ok(bubble.includes(`"${text}"`), `the bubble says "${text}"`);
+    }
+    assert.match(bubble, /"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec), 16:00"/, 'the date, in English');
+    assert.ok(!bubble.includes('銀座本店'), "not the boutique's Japanese name");
+    await assertRecordedSent(reference);
+  });
+
   it("publishing inside a transaction, as the Content Manager's Publish does, sends once the transaction commits", async () => {
     const reference = await request(SUBJECT_B, visit(10, '15:00'));
     const draft = await strapi.documents(APPOINTMENT).findFirst({ status: 'draft', filters: { reference: { $eq: reference } } });

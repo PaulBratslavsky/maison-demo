@@ -27,7 +27,10 @@ export interface AppointmentRequest {
   requestedFor: string;
   note?: string;
   createdVia: CreatedVia;
-  /** The language of the boutique and product names in the answer. Defaults to defaultLocale. */
+  /**
+   * The customer's language. It names the boutique and products in the answer, and the appointment keeps it as its
+   * `language`, which the visit's LINE confirmation is written in. Defaults to defaultLocale.
+   */
   locale?: Locale;
   /** Only for tests. Defaults to the current time. */
   now?: Date;
@@ -298,6 +301,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         );
       }
 
+      // The customer's language names the answer's labels, and stays with the visit for its LINE confirmation.
+      const language = input.locale ?? defaultLocale;
       const created = await strapi.documents(UID.appointment).create({
         data: {
           reference: await uniqueReference(strapi),
@@ -307,10 +312,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           requestedFor: when.toISOString(),
           customerNote: input.note ?? '',
           createdVia: input.createdVia,
+          language,
         },
       });
       const saved = await strapi.documents(UID.appointment).findOne({ documentId: created.documentId, status: 'draft', populate: POPULATE });
-      const [view] = await toViews([saved as Doc], input.locale ?? defaultLocale);
+      const [view] = await toViews([saved as Doc], language);
       return { ok: true, value: view };
     },
 

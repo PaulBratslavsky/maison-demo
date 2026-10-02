@@ -203,7 +203,7 @@ console.log("Added maison-ops to", file);
 | 1:10–1:30 | Booking | Tap **Yes, please.** The request is sent and awaits the boutique. |
 | 1:30–1:50 | The request arrives | On the board, the request appears, created via `concierge`, with the customer masked. |
 | 1:50–2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
-| 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in Japanese, and the board's LINE column: LINE sent. |
+| 2:20–2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45–3:00 | Handoff | The integration slide. "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst takes over. |
 
 **In Japanese (JA),** the same run uses the same tools, with Japanese labels: the second suggestion is はい、お願いします。, and the product page's button is 来店を予約.
@@ -388,7 +388,7 @@ npm run dev          # Strapi, the app and the verify mock, as on stage
   - Staff tools, for staff agents: `appointment_requests` and `confirm_appointment`
   - Errors come back as `isError` results whose text is `{ "error": { "code", "message", "hint" } }`. Arguments the SDK rejects, such as a date that isn't on the calendar, come back as plain text that starts `Input validation error:`.
 - **REST, for websites:** the catalog at `/api/maison/…` with no credentials, and the customer's own bookings with the same session (see "The REST door").
-- **Confirmation:** when a visit is confirmed, whichever way, Strapi pushes the customer a flex message in Japanese with the Messaging API channel's token (`LINE_CHANNEL_ACCESS_TOKEN`, see option A), and records it. `pending_confirmations` returns the same message for each upcoming confirmed visit, for an agent that retries.
+- **Confirmation:** when a visit is confirmed, whichever way, Strapi pushes the customer a flex message in the language they booked in, English or Japanese, with the Messaging API channel's token (`LINE_CHANNEL_ACCESS_TOKEN`, see option A), and records it. `pending_confirmations` returns the same message for each upcoming confirmed visit, for an agent that retries.
 - **Channels:** the MINI App channel and the Messaging API channel must be in one provider.
 
 ### Run it as a LINE MINI App
@@ -470,7 +470,7 @@ Maison's own suites run inside the demo too, from `strapi/src/plugins/maison`:
 
 ## The Maison plugin in this repo
 
-`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `6aa4b0d`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
+`strapi/src/plugins/maison` is [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) at `adfeb7b`, unchanged. That repo is the source of truth, so change Maison there first. What the demo changes about Maison lives outside the copy, in `strapi/src/extensions/maison/`.
 
 To bring in a newer version from a local clone of the plugin's repo, stop Strapi first (the install rebuilds Maison under it), then:
 

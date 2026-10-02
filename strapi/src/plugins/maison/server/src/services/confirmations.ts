@@ -1,11 +1,11 @@
 import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
-import { UID } from '../constants';
+import { LOCALES, UID, type Locale } from '../constants';
 import { buildConfirmationMessage, type FlexMessage } from '../domain/flex-message';
 import { failure, type ServiceResult } from '../domain/service-result';
 import { lineUserIdOf, parseSubject } from '../domain/subject';
-import { formatJaDateTime, toZonedIso } from '../domain/time';
+import { formatEnDateTime, formatJaDateTime, toZonedIso } from '../domain/time';
 
 type Doc = Record<string, any>;
 export type Outcome = 'sent' | 'failed';
@@ -32,25 +32,115 @@ export interface RecordedConfirmation {
 /** Who gets an appointment's LINE confirmation, and what it says. */
 export type LineConfirmation = Omit<PendingConfirmation, 'reference' | 'previousAttempts'>;
 
-/** What a confirmation needs from a published appointment: the boutique's name and address, and the products' names. */
-export const CONFIRMATION_POPULATE = { boutique: { fields: ['name', 'address'] }, products: { fields: ['name'] } };
+/**
+ * What a confirmation needs from a published appointment: the boutique's name and address, and the products' names,
+ * with their documentIds, which inVisitLanguage looks them up by.
+ */
+export const CONFIRMATION_POPULATE = {
+  boutique: { fields: ['documentId', 'name', 'address'] },
+  products: { fields: ['documentId', 'name'] },
+};
+
+/**
+ * The language a visit was booked in, which its confirmation is written in. Visits booked before appointments kept one
+ * have none: those are Japanese, as is any value that isn't a locale.
+ */
+const visitLanguage = (appointment: Doc): Locale =>
+  (LOCALES as readonly unknown[]).includes(appointment.language) ? (appointment.language as Locale) : 'ja';
+
+/** The published versions of `documentIds` in `locale`, by documentId, with `fields`. */
+const publishedIn = async (
+  strapi: Core.Strapi,
+  uid: string,
+  locale: Locale,
+  documentIds: unknown[],
+  fields: string[]
+): Promise<Map<string, Doc>> => {
+  const found = new Map<string, Doc>();
+  const ids = [...new Set(documentIds.filter((id): id is string => typeof id === 'string'))];
+  if (ids.length === 0) return found;
+  const rows = await strapi.documents(uid as any).findMany({
+    locale,
+    status: 'published',
+    filters: { documentId: { $in: ids } },
+    fields,
+    limit: ids.length,
+  });
+  for (const row of rows as Doc[]) found.set(row.documentId, row);
+  return found;
+};
+
+/** A field's value in the visit's language when it has one, and its value in the default locale when it doesn't. */
+const orDefault = (translated: unknown, inDefaultLocale: unknown) =>
+  typeof translated === 'string' && translated.trim() !== '' ? translated : inDefaultLocale;
+
+/**
+ * Appointments populated with CONFIRMATION_POPULATE, with their boutique's name and address and their products' names
+ * in each visit's language, for confirmationFor. An appointment links its boutique and products in the default locale
+ * (appointments.request), so for a visit in another language this reads the published versions of the linked
+ * documents in that language, one lookup per language and content type, and keeps the default locale's value of each
+ * field that's missing or empty there. A visit in the default locale is left as it is.
+ * pending_confirmations and Strapi's sender both go through it, so the two can't drift.
+ */
+export const inVisitLanguage = async (strapi: Core.Strapi, appointments: Doc[]): Promise<Doc[]> => {
+  const { defaultLocale } = getConfig(strapi);
+  const named = new Map<Locale, { boutiques: Map<string, Doc>; products: Map<string, Doc> }>();
+  for (const language of new Set(appointments.map(visitLanguage))) {
+    if (language === defaultLocale) continue;
+    const visits = appointments.filter((appointment) => visitLanguage(appointment) === language);
+    const [boutiques, products] = await Promise.all([
+      publishedIn(strapi, UID.boutique, language, visits.map((visit) => visit.boutique?.documentId), ['name', 'address']),
+      publishedIn(
+        strapi,
+        UID.product,
+        language,
+        visits.flatMap((visit) => ((visit.products ?? []) as Doc[]).map((product) => product.documentId)),
+        ['name']
+      ),
+    ]);
+    named.set(language, { boutiques, products });
+  }
+  return appointments.map((appointment) => {
+    const names = named.get(visitLanguage(appointment));
+    if (!names) return appointment;
+    const boutique = appointment.boutique as Doc | null | undefined;
+    const boutiqueIn = boutique ? names.boutiques.get(boutique.documentId) : undefined;
+    return {
+      ...appointment,
+      boutique: boutique && {
+        ...boutique,
+        name: orDefault(boutiqueIn?.name, boutique.name),
+        address: orDefault(boutiqueIn?.address, boutique.address),
+      },
+      products: ((appointment.products ?? []) as Doc[]).map((product) => ({
+        ...product,
+        name: orDefault(names.products.get(product.documentId)?.name, product.name),
+      })),
+    };
+  });
+};
+
+/** A visit's date and time as each language writes it. */
+const DATE_TIME: Record<Locale, (date: Date, timeZone: string) => string> = { ja: formatJaDateTime, en: formatEnDateTime };
 
 /**
  * The LINE confirmation of a published appointment populated with CONFIRMATION_POPULATE: its recipient, its details
- * and its flex message. pending_confirmations lists it and Strapi sends it, so the two can't drift. null when the
- * appointment has no valid LINE customer.
+ * and its flex message, in the visit's language. It names the boutique and products as the appointment it's given
+ * does, and looks nothing up: inVisitLanguage gives it those names in the visit's language. pending_confirmations lists
+ * it and Strapi sends it, so the two can't drift. null when the appointment has no valid LINE customer.
  */
 export const confirmationFor = (
   appointment: Doc,
-  { liffUrl, timezone, houseName }: { liffUrl: string; timezone: string; houseName: { ja: string } }
+  { liffUrl, timezone, houseName }: { liffUrl: string; timezone: string; houseName: Record<Locale, string> }
 ): LineConfirmation | null => {
   const subject = parseSubject(appointment.customer);
   if (!subject) return null;
+  const language = visitLanguage(appointment);
   const when = new Date(appointment.requestedFor);
   const appLink = `${liffUrl}/visits/${appointment.reference}`;
   const boutique = { name: appointment.boutique?.name ?? '', address: appointment.boutique?.address ?? '' };
   const products = ((appointment.products ?? []) as Doc[]).map((product) => ({ name: product.name as string }));
-  const requestedForText = formatJaDateTime(when, timezone);
+  const requestedForText = DATE_TIME[language](when, timezone);
   return {
     lineUserId: lineUserIdOf(subject),
     boutique,
@@ -59,7 +149,8 @@ export const confirmationFor = (
     products,
     appLink,
     message: buildConfirmationMessage({
-      houseName: houseName.ja,
+      language,
+      houseName: houseName[language],
       reference: appointment.reference,
       boutiqueName: boutique.name,
       boutiqueAddress: boutique.address,
@@ -142,7 +233,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const state = await outcomes(published.map((doc) => doc.reference as string));
 
       const pending: PendingConfirmation[] = [];
-      for (const doc of published) {
+      // Each visit's message is in its language, with the names Strapi's sender uses too.
+      for (const doc of await inVisitLanguage(strapi, published)) {
         if (state.get(doc.reference)?.sent) continue; // recorded as sent since the query above
         const confirmation = confirmationFor(doc, { liffUrl, timezone, houseName });
         if (!confirmation) {
