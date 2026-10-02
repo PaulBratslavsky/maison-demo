@@ -1,5 +1,7 @@
 # The Maison MINI App on the TanStack stack: design
 
+> **On hold, and changing shape (1 Oct 2026, evening).** Paul: "will refactor to tanstack after the presentation", then "build another frontend with tanstack so we have two examples". The talk runs on the Next.js app (tag `demo-stable-nextjs`). After 7 Oct this becomes a second frontend beside `liff/`, on the same Strapi, not a migration of it: sections that remove or replace the Next.js app no longer apply, and the document needs that revision, and Paul's review, before anyone builds from it.
+
 **Status:** direction approved by Paul on 1 October 2026: "Everything before the talk", then "we have today, tomorrow and the whole weekend". This revision follows his reference project, which he shared "for a reason: it has an implementation example for TanStack". It is for his review before the plan is written.
 
 ## The reference, and how to use it

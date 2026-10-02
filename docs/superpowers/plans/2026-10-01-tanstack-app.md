@@ -1,5 +1,7 @@
 # The Maison MINI App on TanStack: implementation plan
 
+> **On hold, and changing shape (1 Oct 2026, evening).** Paul: "will refactor to tanstack after the presentation", then "build another frontend with tanstack so we have two examples". The talk runs on the Next.js app (tag `demo-stable-nextjs`). After 7 Oct this becomes a second frontend beside `liff/`, on the same Strapi, not a migration of it: sections that remove or replace the Next.js app no longer apply, and the document needs that revision, and Paul's review, before anyone builds from it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move `liff/` from Next.js 16 and the Vercel AI SDK to TanStack Start, Router, Query and TanStack AI, with the browser holding no secrets, every screen's data and the concierge served by server functions, and the outside (screens, paths, look, commands) unchanged.
