@@ -410,9 +410,9 @@ The AI SDK's Anthropic provider (`@ai-sdk/anthropic` 4.0.71, checked in `liff/no
 
 - [ ] **Step 1: Write the failing tests.** Unit tests never reach a network: they use the AI SDK's `MockLanguageModelV4` from `ai/test`, as `liff/lib/concierge.test.ts` does, injected in place of `languageModelOf`.
   - **ai-provider:**
-    - `DEFAULT_MODEL`: `anthropic` gives `claude-sonnet-5-5` (Paul's choice, 2 Oct 2026; Pulse uses Haiku 4.5), `openai` gives `gpt-5-mini`, `openai-compatible` gives `llama3.1` (Pulse's).
+    - `DEFAULT_MODEL` is Pulse's: `anthropic` gives `claude-haiku-4-5-20251001`, `openai` gives `gpt-5-mini`, `openai-compatible` gives `llama3.1`.
     - `modelIdOf` returns `aiModel` when set, and the provider's default otherwise.
-    - `modelVersionOf` gives `<provider>/<model>`, e.g. `anthropic/claude-sonnet-5-5`.
+    - `modelVersionOf` gives `<provider>/<model>`, e.g. `anthropic/claude-haiku-4-5-20251001`.
     - `aiEnabled` is true with an API key, or with `openai-compatible` and a base URL. Otherwise it's false: no key, or a base URL with `anthropic`.
     - `languageModelOf`:
       - `anthropic` uses `createAnthropic({ apiKey })`, a factory and not the singleton (Pulse's comment says why).
@@ -475,9 +475,9 @@ export interface AiSettings {
   aiBaseUrl: string | null;
 }
 
-/** A valid model id per provider, so the first call after setting a key doesn't 404. Anthropic: Claude Sonnet 5.5 (Paul's choice; Pulse uses Haiku 4.5). */
+/** Pulse's defaults: a valid model id per provider, so the first call after setting a key doesn't 404. */
 export const DEFAULT_MODEL: Record<AiProvider, string> = {
-  anthropic: 'claude-sonnet-5-5',
+  anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-5-mini',
   'openai-compatible': 'llama3.1',
 };
@@ -793,7 +793,7 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
 - [ ] **Step 2: Setup.** The "Maison customer" token gets `'plugin::maison.inquiries.log'`. Update `scripts/maison-setup.test.mjs` if it pins actions.
 - [ ] **Step 3: Config.** In `strapi/config/plugins.ts`, add Pulse's settings: `aiProvider: env('AI_PROVIDER', '')`, `aiModel: env('AI_MODEL', '')`, `aiApiKey: env('AI_API_KEY', '')` and `aiBaseUrl: env('AI_BASE_URL', '')`. Add a comment: these label inquiries. Unset, labelling is off, and new inquiries wait under Not labelled. `.env.example` gets the four names, with no values.
 - [ ] **Step 4: README.**
-  - Cloud: tick "MCP: log customer inquiries" on the "Maison customer" token by hand. Give staff "Review customer inquiries" and "Reply to customer inquiries on LINE". To label, set `AI_API_KEY` (an Anthropic key) in the project's environment variables, then redeploy (docs.strapi.io/cloud/projects/settings, "Variables"). `AI_PROVIDER` defaults to `anthropic`, and `AI_MODEL` to `claude-sonnet-5-5` (`claude-haiku-4-5-20251001`, Pulse's default, still works).
+  - Cloud: tick "MCP: log customer inquiries" on the "Maison customer" token by hand. Give staff "Review customer inquiries" and "Reply to customer inquiries on LINE". To label, set `AI_API_KEY` (an Anthropic key) in the project's environment variables, then redeploy (docs.strapi.io/cloud/projects/settings, "Variables"). `AI_PROVIDER` defaults to `anthropic`, and `AI_MODEL` to `claude-haiku-4-5-20251001`, as in Pulse.
   - Local: labelling runs on Ollama: `AI_PROVIDER=openai-compatible`, `AI_BASE_URL=http://127.0.0.1:11434/v1`, and `AI_MODEL` set to a pulled model.
 - [ ] **Step 5: No Anthropic stand-in.** Local checks use Ollama, so the controller's early stand-in (`scripts/anthropic-stand-in.mjs`, commit 99515b1) is removed. The LINE stand-in keeps its quota routes.
 - [ ] **Step 6: Run** the demo's `npm test` and the integration suites. Expected: PASS, including `inquiries.test.mjs`.

@@ -33,7 +33,7 @@
 |---|---|---|
 | Product knowledge, inquiries, labelling, queues, Reply on LINE | The Maison plugin (`strapi-store-demo-mcp`), copied into the demo as before | One service layer: the concierge, the board, and a later LINE webhook all use the same rules |
 | Logging each turn | The app's concierge route (`liff/lib/concierge.ts`), after the turn ends | The server, not the model, decides what's logged |
-| The model that labels | Called from Strapi through the AI SDK, with Pulse's provider module; Claude Sonnet 5.5 by default | Pulse uses Haiku 4.5; Paul chose Sonnet 5.5 (2 Oct 2026), about $0.003 an inquiry. Strapi reads Pulse's settings: `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, `AI_BASE_URL` |
+| The model that labels | Called from Strapi through the AI SDK, with Pulse's provider module; Claude Haiku 4.5 by default | Small, fast and cheap, as in Pulse. Strapi reads Pulse's settings: `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, `AI_BASE_URL` |
 
 ## 1. Product knowledge (content type)
 
@@ -120,7 +120,7 @@ Pulse's pattern, scaled down:
   - **Error:** `failed`, with `analysisAttempts` + 1. At 5 attempts it's parked, and a **Label again** action resets it.
 - **Without AI settings** (no `AI_API_KEY`, and no `AI_BASE_URL` for a local model): nothing is sent. As in Pulse, the sweep marks new rows `skipped`. They show under **Not labelled**, and are labelled once AI is on.
 - **Human corrections win:** a person can change the kind or the sentiment on the board. That sets `humanCorrected`, and labelling never overwrites it.
-- **Config:** Pulse's: `aiProvider` (`anthropic`, `openai` or `openai-compatible`, from `AI_PROVIDER`), `aiModel` (`AI_MODEL`, default per provider, `claude-sonnet-5-5` for Anthropic), `aiApiKey` (`AI_API_KEY`) and `aiBaseUrl` (`AI_BASE_URL`, for a local model such as Ollama). Tests point `aiBaseUrl` at a local stand-in, and live checks at Ollama.
+- **Config:** Pulse's: `aiProvider` (`anthropic`, `openai` or `openai-compatible`, from `AI_PROVIDER`), `aiModel` (`AI_MODEL`, default per provider, `claude-haiku-4-5-20251001` for Anthropic), `aiApiKey` (`AI_API_KEY`) and `aiBaseUrl` (`AI_BASE_URL`, for a local model such as Ollama). Tests point `aiBaseUrl` at a local stand-in, and live checks at Ollama.
 
 ## 5. The Inquiries page (Strapi admin)
 
