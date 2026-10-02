@@ -10,6 +10,7 @@ const liff = vi.hoisted(() => ({
   getIDToken: vi.fn(() => 'eyJ.line.idtoken'),
   getAppLanguage: vi.fn((): string => 'ja'),
   getOS: vi.fn((): LineOs => 'ios'),
+  getFriendship: vi.fn(async (): Promise<unknown> => ({ friendFlag: true })),
   login: vi.fn(),
   logout: vi.fn(),
   use: vi.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
   liff.isLoggedIn.mockReturnValue(true);
   liff.getAppLanguage.mockReturnValue('ja');
   liff.getOS.mockReturnValue('ios');
+  liff.getFriendship.mockImplementation(async () => ({ friendFlag: true }));
   vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'false');
   vi.stubEnv('NEXT_PUBLIC_LIFF_ID', LIFF_ID);
 });
@@ -180,5 +182,83 @@ describe('initLiff with the LIFF mock (the stage and development)', () => {
     expect(liff.init).toHaveBeenCalledWith({ liffId: LIFF_ID, mock: true });
     expect(liff.$mock.set).toHaveBeenCalledTimes(1);
     expect(liff.login).not.toHaveBeenCalled();
+  });
+});
+
+describe("friendFlag: whether the customer has added Maison's Official Account, for the add-friend nudge", () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_LINE_OA_ID', '@123abcde'); // made up: never Maison's real basic ID in this repo
+    browser();
+  });
+
+  /** Signs in as the screens do, then asks the way each screen's button does. */
+  const friendFlag = async () => {
+    const { initLiff } = await import('./liff');
+    return (await initLiff()).friendFlag();
+  };
+
+  it.each([true, false])(
+    "passes on LINE's friendFlag %s, asked once per page load, for the account linked to the LINE Login channel",
+    async (answer) => {
+      liff.getFriendship.mockResolvedValue({ friendFlag: answer });
+      expect(await friendFlag()).toBe(answer);
+      expect(await friendFlag()).toBe(answer); // another screen, or another button, on the same page load
+      expect(liff.getFriendship).toHaveBeenCalledTimes(1);
+      expect(liff.getFriendship).toHaveBeenCalledWith(); // no officialAccountId: the linked account is the one asked about
+    }
+  );
+
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+    ['not an @ ID', '123abcde'],
+  ])("doesn't ask LINE when NEXT_PUBLIC_LINE_OA_ID is %s: there's no button to word", async (_, value) => {
+    vi.stubEnv('NEXT_PUBLIC_LINE_OA_ID', value);
+    expect(await friendFlag()).toBeNull();
+    expect(liff.getFriendship).not.toHaveBeenCalled();
+  });
+
+  it('gives no answer when the call fails, as it does until the account is linked: the plain button, and one warning in development', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    liff.getFriendship.mockRejectedValue(new Error('403: no Official Account is linked to the channel'));
+    expect(await friendFlag()).toBeNull();
+    expect(await friendFlag()).toBeNull(); // the page load's answer: not asked again
+    expect(liff.getFriendship).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('Linked LINE Official Account');
+  });
+
+  it('says nothing about a failed call outside development', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    liff.getFriendship.mockRejectedValue(new Error('403'));
+    expect(await friendFlag()).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  describe('with the LIFF mock', () => {
+    beforeEach(() => {
+      vi.stubEnv('NEXT_PUBLIC_LIFF_MOCK', 'true');
+      liff.isInClient.mockReturnValue(false);
+    });
+
+    it("gives no answer when the mock throws, as @line/liff-mock does without liff.login(), which mock mode never calls", async () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      liff.getFriendship.mockImplementation(() => {
+        throw new Error('You need to call liff.login first.'); // at once, not a rejected promise
+      });
+      expect(await friendFlag()).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("takes the mock's answer like LINE's when it gives one, and an answer without a friendFlag as none", async () => {
+      liff.getFriendship.mockResolvedValue({ friendFlag: false }); // @line/liff-mock's default answer
+      expect(await friendFlag()).toBe(false);
+      vi.resetModules(); // a new page load
+      liff.getFriendship.mockResolvedValue({});
+      expect(await friendFlag()).toBeNull();
+    });
   });
 });

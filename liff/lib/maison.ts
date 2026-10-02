@@ -1,5 +1,5 @@
 import { config } from './config';
-import { initLiff } from './liff';
+import { type LiffState, initLiff } from './liff';
 import { type ToolCallRecord, createMcp } from './mcp';
 import { type Session, SessionError, createSession } from './session';
 import type { Locale } from './types';
@@ -9,6 +9,8 @@ export interface Maison {
   mock: boolean;
   session: Session;
   callTool: ReturnType<typeof createMcp>['callTool'];
+  /** Whether the customer has added Maison's LINE Official Account, or null: LIFF's answer (LiffState.friendFlag). */
+  friendFlag: LiffState['friendFlag'];
 }
 
 type Listener = (record: ToolCallRecord) => void;
@@ -68,6 +70,7 @@ const start = async (): Promise<Maison> => {
     mock: liff.mock,
     session,
     callTool: mcp.callTool,
+    friendFlag: liff.friendFlag,
   };
 };
 

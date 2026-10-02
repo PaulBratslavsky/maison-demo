@@ -43,6 +43,7 @@ const liffState = (mock: boolean) => ({
   locale: 'en' as const,
   mock,
   signInAgain: vi.fn(),
+  friendFlag: vi.fn(async (): Promise<boolean | null> => null),
 });
 
 /** maison.ts keeps its sign-in and its listeners at module level, so each test loads a fresh copy. */
@@ -92,6 +93,16 @@ describe('getMaison', () => {
     fetchImpl.mockImplementation(async () => granted());
     expect(await getMaison()).toMatchObject({ mock: true });
     expect(mocks.initLiff).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands the screens LIFF\'s friendship check, for the words of "Chat with Maison on LINE"', async () => {
+    const liff = liffState(false);
+    liff.friendFlag.mockResolvedValue(false);
+    mocks.initLiff.mockResolvedValue(liff);
+    tokenEndpoint(granted);
+    const { getMaison } = await load();
+    expect(await (await getMaison()).friendFlag()).toBe(false);
+    expect(liff.friendFlag).toHaveBeenCalledTimes(1);
   });
 
   it('outside LINE, hands the open-in-LINE state to the screens as it came: no token exchange, no MCP connection', async () => {

@@ -2,6 +2,7 @@ import type { ExtendedInit, LiffMockApi } from '@line/liff-mock';
 
 import { config } from './config';
 import { lineAppUrl } from './line-app-url.mjs';
+import { lineChatUrl } from './line-chat';
 import { OpenInLineError } from './open-in-line';
 import type { Locale } from './types';
 
@@ -11,11 +12,24 @@ export interface LiffState {
   mock: boolean;
   /** Inside LINE: a new LINE login, for when the token endpoint answers invalid_grant. It reloads the page. */
   signInAgain: () => void;
+  /**
+   * Whether the customer has added Maison's LINE Official Account as a friend, for "Chat with Maison on LINE"'s words
+   * (lineChatWords): liff.getFriendship()'s friendFlag, for the account linked to the LIFF app's LINE Login channel.
+   * Asked once per page load, and only with NEXT_PUBLIC_LINE_OA_ID set. Null when there's no answer: the setting is
+   * unset, or the call failed, as it does until that account is linked, and with the LIFF mock, which answers only after
+   * liff.login(). A mock that answers is taken at its word, like LINE.
+   */
+  friendFlag: () => Promise<boolean | null>;
 }
 
 const LINE_USER_ID = /^U[0-9a-f]{32}$/;
 const DEMO_USER_KEY = 'maison.demoUser';
 const SIGNED_IN_AGAIN_AT = 'maison.signedInAgainAt';
+/** Development only: why the plain button shows when liff.getFriendship() fails, and the fix. It names no LINE value. */
+const FRIENDSHIP_FAILED =
+  'liff.getFriendship() failed, so the app shows the plain "Chat with Maison on LINE" button. Inside LINE, link ' +
+  "Maison's Official Account to the LIFF app's LINE Login channel: Basic settings → Linked LINE Official Account. The " +
+  'LIFF mock answers only after liff.login(), which mock mode never calls.';
 let ready: Promise<LiffState> | null = null;
 
 export const toLocale = (language: string | undefined): Locale =>
@@ -73,6 +87,19 @@ const init = async (): Promise<LiffState> => {
       'LINE gave no ID token. The LIFF app needs the openid scope.'
     );
   }
+  // LiffState.friendFlag: asked at most once per page load, and its answer kept, a failure's too.
+  let friendship: Promise<boolean | null> | null = null;
+  const askFriendship = async (): Promise<boolean | null> => {
+    if (!lineChatUrl(config.lineOaId)) return null;
+    try {
+      // Inside the try: @line/liff-mock throws at once rather than reject, when liff.login() hasn't been called.
+      const { friendFlag } = await liff.getFriendship();
+      return typeof friendFlag === 'boolean' ? friendFlag : null;
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') console.warn(FRIENDSHIP_FAILED, error);
+      return null;
+    }
+  };
   return {
     getIdToken: () => liff.getIDToken() ?? '',
     locale: toLocale(liff.getAppLanguage()),
@@ -93,6 +120,7 @@ const init = async (): Promise<LiffState> => {
       liff.logout(); // drops the expired ID token
       window.location.reload();
     },
+    friendFlag: () => (friendship ??= askFriendship()),
   };
 };
 
