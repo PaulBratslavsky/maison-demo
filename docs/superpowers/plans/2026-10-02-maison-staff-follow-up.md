@@ -637,12 +637,12 @@ const staffNameOf = (ctx): string | null => {
 
 - [ ] **Step 7: Run** the unit tests, then `npm test` and `npm run test:ts:back`. Expected: PASS.
 - [ ] **Step 8: The integration suite,** `test/integration/questions.test.mjs`, with its own database name and the LINE stand-in of `line-confirmations.test.mjs` (copy its `startLineStub`; answer `{ displayName: 'Paul (test)' }` for `GET /v2/bot/profile/…` and `SENT` for pushes). It boots with `lineChannelAccessToken` and `lineApiBaseUrl` pointing at the stand-in, loads the demo catalog, then, through `strapi.plugin('maison').service(…)`:
-  1. `questions.ask` for `SUBJECT_A` about `jewelry-coffret`, in English, records `Q-…` with `customerName` `'Paul (test)'`.
+  1. `questions.ask` for `SUBJECT_A`, question `'Can the coffret hold a watch?'`, about `jewelry-coffret`, in English, records `Q-…` with `customerName` `'Paul (test)'`.
   2. `questions.list()` shows it, masked, with the piece's English name.
   3. `questions.notify(reference, 'Jane')` answers `sent`; the stand-in got one push to the user ID whose text contains the quoted question and `Jane, Maison`; the question is taken.
   4. A second `notify` answers `already_taken`, and the stand-in got nothing more.
   5. `questions.answer(reference, { text: 'Yes, a watch up to 42 mm fits.', addToKnowledge: true, category: 'sizing' }, 'Jane')` answers `sent` with a `knowledgeDocumentId`.
-  6. `catalog.searchKnowledge('en', { query: 'Can the jewelry coffret hold a watch?', productSlugs: ['jewelry-coffret'] })` returns that entry first.
+  6. `catalog.searchKnowledge('en', { query: 'Will a watch fit in the coffret?', productSlugs: ['jewelry-coffret'] })` includes that entry: the next customer gets the answer.
   7. Six `ask`s for `SUBJECT_B` end with `too_many_open_questions`.
   Don't run it yet: it runs against the demo's copy in Task 8.
 - [ ] **Step 9: Commit**
@@ -675,7 +675,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     - `askedAt('2026-10-03T01:12:00.000Z')` is `2026-10-03 10:12`, Tokyo time, in any time zone.
   - `test/unit/admin-permissions.test.ts`: `PERMISSIONS.page` includes `plugin::maison.questions.read`; `PERMISSIONS.sections` includes read and answer; and the flag names `useRBAC` makes (`can` plus the action's last word, capitalised) are all different.
   - `test/unit/seed.test.ts`: `resetDemoAppointments` also deletes every question, and the knowledge entries their answers added (`delete({ documentId, locale: '*' })` for each `knowledgeDocumentId`), and answers `{ appointments, notifications, questions, knowledge }`.
-  - `test/unit/seed-result.test.ts`: `describeReset({ appointments: 3, notifications: 2, questions: 1, knowledge: 1 })` is `Deleted 3 appointments, 2 notifications, 1 question and 1 product knowledge entry.`, with plurals for other counts (`0 questions`, `2 product knowledge entries`).
+  - `test/unit/seed-result.test.ts`: `describeReset({ appointments: 3, notifications: 2, questions: 1, knowledge: 1 })` is `Deleted 3 appointments, 2 notifications, 1 question and 1 product knowledge entry.`; every count takes its singular or plural (`1 appointment`, `0 questions`, `2 product knowledge entries`).
 - [ ] **Step 2: Run** them. Expected: FAIL.
 - [ ] **Step 3: `admin/src/questions.ts`:** the row type (the server's `StaffQuestionView`, written out as `board.ts` writes `StaffAppointment`), `REASON_LABELS`, `statusLabel`, `canLetThemKnow`, `canAnswer`, `CATEGORY_OPTIONS` (`{ value, label }[]`), and `askedAt` (format with `Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', … })` or the helper in `admin/src/time.ts` if it has one).
 - [ ] **Step 4: Permissions,** in `admin/src/permissions.ts`:
