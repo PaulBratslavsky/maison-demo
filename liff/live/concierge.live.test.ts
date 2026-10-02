@@ -285,5 +285,7 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     // The note says the question is with the advisors, under its reference, only when the call went through: Strapi's own reference, or none.
     const recorded = calls.find((call) => call.name === 'hand_off_to_staff' && call.output?.structuredContent?.question?.reference);
     expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(recorded?.output?.structuredContent.question.reference);
+    // With nothing recorded (the model skipped the call, or it failed), the reply must not promise contact: nobody has the question.
+    if (!note?.recorded) expect(answer, `it promises contact though nothing was recorded. Tools: ${called.join(', ')}`).not.toMatch(/will (contact|reach out|get back)/i);
   });
 });

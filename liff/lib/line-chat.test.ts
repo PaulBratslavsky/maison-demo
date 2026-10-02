@@ -154,6 +154,27 @@ describe('lineMessageUrl', () => {
     expect(typedIn('あ'.repeat(600))).toBe(encodeURIComponent('あ'.repeat(500)));
   });
 
+  // A string can hold half of a surrogate pair on its own (a model can write one), and encodeURIComponent throws on it.
+  it('turns a lone half of a surrogate pair into U+FFFD, and keeps every real emoji', () => {
+    const replacement = encodeURIComponent('\uFFFD'); // %EF%BF%BD
+    expect(() => lineMessageUrl('@maison', 'a\ud83db')).not.toThrow();
+    expect(typedIn('a\ud83db')).toBe(`a${replacement}b`); // a lone high half
+    expect(typedIn('a\ude00b')).toBe(`a${replacement}b`); // a lone low half
+    expect(typedIn('\ude00\ud83d')).toBe(`${replacement}${replacement}`); // two halves the wrong way round are two lone halves
+    expect(typedIn('\ud83d😀')).toBe(`${replacement}${encodeURIComponent('😀')}`); // a lone half in front of a whole emoji
+    expect(typedIn('😀\ude00')).toBe(`${encodeURIComponent('😀')}${replacement}`);
+    // Real emoji survive: a pair, a flag, a family joined by zero-width joiners, a skin tone, and a rare Han character.
+    for (const emoji of ['😀', '🇯🇵', '👨‍👩‍👧', '👍🏽', '𠮷']) {
+      expect(typedIn(`Q ${emoji} ok`), emoji).toBe(encodeURIComponent(`Q ${emoji} ok`));
+      expect(typedIn(`Q ${emoji} ok`), emoji).not.toContain(replacement);
+    }
+  });
+
+  it('replaces a lone half the cut leaves at the limit, and drops one the cut takes off', () => {
+    expect(typedIn('a'.repeat(499) + '\ud83d' + 'b')).toBe('a'.repeat(499) + encodeURIComponent('\uFFFD'));
+    expect(typedIn('a'.repeat(500) + '\ud83d')).toBe('a'.repeat(500));
+  });
+
   it('never cuts a character in two: one at the limit goes whole or not at all', () => {
     // 😀 is two UTF-16 units. Cut between them, encodeURIComponent would throw.
     expect(typedIn('a'.repeat(499) + '😀' + 'b')).toBe('a'.repeat(499) + encodeURIComponent('😀'));

@@ -117,12 +117,28 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, handedOff)], false)).toBe(false); // the call was made, whatever the search found
   });
 
-  it('still allows it when the hand-off failed or has no result, and no search found nothing: no note shows', () => {
+  // A failed hand-off has the plain note and the LINE chat button under it, but they are no answer: the failure may be a
+  // passing one, and "Try again" asks again.
+  it('still allows it after a hand-off that failed, with no words after it, though the plain note shows under it', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant({ ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
-    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-available'))], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', refusal))], false)).toBe(true); // a result that is an error
     expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', { content: [] }))], false)).toBe(true); // a result with no reference: nothing says it was recorded
     expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, { ...handOff('output-error'), errorText: 'boom' }, { type: 'step-start' })], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(text('One moment.'), { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(true); // the words came before it
+  });
+
+  it('is false once words follow a failed hand-off: the customer has something to read', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant({ ...handOff('output-error'), errorText: 'boom' }, text('I could not pass it on. Please use the LINE chat.'))], false)).toBe(false);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('output-available', refusal), text('You already have five questions with the advisors.'))], false)).toBe(false);
+    expect(needsRetry([...askedAboutCare, assistant(foundAnAnswer, { ...handOff('output-error'), errorText: 'boom' }, text('Here is what I found.'))], false)).toBe(false);
+  });
+
+  it('still allows it while a hand-off has not finished, with no words after it: no note shows yet', () => {
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-available'))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-streaming'))], false)).toBe(true);
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, handOff('input-available'))], false)).toBe(true); // the empty search's note waits for it
+    expect(needsRetry([...askedAboutBitcoin, assistant(handOff('input-available'))], true)).toBe(false); // but never while a reply is coming in
   });
 
   // The local model often skips the hand-off. The chat then shows the note under the search that found nothing (handOffAt).
@@ -130,7 +146,8 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing)], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant({ type: 'step-start' }, foundNothing, { type: 'step-start' })], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, foundNothing)], false)).toBe(false); // two searches, both empty
-    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(false); // a failed hand-off doesn't take the note away
+    expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, { ...handOff('output-error'), errorText: 'boom' })], false)).toBe(false); // a failed hand-off doesn't take the note away: the search's note is the answer
+    expect(needsRetry([...askedAboutBitcoin, assistant({ ...handOff('output-error'), errorText: 'boom' }, foundNothing)], false)).toBe(false);
     // A first search that was refused or broke, and a second that found nothing: rule 6 has the model call again, and the last one decides.
     expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('output-available', refusal), foundNothing)], false)).toBe(false);
     expect(needsRetry([...askedAboutBitcoin, assistant({ ...knowledge('output-error'), errorText: 'fetch failed' }, foundNothing)], false)).toBe(false);

@@ -95,6 +95,13 @@ describe('toolView: hand_off_to_staff', () => {
     expect(toolView({ ...call, state: 'output-available', output: textOnly }, 'en').handOff).toBeNull();
   });
 
+  it('trims the question, which is typed into the LINE chat: the spaces and line breaks around it are not the customer’s', () => {
+    const handOffOf = (question: unknown) => toolView({ toolName: 'hand_off_to_staff', state: 'output-available', input: { question }, output: recorded('Q-4821') }, 'en').handOff;
+    expect(handOffOf('  Can it hold a watch?  \n')).toEqual({ reference: 'Q-4821', question: 'Can it hold a watch?' });
+    expect(handOffOf('Can it hold\na watch?')?.question).toBe('Can it hold\na watch?'); // inside it, as it is
+    expect(handOffOf(' \n ')).toEqual({ reference: 'Q-4821', question: '' });
+  });
+
   it('is still a recorded hand-off when the call has no readable question: the reference is what says Strapi has it', () => {
     for (const input of [undefined, null, {}, { question: 42 }]) {
       expect(toolView({ toolName: 'hand_off_to_staff', state: 'output-available', input, output: recorded('Q-4821') }, 'en').handOff, JSON.stringify(input)).toEqual({ reference: 'Q-4821', question: '' });
@@ -177,9 +184,10 @@ describe('toolPartOf', () => {
   });
 });
 
-// Where the hand-off note goes in a message, and which note: the index of the part it goes under, with what Strapi
-// recorded, or null for no note. The model may skip the hand_off_to_staff call (the local model does), so a search that
-// found nothing shows a note too: the plain one, since nothing was recorded.
+// Where the hand-off note goes in a message, and which note (`kind`): the index of the part it goes under, with what
+// Strapi recorded, or null for no note. A hand-off that went through gets the recorded note. When nothing was recorded
+// the plain one shows, so a customer can always reach a person: under a search that found nothing (the model may skip
+// the call, as the local model does), or under a hand-off that failed.
 describe('handOffAt', () => {
   type Part = { type: string; [key: string]: unknown };
   /** A hand_off_to_staff call as the page holds it: a Maison tool, so a dynamic-tool part, whose output is the MCP result. */
@@ -192,9 +200,11 @@ describe('handOffAt', () => {
   });
   const handedOff = handOff('output-available', recorded('Q-4821'));
   /** The note under a hand-off Strapi recorded, as handOffAt answers it. */
-  const recordedAt = (index: number, reference = 'Q-4821', question = 'Can it hold a watch?') => ({ index, recorded: { reference, question } });
-  /** The plain note under a search that found nothing: the call wasn't made, or didn't go through, so nothing is recorded. */
-  const fallbackAt = (index: number) => ({ index, recorded: null });
+  const recordedAt = (index: number, reference = 'Q-4821', question = 'Can it hold a watch?') => ({ index, kind: 'recorded', recorded: { reference, question } });
+  /** The plain note under a search that found nothing, when the model made no hand-off: nothing is recorded. */
+  const emptySearchAt = (index: number) => ({ index, kind: 'empty_search', recorded: null });
+  /** The same plain note under a hand-off that failed, so a customer can always reach a person: nothing is recorded. */
+  const failedHandOffAt = (index: number) => ({ index, kind: 'failed_hand_off', recorded: null });
   /** A search_knowledge call, an MCP tool: a dynamic-tool part, whose output is the MCP result. */
   const search = (state: string, output?: unknown): Part => ({ type: 'dynamic-tool', toolName: 'search_knowledge', state, ...(output === undefined ? {} : { output }) });
   const found = (...titles: string[]) => search('output-available', { content: [{ type: 'text', text: '{}' }], structuredContent: { locale: 'en', entries: titles.map((title) => ({ title })) } });
@@ -216,7 +226,9 @@ describe('handOffAt', () => {
   });
 
   it('answers what Strapi recorded: the reference it gave and the question the model sent', () => {
-    expect(handOffAt([handOff('output-available', recorded('Q-0007'), 'Is it waterproof?')])).toEqual({ index: 0, recorded: { reference: 'Q-0007', question: 'Is it waterproof?' } });
+    expect(handOffAt([handOff('output-available', recorded('Q-0007'), 'Is it waterproof?')])).toEqual({ index: 0, kind: 'recorded', recorded: { reference: 'Q-0007', question: 'Is it waterproof?' } });
+    // The question is trimmed, as toolView's is: it is typed into the LINE chat.
+    expect(handOffAt([handOff('output-available', recorded('Q-0007'), '  Is it waterproof?\n')])).toEqual(recordedAt(0, 'Q-0007', 'Is it waterproof?'));
   });
 
   it('puts it under a hand-off whatever the searches found: the model made the call', () => {
@@ -225,31 +237,64 @@ describe('handOffAt', () => {
     expect(handOffAt([search('output-error'), handedOff])).toEqual(recordedAt(1));
   });
 
-  it('puts none under a hand-off that is running, failed or was refused, when no search found nothing', () => {
-    expect(handOffAt([handOff('input-streaming')])).toBeNull();
-    expect(handOffAt([handOff('input-available')])).toBeNull();
-    expect(handOffAt([handOff('output-error')])).toBeNull();
-    expect(handOffAt([handOff('output-available', refusal)])).toBeNull();
-    expect(handOffAt([foundAnAnswer, handOff('output-error')])).toBeNull();
-    expect(handOffAt([foundAnAnswer, handOff('output-available', refusal)])).toBeNull();
+  it('puts the plain note under a hand-off that failed or was refused, so a customer can always reach a person', () => {
+    expect(handOffAt([handOff('output-error')])).toEqual(failedHandOffAt(0));
+    expect(handOffAt([handOff('output-available', refusal)])).toEqual(failedHandOffAt(0));
+    expect(handOffAt([step, handOff('output-error'), words])).toEqual(failedHandOffAt(1)); // under it, above the model's words
+    // Whatever the searches found, or none at all: a customer who asks for a person gets a hand-off with no search.
+    expect(handOffAt([foundAnAnswer, handOff('output-error')])).toEqual(failedHandOffAt(1));
+    expect(handOffAt([foundAnAnswer, handOff('output-available', refusal)])).toEqual(failedHandOffAt(1));
+    expect(handOffAt([search('output-error'), handOff('output-error')])).toEqual(failedHandOffAt(1));
+    // A last search that failed or was refused has no note of its own, so the failed hand-off gets one.
+    expect(handOffAt([foundNothing, search('output-error'), handOff('output-error')])).toEqual(failedHandOffAt(2));
+    expect(handOffAt([foundNothing, search('output-available', refusal), handOff('output-available', refusal)])).toEqual(failedHandOffAt(2));
+    // Several that failed: under the last, as the last search decides.
+    expect(handOffAt([handOff('output-error'), step, handOff('output-available', refusal)])).toEqual(failedHandOffAt(2));
+    // One that went through wins over one that failed, whichever came first.
+    expect(handOffAt([handOff('output-error'), handedOff])).toEqual(recordedAt(1));
+    expect(handOffAt([handedOff, handOff('output-error')])).toEqual(recordedAt(0));
   });
 
-  it('does not count a hand-off whose result has no reference: nothing says Strapi recorded the question', () => {
-    expect(handOffAt([handOff('output-available', { content: [] })])).toBeNull();
-    expect(handOffAt([handOff('output-available', { content: [], structuredContent: { question: { reference: '' } } })])).toBeNull();
-    expect(handOffAt([handOff('output-available', null)])).toBeNull();
-    expect(handOffAt([foundAnAnswer, handOff('output-available', { content: [] })])).toBeNull();
-    // After a search that found nothing, the plain note shows, which claims nothing.
-    expect(handOffAt([foundNothing, handOff('output-available', { content: [] })])).toEqual(fallbackAt(0));
+  it("puts an empty search's note first, so a failed hand-off after one is placed where it always was", () => {
+    expect(handOffAt([foundNothing, handOff('output-error')])).toEqual(emptySearchAt(0));
+    expect(handOffAt([foundNothing, handOff('output-available', refusal)])).toEqual(emptySearchAt(0));
+    expect(handOffAt([handOff('output-error'), foundNothing])).toEqual(emptySearchAt(1));
+    expect(handOffAt([foundNothing, step, handOff('output-error'), step, foundNothing])).toEqual(emptySearchAt(4));
+  });
+
+  // The plain note would show under the search or the failure, and then be replaced by the recorded one under the call.
+  it('places no fallback while a hand-off is still running, so the plain note never flashes before the recorded one', () => {
+    for (const state of ['input-streaming', 'input-available']) {
+      expect(handOffAt([handOff(state)]), state).toBeNull();
+      expect(handOffAt([foundNothing, handOff(state)]), state).toBeNull(); // the empty search's note waits too
+      expect(handOffAt([foundAnAnswer, handOff(state)]), state).toBeNull();
+      expect(handOffAt([handOff('output-error'), step, handOff(state)]), state).toBeNull(); // a second try is under way
+      expect(handOffAt([foundNothing, handOff('output-error'), step, handOff(state)]), state).toBeNull();
+      expect(handOffAt([handOff(state), foundNothing]), state).toBeNull(); // whichever came first
+    }
+    // Once it finishes, the note is there at once: recorded under the call, or the plain one if it failed.
+    expect(handOffAt([foundNothing, handOff('input-available')])).toBeNull();
+    expect(handOffAt([foundNothing, handedOff])).toEqual(recordedAt(1));
+    expect(handOffAt([handOff('input-available')])).toBeNull();
+    expect(handOffAt([handOff('output-error')])).toEqual(failedHandOffAt(0));
+    // A hand-off that went through keeps its note while a second one runs.
+    expect(handOffAt([handedOff, handOff('input-available')])).toEqual(recordedAt(0));
+  });
+
+  it('treats a hand-off whose result has no reference as one that recorded nothing: the plain note, never the advisors', () => {
+    for (const output of [{ content: [] }, { content: [], structuredContent: { question: { reference: '' } } }, null]) {
+      expect(handOffAt([handOff('output-available', output)]), JSON.stringify(output)).toEqual(failedHandOffAt(0));
+      expect(handOffAt([foundAnAnswer, handOff('output-available', output)]), JSON.stringify(output)).toEqual(failedHandOffAt(1));
+      expect(handOffAt([foundNothing, handOff('output-available', output)]), JSON.stringify(output)).toEqual(emptySearchAt(0));
+    }
   });
 
   it('falls back to the last search that found nothing, when the model made no hand-off: the plain note, with nothing recorded', () => {
-    expect(handOffAt([foundNothing])).toEqual(fallbackAt(0));
-    expect(handOffAt([step, foundNothing, step, words])).toEqual(fallbackAt(1)); // under the search, above the model's words
-    expect(handOffAt([foundNothing, step, foundNothing])).toEqual(fallbackAt(2)); // two searches, both empty: under the last
-    expect(handOffAt([foundNothing, handOff('output-error')])).toEqual(fallbackAt(0)); // a hand-off that failed doesn't take the note away
-    expect(handOffAt([foundNothing, handOff('output-available', refusal)])).toEqual(fallbackAt(0));
-    expect(handOffAt([foundNothing, handOff('input-available')])).toEqual(fallbackAt(0)); // still running: the note moves under it once it goes through
+    expect(handOffAt([foundNothing])).toEqual(emptySearchAt(0));
+    expect(handOffAt([step, foundNothing, step, words])).toEqual(emptySearchAt(1)); // under the search, above the model's words
+    expect(handOffAt([foundNothing, step, foundNothing])).toEqual(emptySearchAt(2)); // two searches, both empty: under the last
+    expect(handOffAt([foundNothing, handOff('output-error')])).toEqual(emptySearchAt(0)); // a hand-off that failed doesn't take the note away
+    expect(handOffAt([foundNothing, handOff('output-available', refusal)])).toEqual(emptySearchAt(0));
   });
 
   it('shows no fallback note when any search found entries', () => {
@@ -274,14 +319,14 @@ describe('handOffAt', () => {
 
   // Rule 6 has the model fix a refused call and call again, and the local model makes bad first calls.
   it('lets the last search decide: an earlier one that failed, was refused or could not be read does not cancel the note', () => {
-    expect(handOffAt([search('output-available', refusal), foundNothing])).toEqual(fallbackAt(1));
-    expect(handOffAt([search('output-error'), foundNothing])).toEqual(fallbackAt(1));
-    expect(handOffAt([search('output-available', refusal), step, search('output-error'), step, foundNothing])).toEqual(fallbackAt(4)); // two bad ones, then an empty one
-    expect(handOffAt([search('output-available', { content: [] }), foundNothing])).toEqual(fallbackAt(1)); // a result with nothing to read
+    expect(handOffAt([search('output-available', refusal), foundNothing])).toEqual(emptySearchAt(1));
+    expect(handOffAt([search('output-error'), foundNothing])).toEqual(emptySearchAt(1));
+    expect(handOffAt([search('output-available', refusal), step, search('output-error'), step, foundNothing])).toEqual(emptySearchAt(4)); // two bad ones, then an empty one
+    expect(handOffAt([search('output-available', { content: [] }), foundNothing])).toEqual(emptySearchAt(1)); // a result with nothing to read
     // A guessed slug is not_found; the model looks it up with search_products, then searches again.
     const notFound = search('output-available', { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'not_found', message: 'No such product.', hint: 'Call search_products to find valid product slugs.' } }) }] });
     const products: Part = { type: 'dynamic-tool', toolName: 'search_products', state: 'output-available', output: { content: [], structuredContent: { products: [{ slug: 'weekender-50' }] } } };
-    expect(handOffAt([notFound, products, foundNothing])).toEqual(fallbackAt(2));
+    expect(handOffAt([notFound, products, foundNothing])).toEqual(emptySearchAt(2));
     // The last one still has to be the empty one, and no search may have found entries or be running.
     expect(handOffAt([search('output-available', refusal), foundAnAnswer, foundNothing])).toBeNull();
     expect(handOffAt([search('output-error'), foundAnAnswer])).toBeNull();
@@ -302,7 +347,7 @@ describe('handOffAt', () => {
 
   it('reads a call from a static part too, and counts every part toward the index', () => {
     const typed: Part = { type: 'tool-search_knowledge', state: 'output-available', output: { content: [], structuredContent: { entries: [] } } };
-    expect(handOffAt([step, words, typed])).toEqual(fallbackAt(2));
+    expect(handOffAt([step, words, typed])).toEqual(emptySearchAt(2));
     expect(handOffAt([step, words, { ...typed, output: { content: [], structuredContent: { entries: [{ title: 'A' }] } } }])).toBeNull();
     const typedHandOff: Part = { type: 'tool-hand_off_to_staff', state: 'output-available', input: { question: 'Can it hold a watch?' }, output: recorded('Q-4821') };
     expect(handOffAt([step, typed, words, typedHandOff])).toEqual(recordedAt(3));

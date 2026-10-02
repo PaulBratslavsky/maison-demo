@@ -712,14 +712,14 @@ describe('conciergeInstructions', () => {
   });
 
   // Rules 9 and 10, word for word: the policy question and what follows when no entry answers it, and the request for a person.
-  const RULE_9 = `9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded in this reply, and never promise a time yourself.`;
+  const RULE_9 = `9. For a question about Maison's services and policies, such as care, materials, sizing, personalization, delivery, payment, returns, repairs, warranty or gift wrapping, call search_knowledge with the customer's own words, and with productSlugs when the question is about particular pieces. Answer only from the entries it returns, and never invent a policy, a price or a time. If no entry answers the question, call hand_off_to_staff next, before you write anything, with the customer's question in their own words, reason "no_answer", and productSlug when it is about one piece. Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply. Never say a question is with the advisors unless hand_off_to_staff succeeded for it, in this reply or an earlier one, and never promise a time yourself.`;
   const RULE_10 = `10. If the customer asks to talk to a person, call hand_off_to_staff at once with their request, reason "asked_for_person". Hand off each question once: if it is already with the advisors, say so.`;
 
   it('sends questions about policies to search_knowledge, and the ones it has no answer to, or a request for a person, to hand_off_to_staff, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
       expect(text, locale).toContain(`\n${RULE_9}\n${RULE_10}`);
-      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is.
+      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is: in this reply or an earlier one.
       expect(text, locale).not.toMatch(/answers questions like this in the LINE chat/);
       expect(text, locale).not.toMatch(/button below/);
       expect(text, locale).not.toMatch(/Don't mention the LINE chat yourself/);

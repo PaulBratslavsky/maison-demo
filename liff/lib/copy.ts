@@ -68,8 +68,9 @@ export const COPY = {
     // The concierge's hand-off (components/chat-parts.tsx), under the line handOffAt names (lib/tool-view.ts). Under a
     // hand_off_to_staff that Strapi recorded: `note` says who has the question, by its reference, and where and when they
     // reply, and `send` is the button that opens Maison's LINE chat with `typed` already in it (lineMessageUrl in
-    // lib/line-chat.ts). `fallback` is for a question nothing recorded, when the model skipped the call (or it failed)
-    // after a knowledge search that found nothing: it says only where the team answers, above "Chat with Maison on LINE".
+    // lib/line-chat.ts). `fallback` is for a question nothing recorded, when the model skipped the call after a knowledge
+    // search that found nothing, or the call failed: it says only where the team answers, above "Chat with Maison on
+    // LINE", so a customer can always reach a person.
     handOff: {
       fallback: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
       note: (reference: string) => `ご質問（${reference}）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。`,

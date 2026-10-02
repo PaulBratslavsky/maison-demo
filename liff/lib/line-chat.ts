@@ -19,13 +19,22 @@ export const lineChatUrl = (basicId: string | undefined): string | null => {
 const MAX_TYPED = 500;
 
 /**
+ * Half of a surrogate pair on its own, which a model can write and encodeURIComponent throws on. An emoji is a whole
+ * pair, and isn't matched. (String.prototype.toWellFormed does this too, but older LIFF in-app browsers lack it.)
+ */
+const LONE_SURROGATE = /\p{Cs}/gu;
+
+/**
  * LINE's link that opens the chat with Maison with `text` already typed in, for the customer to send: "Send it in the
  * LINE chat" under a hand-off. Once they send it, staff see the chat in LINE Official Account Manager, which on an
- * unverified account lists only customers who have written. Null when the setting is unset or isn't an @ ID.
+ * unverified account lists only customers who have written. Null when the setting is unset or isn't an @ ID. The text is
+ * cut to 500 characters, never through one, and a lone half of a surrogate pair in it becomes U+FFFD.
  */
 export const lineMessageUrl = (basicId: string | undefined, text: string): string | null => {
   const id = basicId?.trim() ?? '';
-  return LINE_ID.test(id) ? `https://line.me/R/oaMessage/${encodeURIComponent(id)}/?${encodeURIComponent(Array.from(text).slice(0, MAX_TYPED).join(''))}` : null;
+  return LINE_ID.test(id)
+    ? `https://line.me/R/oaMessage/${encodeURIComponent(id)}/?${encodeURIComponent(Array.from(text).slice(0, MAX_TYPED).join('').replace(LONE_SURROGATE, '\uFFFD'))}`
+    : null;
 };
 
 /**
