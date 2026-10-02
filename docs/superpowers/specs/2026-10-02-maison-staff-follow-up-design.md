@@ -196,6 +196,7 @@ In the question's language, published at once: the question as its title (cut to
 - A reply box in Strapi for a conversation. Staff reply in LINE's own chat.
 - A LINE webhook, so customers' chat messages reach Strapi.
 - Logging every turn on the server (spec step 3), instead of relying on the model's call.
+- A guard for two staff pressing Let them know or Answer on the same question at the same moment: both could send. The buttons disable while one person's request runs.
 
 ## Testing
 
