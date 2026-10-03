@@ -83,7 +83,8 @@ The inputs and conditions most likely to break a customer's evening, and what sh
 | `liff/components/booking-form.tsx` | New: the sheet's form, shared |
 | `liff/components/booking-sheet.tsx` | Wraps the shared form in its dialog |
 | `liff/components/visit-picker.tsx` | New: the inline card around the shared form, Request and Not now |
-| `liff/lib/visit-picker.ts` | New, pure: the prefill fallbacks, the several-pieces rule, which picker is live, the resume predicate |
+| `liff/lib/visit-picker.ts` | New, pure: the prefill fallbacks, which picker is live, the resume predicate |
+| `liff/lib/booking.ts` | The several-pieces rule (a boutique with at least one of the pieces), shared by the sheet and the picker |
 | `liff/components/chat-parts.tsx`, `liff/lib/tool-view.ts` | Render the picker, its lines and its card |
 | `liff/lib/chat-retry.ts` | "Try again" rules for the picker |
 | `liff/lib/copy.ts` | The suggestion chips and the three new lines |

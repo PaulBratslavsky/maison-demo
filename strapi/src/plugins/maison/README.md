@@ -35,27 +35,16 @@ Confirming a request is one act wherever it happens: the `confirm_appointment` t
 - For the customer tools and the customer routes, strapi-oauth-mcp-manager 1.1 with LINE sign-in configured. Without it, those tools answer `not_signed_in` and those routes answer 503.
 - For the admin chat, strapi-plugin-tanstack-ai 1.6 with its chat configured. Maison needs no setup for it: the chat finds Maison's tools by itself.
 
-## Install for local development
+## Install
 
-```bash
-git clone https://github.com/PaulBratslavsky/strapi-store-demo-mcp.git
-cd strapi-store-demo-mcp
-npm install
-npm run link          # builds, then publishes to a local yalc store
-```
-
-In your Strapi app:
-
-```bash
-npx yalc@1.0.0-pre.53 add --link strapi-store-demo-mcp
-yarn install          # or npm install
-```
+Maison lives in the [maison-demo](https://github.com/PaulBratslavsky/maison-demo) repo, in `strapi/src/plugins/maison`, and the demo's Strapi loads it as a local plugin. To use it in another Strapi app, copy this folder into that app's `src/plugins/maison`, run `npm install` in it, and add it to `config/plugins.ts` with `resolve`:
 
 ```ts
 // config/plugins.ts
 export default ({ env }) => ({
   maison: {
     enabled: true,
+    resolve: 'src/plugins/maison',
     config: {
       liffUrl: env('MAISON_LIFF_URL', null),
       lineChannelAccessToken: env('LINE_CHANNEL_ACCESS_TOKEN', null),
