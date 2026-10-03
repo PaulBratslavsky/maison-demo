@@ -5,11 +5,14 @@ import {
   asSchema,
   convertToModelMessages,
   createUIMessageStreamResponse,
+  hasToolCall,
   isStepCount,
   streamText,
   toUIMessageStream,
   tool,
   type LanguageModel,
+  type ModelMessage,
+  type TextStreamPart,
   type ToolSet,
   type UIMessage,
 } from 'ai';
@@ -19,6 +22,7 @@ import { tokyoDays } from './format';
 import { pieceSlugOf } from './piece-slug';
 import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
 import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
+import { toolPartOf } from './tool-view';
 import { CHOOSE_VISIT } from './visit-picker';
 
 /** Tells the Maison plugin a call came from the concierge. Informational; never used for identity. */
@@ -34,6 +38,12 @@ const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 
 const LOG_TIMEOUT_MS = 5000;
 /** How many days the calendar in the instructions covers, today first. */
 const CALENDAR_DAYS = 14;
+/** How long the visit picker's extra pass may take (handleConcierge). The customer has the first reply meanwhile. */
+const PICKER_PASS_TIMEOUT_MS = 20_000;
+/** The extra pass's steps at most: resolve_date for a day the customer named, choose_visit, and one to spare. */
+const PICKER_PASS_STEPS = 3;
+/** What the server's log says when the extra pass shows no picker, before the reason. */
+const NO_PICKER = '[concierge] The extra pass for a visit picker showed none, so the turn keeps its first reply:';
 const WEEKDAY_NAMES = {
   en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   ja: ['日', '月', '火', '水', '木', '金', '土'],
@@ -452,17 +462,47 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
 /** What the log says of a turn that ended at a visit picker, for the staff who read it: the concierge's words aren't the whole of what it did. */
 const PICKER_NOTE = '(The concierge showed a visit picker so the customer can request a visit.)';
 
+/** Whether a turn's content holds a choose_visit call that showed the picker. A call the schema refused (`invalid`) showed none. */
+const showsPicker = (content: ReadonlyArray<{ type: string; toolName?: string; invalid?: boolean }>): boolean =>
+  content.some((part) => part.type === 'tool-call' && part.toolName === CHOOSE_VISIT && part.invalid !== true);
+
 /**
  * The reply a finished turn is logged with: its words (turnReplyOf), and, when the turn holds a choose_visit call, the
  * note above on a paragraph of its own, or alone when no words came before the call. A turn that ends at the call has
  * nothing after it: the customer's answer comes in a later request, which isn't logged, so without the note staff's
- * labeller would see a customer with no answer. A call the schema refused (`invalid`) showed no picker, and doesn't count.
+ * labeller would see a customer with no answer. A call the schema refused showed no picker, and doesn't count (showsPicker).
  */
 const loggedReplyOf = (content: ReadonlyArray<{ type: string; text?: string; toolName?: string; invalid?: boolean }>): string => {
   const words = turnReplyOf(content);
-  const showedPicker = content.some((part) => part.type === 'tool-call' && part.toolName === CHOOSE_VISIT && part.invalid !== true);
-  return showedPicker ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
+  return showsPicker(content) ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
 };
+
+/** Whether a turn's content holds a choose_visit call in any state: one that showed the picker, or one that was refused. */
+const callsPicker = (content: ReadonlyArray<{ type: string; toolName?: string }>): boolean =>
+  content.some((part) => (part.type === 'tool-call' || part.type === 'tool-error') && part.toolName === CHOOSE_VISIT);
+
+/**
+ * The pieces a tool result names by slug: a search_products result's products, or a view_product result's product. None
+ * for a refusal (an isError result), a result with no structuredContent, any other tool, and a value that isn't a slug.
+ */
+const piecesFoundBy = ({ toolName, output }: { toolName: string; output: unknown }): string[] => {
+  if (!isObject(output) || output.isError === true || !isObject(output.structuredContent)) return [];
+  const { products, product } = output.structuredContent;
+  if (toolName === 'search_products' && Array.isArray(products)) return products.flatMap((found) => (isObject(found) ? (pieceSlugOf(found.slug) ?? []) : []));
+  const viewed = toolName === 'view_product' && isObject(product) ? pieceSlugOf(product.slug) : null;
+  return viewed ? [viewed] : [];
+};
+
+/** The tool calls in the conversation's earlier replies that came back whole, as the page sends them back (toolPartOf): each tool's name and result. */
+const earlierResultsOf = (messages: UIMessage[]): Array<{ toolName: string; output: unknown }> =>
+  messages.flatMap((message) =>
+    message.role !== 'assistant'
+      ? []
+      : message.parts.flatMap((part) => {
+          const call = toolPartOf(part);
+          return call?.state === 'output-available' ? [{ toolName: call.toolName, output: call.output }] : [];
+        })
+  );
 
 /** English words that ask for a visit, as whole words in any case: "visitor" and "notebook" don't count. */
 const VISIT_WORDS = /\b(?:book(?:ing)?|visit(?:s|ing)?|appointments?|schedul(?:e|ing)|reserv(?:e|ation|ations))\b/i;
@@ -607,6 +647,84 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       }
       if (why !== undefined) console.warn("[concierge] The turn couldn't be logged:", why);
     };
+    /** What a turn did, as the log reads it: its content and its tool results, of one pass or of both. */
+    type TurnRecord = Parameters<typeof logTurn>[0];
+    type Part = TextStreamPart<typeof tools>;
+    const instructions = conciergeInstructions(locale, now, piece);
+    // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as they
+    // did in that turn, and not as the raw MCP result. A visit picker the customer moved past by writing has no answer: a
+    // call without a result is one the model call refuses (MissingToolResultsError), so it is left out, and the model
+    // answers the new message (ignoreIncompleteToolCalls).
+    const modelMessages = await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true });
+
+    /**
+     * The visit picker's safety net. Rule 3 says to call choose_visit for a visit, but the model decides, and once in
+     * production it asked for the boutique, day and time in words instead. So a turn that ended whole (the caller checks
+     * `failed`) gets one extra pass when all of these hold:
+     * - it isn't a resume (the customer's answer to a picker);
+     * - the customer's message asks to book or visit (asksToVisit);
+     * - the turn made no choose_visit call, in any state, a refused one included (callsPicker);
+     * - a piece is known: the page's, or one that search_products or view_product returned in this conversation, in an
+     *   earlier reply or in this turn. Without one, asking which piece is the right reply.
+     */
+    const needsPickerPass = (turn: TurnRecord): boolean =>
+      !resumed &&
+      asksToVisit(question) &&
+      !callsPicker(turn.content) &&
+      (piece !== null || [...earlierResultsOf(messages), ...turn.toolResults].some((result) => piecesFoundBy(result).length > 0));
+
+    /**
+     * The extra pass: the same model, instructions and tools (choose_visit's check of its pieces included), with only
+     * resolve_date and choose_visit active and a tool call required. A step after the first must call choose_visit, so a
+     * day the customer named is resolved first (rule 4) and the picker follows. It stops at the call, or after
+     * PICKER_PASS_STEPS. Its messages are the conversation and the turn's own, without the reply's words when they come
+     * last: Claude Sonnet 5 refuses a request that ends with the assistant's turn (a prefill) with a 400.
+     *
+     * Its parts (without its start) are returned only when it ended whole with a picker. Otherwise it returns why it
+     * didn't, or null when the customer left, which isn't a failure. Nothing of a pass that fails reaches the page.
+     */
+    const pickerPass = async (turnMessages: ModelMessage[]): Promise<(TurnRecord & { parts: Part[] }) | { why: string | null }> => {
+      const timeout = AbortSignal.timeout(PICKER_PASS_TIMEOUT_MS);
+      // Set by the callbacks below, so not narrowed to its first value.
+      let end = undefined as TurnRecord | undefined;
+      let error: unknown;
+      const pass = streamText({
+        model: deps.model,
+        instructions,
+        messages: [...modelMessages, ...turnMessages],
+        tools,
+        activeTools: ['resolve_date', CHOOSE_VISIT],
+        toolChoice: 'required',
+        prepareStep: ({ steps, stepNumber }) =>
+          stepNumber > 0 && !steps.some((step) => step.toolCalls.some((call) => call.toolName === CHOOSE_VISIT)) ? { toolChoice: { type: 'tool', toolName: CHOOSE_VISIT } } : undefined,
+        stopWhen: [hasToolCall(CHOOSE_VISIT), isStepCount(PICKER_PASS_STEPS)],
+        abortSignal: AbortSignal.any([request.signal, timeout]),
+        onEnd: (event) => {
+          end = { content: event.content, toolResults: event.toolResults };
+        },
+        // Given, so the SDK doesn't print it: the error part says the same, and the caller warns with it.
+        onError: ({ error: cause }) => {
+          error ??= cause;
+        },
+      });
+      const parts: Part[] = [];
+      try {
+        for await (const part of pass.stream) {
+          if (part.type === 'error') error ??= part.error;
+          if (part.type !== 'start') parts.push(part);
+        }
+      } catch (cause) {
+        error ??= cause;
+      }
+      if (request.signal.aborted) return { why: null };
+      if (timeout.aborted) return { why: `it took longer than ${PICKER_PASS_TIMEOUT_MS / 1000} seconds` };
+      if (error !== undefined) return { why: describeModelError(error, deps.modelLabel, deps.modelFix) };
+      if (!end || !showsPicker(end.content)) return { why: 'it ended without a visit picker' };
+      return { ...end, parts };
+    };
+
+    /** What the extra pass adds to the page's message: its parts when it showed a picker, else none. Settled once the first pass has ended, however it ended. */
+    const added = Promise.withResolvers<Part[]>();
     /**
      * Whether the turn failed or was cut off. onEnd isn't told: it also runs for a turn that fails once a step has finished
      * (see onEnd below). No stream retries are set, so every onError ends the turn.
@@ -614,37 +732,92 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     let failed = false;
     const result = streamText({
       model: deps.model,
-      instructions: conciergeInstructions(locale, now, piece),
-      // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as
-      // they did in that turn, and not as the raw MCP result. A visit picker the customer moved past by writing has no
-      // answer: a call without a result is one the model call refuses (MissingToolResultsError), so it is left out, and
-      // the model answers the new message (ignoreIncompleteToolCalls).
-      messages: await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true }),
+      instructions,
+      messages: modelMessages,
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
       // onEnd is skipped on abort, and when no step completes, so close in all three. It also runs, after onError, for a turn
       // that fails once a step has finished (a tool step, then a model call that throws or a stream that errors), so `failed`
-      // keeps that turn out of the log: only a turn that ended whole is logged, and before the client closes, since closing
-      // it first would cut the log short.
+      // keeps that turn out of the extra pass and the log: only a turn that ended whole gets them, and before the client
+      // closes, since closing it first would cut them short. The turn is logged once, after both passes: as the first pass
+      // ended when the extra pass showed no picker.
       onEnd: async (event) => {
-        if (!failed) await logTurn(event);
+        let turn: TurnRecord = { content: event.content, toolResults: event.toolResults };
+        if (!failed && needsPickerPass(turn)) {
+          const turnMessages = [...event.responseMessages];
+          while (turnMessages.at(-1)?.role === 'assistant') turnMessages.pop();
+          const pass = await pickerPass(turnMessages);
+          if ('parts' in pass) {
+            added.resolve(pass.parts); // before the log, which the page doesn't wait for
+            turn = { content: [...turn.content, ...pass.content], toolResults: [...turn.toolResults, ...pass.toolResults] };
+          } else if (pass.why !== null) {
+            console.warn(NO_PICKER, pass.why);
+          }
+        }
+        added.resolve([]);
+        if (!failed) await logTurn(turn);
         await close();
       },
       onAbort: async () => {
         failed = true;
+        added.resolve([]);
         await close();
       },
       onError: async ({ error }) => {
         failed = true;
+        added.resolve([]);
         // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).
         console.error('[concierge]', describeModelError(error, deps.modelLabel, deps.modelFix), error);
         await close();
       },
     });
+
+    /**
+     * The turn's parts, as one message for the page: the first pass's, and after them the extra pass's when it showed a
+     * picker, with one start and one finish. The first pass's finish waits for what the extra pass adds, and is replaced
+     * by the extra pass's own when it adds parts. Its stream is read to its end meanwhile, which comes once its onEnd has
+     * run (the extra pass, the log, the client's close), so nothing waits on this reader, and the page's stream ends after
+     * the log, as it did with one pass.
+     */
+    async function* turnParts(): AsyncGenerator<Part> {
+      const first = result.stream[Symbol.asyncIterator]();
+      try {
+        for (let next = await first.next(); !next.done; next = await first.next()) {
+          if (next.value.type !== 'finish') {
+            yield next.value;
+            continue;
+          }
+          const rest = (async () => {
+            const tail: Part[] = [];
+            for (let more = await first.next(); !more.done; more = await first.next()) tail.push(more.value);
+            return tail;
+          })();
+          const extra = await Promise.race([added.promise, rest.then(() => added.promise)]);
+          yield* extra.filter((part) => part.type !== 'finish');
+          yield extra.findLast((part) => part.type === 'finish') ?? next.value;
+          yield* await rest;
+          return;
+        }
+      } finally {
+        await first.return?.();
+      }
+    }
+    const reply = turnParts();
+    const replyStream = new ReadableStream<Part>({
+      async pull(controller) {
+        const next = await reply.next();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel() {
+        // Not waited for: the generator stops at its next part, which may come only once the extra pass has ended.
+        reply.return(undefined).catch(() => {});
+      },
+    });
     return createUIMessageStreamResponse({
       stream: toUIMessageStream({
-        stream: result.stream,
+        stream: replyStream,
         originalMessages: messages,
         onError: (error) => describeModelError(error, deps.modelLabel, deps.modelFix),
       }),
