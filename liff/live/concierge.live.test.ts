@@ -379,8 +379,11 @@ describe.skipIf(!ready || !claude)('the visit picker on Claude', () => {
   });
 
   // Paul's conversation in production on 3 October, as Strapi Cloud logged it: what he asked and what the concierge
-  // replied, as text. To the last message, the concierge replied in words with no picker, once. Now the turn ends in a
-  // picker either way: the model's own call, or the safety net's extra pass (handleConcierge).
+  // replied. To the last message, the concierge replied in words with no picker, once. The "What do you have" reply goes
+  // back as the page sends it, with its search_products call before its words, so the Cabin Case 55 is a piece known
+  // from an earlier turn: the safety net's extra pass can run even when this turn searches for nothing.
+  // This case mostly checks the model's own choose_visit call: Claude rarely slips, so the extra pass seldom runs here.
+  // The unit tests in lib/concierge.test.ts are what check the extra pass.
   const PRODUCTION: Array<[string, string]> = [
     [
       'When is a good time to come into to the store',
@@ -393,9 +396,34 @@ describe.skipIf(!ready || !claude)('the visit picker on Claude', () => {
       'Here are a few highlights: the Voyage Trunk 110, a grand travel trunk that can be personalized; the Cabin Case 55, a versatile personalizable trunk available at all our boutiques; and the Weekender 50, a stylish travel bag also open to personalization. Would you like to see any of these in person, or shall I narrow things down by budget or occasion?',
     ],
   ];
+  /** The search behind "What do you have", as search_products answers it (its structuredContent, and the same as text). */
+  const highlights = {
+    products: [
+      { slug: 'voyage-trunk-110', name: 'Voyage Trunk 110', category: 'trunk', priceJpy: 2800000, imageUrl: null, occasions: ['travel', 'wedding'], personalizable: true, inStockAt: ['ginza'] },
+      { slug: 'cabin-case-55', name: 'Cabin Case 55', category: 'trunk', priceJpy: 690000, imageUrl: null, occasions: ['travel', 'new-job'], personalizable: true, inStockAt: ['ginza', 'omotesando', 'osaka'] },
+      { slug: 'weekender-50', name: 'Weekender 50', category: 'travel', priceJpy: 385000, imageUrl: null, occasions: ['travel', 'birthday', 'anniversary'], personalizable: true, inStockAt: ['ginza', 'omotesando'] },
+    ],
+  };
 
   it("ends Paul's production conversation in a visit picker for the Cabin Case 55, from the model's own call or the extra pass", async () => {
-    const history = PRODUCTION.flatMap(([asked, replied], index): UIMessage[] => [say(`u${index}`, asked), { id: `a${index}`, role: 'assistant', parts: [{ type: 'text', text: replied }] }]);
+    const history = PRODUCTION.flatMap(([asked, replied], index): UIMessage[] => {
+      const searched =
+        asked === 'What do you have'
+          ? [
+              { type: 'step-start' as const },
+              {
+                type: 'dynamic-tool' as const,
+                toolName: 'search_products',
+                toolCallId: 'toolu_history_search',
+                state: 'output-available' as const,
+                input: { locale: 'en' },
+                output: { content: [{ type: 'text', text: JSON.stringify(highlights) }], structuredContent: highlights },
+              },
+              { type: 'step-start' as const },
+            ]
+          : [];
+      return [say(`u${index}`, asked), { id: `a${index}`, role: 'assistant', parts: [...searched, { type: 'text', text: replied }] }];
+    });
     const messages = [...history, say('ulast', 'I would like to book a visit to see cabin case')];
     const events = await converse(token, { locale: 'en', messages });
     const trace = traceOf(events);
