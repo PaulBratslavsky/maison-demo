@@ -1,11 +1,13 @@
 /**
- * The concierge end to end on the local model: the real route, a signed-in demo customer, real MCP tool calls to the
- * running Strapi. Opt-in (`npm run test:live`), and skipped when the app's client ID is missing (`npm run setup` writes
- * NEXT_PUBLIC_MAISON_CLIENT_ID to liff/.env), or Ollama or Strapi isn't up. In LINE mode it refuses to run
- * (live/support.ts). It always uses the local model, even when an API key is set, so it costs nothing and runs offline.
+ * The concierge end to end: the real route, a signed-in demo customer, real MCP tool calls to the running Strapi. Opt-in
+ * (`npm run test:live`), and skipped when the app's client ID is missing (`npm run setup` writes
+ * NEXT_PUBLIC_MAISON_CLIENT_ID to liff/.env), or Strapi or the model isn't there. In LINE mode it refuses to run
+ * (live/support.ts). Two modes:
+ * - The local model, the default. It always uses Ollama, even when an API key is set, so it costs nothing and runs offline.
+ * - Claude, opt-in: `LIVE_MODEL=claude npm run test:live` runs the visit picker's two cases on Claude, with the key the
+ *   app uses from liff/.env (ANTHROPIC_API_KEY, or AI_GATEWAY_API_KEY). Skipped without one. The key is never printed:
+ *   the test only checks that one is set.
  */
-import { randomBytes } from 'node:crypto';
-
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai';
@@ -16,13 +18,20 @@ import { COPY } from '@/lib/copy';
 import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
 import { handOffAt } from '@/lib/tool-view';
+import { CHOOSE_VISIT, livePickerOf } from '@/lib/visit-picker';
 import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, sseEvents, strapiUp, weekdaysIn } from './support';
 
-delete process.env.ANTHROPIC_API_KEY;
-delete process.env.AI_GATEWAY_API_KEY;
+/** Which model answers: Claude only when asked for by name, so a run costs nothing unless someone means it to. */
+const claude = process.env.LIVE_MODEL === 'claude';
+if (!claude) {
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.AI_GATEWAY_API_KEY;
+}
+/** Whether a key for Claude is set: checked, never read out. */
+const hasClaudeKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.AI_GATEWAY_API_KEY);
 
 const clientId = process.env.NEXT_PUBLIC_MAISON_CLIENT_ID ?? '';
-const ready = Boolean(clientId) && (await strapiUp()) && (await ollamaUp());
+const ready = Boolean(clientId) && (await strapiUp()) && (claude ? hasClaudeKey : await ollamaUp());
 /** A demo customer of its own, so the browser tests' customers never see these visits. */
 const CUSTOMER = `U${'c'.repeat(32)}`;
 const QUESTION = "I'm looking for a travel gift under ¥400,000 that I can see at the Ginza boutique. What would you suggest?";
@@ -51,6 +60,77 @@ const assistantMessageOf = async (events: Array<Record<string, any>>): Promise<U
   let message: UIMessage | undefined;
   for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
   return message as UIMessage;
+};
+
+const say = (id: string, text: string): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+/** For a failure's message: the calls the turn made, and what the concierge said. */
+const traceOf = (events: Array<Record<string, any>>) =>
+  `Tools: ${callsIn(events)
+    .map((call) => `${call.name}(${JSON.stringify(call.input)})`)
+    .join(', ')}. Reply: ${JSON.stringify(textIn(events))}`;
+
+/** One request through the real route, as the app sends it, signed in with `token`: the stream's events, with no error among them. */
+const converse = async (token: string, body: Record<string, unknown>) => {
+  const response = await POST(
+    new Request('http://localhost:3003/api/concierge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+  );
+  expect(response.status).toBe(200);
+  const events = sseEvents(await response.text());
+  expect(events.filter((event) => event.type === 'error')).toEqual([]);
+  return events;
+};
+
+/**
+ * The demo's first suggestion, as the stage sends it, ends in a visit picker: for the next Saturday in Tokyo (the date
+ * resolve_date returned, which it asked first) at 14:00 in Ginza, for pieces a search in that turn returned. Nothing is
+ * booked: the turn stops at the picker, which waits for the customer, and the reply says no visit is confirmed and names
+ * no other day.
+ */
+const expectTheDemoPicker = async (token: string) => {
+  const saturday = resolveDate({ weekday: 'saturday' }, 'en').date; // by the code the tool runs
+  const [ask] = COPY.en.suggestions;
+  const events = await converse(token, { locale: 'en', messages: [say('u1', ask)] });
+  const calls = callsIn(events);
+  const trace = traceOf(events);
+
+  const asked = calls.findIndex((call) => call.name === 'resolve_date');
+  const shown = calls.findIndex((call) => call.name === CHOOSE_VISIT);
+  expect(asked, `it asks resolve_date. ${trace}`).toBeGreaterThanOrEqual(0);
+  expect(shown, `it shows the picker. ${trace}`).toBeGreaterThanOrEqual(0);
+  expect(asked < shown, `it asks resolve_date before it shows the picker. ${trace}`).toBe(true);
+  expect(
+    calls.some((call) => call.name === 'resolve_date' && call.output?.date === saturday && call.output?.weekday === 'Saturday'),
+    `resolve_date gave it ${saturday}, a Saturday. ${trace}`
+  ).toBe(true);
+
+  const picker = calls[shown];
+  expect(picker.input, `the picker is for Ginza on ${saturday} at 14:00. ${trace}`).toMatchObject({ boutique: 'ginza', date: saturday, time: '14:00' });
+  const found = new Set(
+    calls
+      .filter((call) => call.name === 'search_products')
+      .flatMap((call) => (call.output?.structuredContent?.products as Product[] | undefined) ?? [])
+      .map((product) => product.slug)
+  );
+  const pieces: string[] = picker.input.productSlugs ?? [];
+  expect(pieces.length, `the picker has pieces. ${trace}`).toBeGreaterThan(0);
+  for (const slug of pieces) expect(found.has(slug), `${slug} came from search_products in this turn. ${trace}`).toBe(true);
+
+  // The customer books, in the picker: the model asks for no visit itself, and says none is confirmed.
+  expect(events.some((event) => event.toolName === 'request_appointment'), `the model called request_appointment. ${trace}`).toBe(false);
+  const reply = textIn(events);
+  expect(saysConfirmed(reply), `the reply says the visit is confirmed. ${trace}`).toBe(false);
+  const year = Number(saturday.slice(0, 4));
+  expect(datesIn(reply, year).filter((date) => date !== saturday), `the reply names another date. ${trace}`).toEqual([]);
+  expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the reply names another weekday. ${trace}`).toEqual([]);
+
+  // The page shows that picker, live: the reply's message ends with it, waiting. No hand-off note: this is a gift and a visit.
+  const message = await assistantMessageOf(events);
+  expect(livePickerOf([say('u1', ask), message]), `the picker waits for the customer. ${trace}`).toBe(picker.id);
+  expect(handOffAt(message.parts), `a hand-off note shows. ${trace}`).toBeNull();
 };
 
 // These run without Ollama or Strapi: they check the checks.
@@ -124,7 +204,7 @@ describe("the booking test's reply checks", () => {
   });
 });
 
-describe.skipIf(!ready)('the concierge on the local model', () => {
+describe.skipIf(!ready || claude)('the concierge on the local model', () => {
   let stopMock = () => {};
   let token = '';
 
@@ -193,71 +273,8 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(handOffAt((await assistantMessageOf(events)).parts), `a hand-off note shows on a gift question. ${context}`).toBeNull();
   });
 
-  /**
-   * The demo's two messages, with "Saturday" in the first: it must ask resolve_date for the day, book the next Saturday
-   * in Tokyo with the date that returned, and never name another date or weekday. It books a visit in the demo database,
-   * for a customer of its own each run: the plugin lets one customer have 3 requests waiting for a boutique.
-   */
-  it('books the next Saturday in Tokyo, with the date resolve_date returned', async () => {
-    const customer = `U${randomBytes(16).toString('hex')}`;
-    const customerToken = await createSession({ strapiUrl: STRAPI_URL, clientId, getIdToken: () => `valid.${customer}` }).getToken();
-    const saturday = resolveDate({ weekday: 'saturday' }, 'en').date; // by the code the tool runs
-    const [ask, yes] = COPY.en.suggestions; // the two messages the stage demo sends
-    const say = (id: string, text: string): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
-    const converse = async (messages: UIMessage[]) => {
-      const response = await POST(
-        new Request('http://localhost:3003/api/concierge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${customerToken}` },
-          body: JSON.stringify({ locale: 'en', messages }),
-        })
-      );
-      expect(response.status).toBe(200);
-      const events = sseEvents(await response.text());
-      expect(events.filter((event) => event.type === 'error')).toEqual([]);
-      return events;
-    };
-
-    const firstTurn = await converse([say('u1', ask)]);
-    const firstReply = await assistantMessageOf(firstTurn);
-    const secondTurn = await converse([say('u1', ask), firstReply, say('u2', yes)]);
-    const secondReply = await assistantMessageOf(secondTurn);
-    const calls = callsIn([...firstTurn, ...secondTurn]);
-    const replies = [textIn(firstTurn), textIn(secondTurn)];
-    const trace = `Tools: ${calls.map((call) => `${call.name}(${JSON.stringify(call.input)})`).join(', ')}. Replies: ${JSON.stringify(replies)}`;
-
-    // It asked resolve_date for the day, before it booked.
-    const asked = calls.findIndex((call) => call.name === 'resolve_date');
-    const booking = calls.findIndex((call) => call.name === 'request_appointment');
-    expect(asked, `it asks resolve_date. ${trace}`).toBeGreaterThanOrEqual(0);
-    expect(booking, `it requests the visit. ${trace}`).toBeGreaterThanOrEqual(0);
-    expect(asked < booking, `it asks resolve_date before it requests the visit. ${trace}`).toBe(true);
-    expect(
-      calls.some((call) => call.name === 'resolve_date' && call.output?.date === saturday && call.output?.weekday === 'Saturday'),
-      `resolve_date gave it ${saturday}, a Saturday. ${trace}`
-    ).toBe(true);
-
-    // The visit it got is on that Saturday at 2 pm, in the request and as the system stored it.
-    const booked = calls.find((call) => call.name === 'request_appointment' && call.output?.structuredContent?.appointment);
-    const on = new RegExp(`^${saturday}T14:00`);
-    expect(booked, `a visit was requested. ${trace}`).toBeDefined();
-    expect(booked?.input.requestedFor, `it asks for ${saturday} at 14:00. ${trace}`).toMatch(on);
-    expect(booked?.output?.structuredContent.appointment.requestedFor, `the visit is on ${saturday} at 14:00. ${trace}`).toMatch(on);
-
-    // The visit is requested, not confirmed: the boutique confirms it, on LINE.
-    expect(saysConfirmed(replies[1]), `the second reply says the visit is confirmed. ${trace}`).toBe(false);
-
-    // And what it tells the customer, before the yes and after the booking, names no other date or weekday.
-    const year = Number(saturday.slice(0, 4));
-    for (const [which, reply] of [['first', replies[0]], ['second', replies[1]]] as const) {
-      expect(datesIn(reply, year).filter((date) => date !== saturday), `the ${which} reply names another date. ${trace}`).toEqual([]);
-      expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the ${which} reply names another weekday. ${trace}`).toEqual([]);
-    }
-
-    // The stage beat is a gift and a booking, not a policy question: neither reply shows a hand-off note.
-    for (const [which, reply] of [['first', firstReply], ['second', secondReply]] as const) {
-      expect(handOffAt(reply.parts), `the ${which} reply shows a hand-off note. ${trace}`).toBeNull();
-    }
+  it("ends the demo's first suggestion in a visit picker for Ginza, the next Saturday in Tokyo and 14:00, with the date resolve_date returned", async () => {
+    await expectTheDemoPicker(token);
   });
 
   it("answers a care question from Maison's product knowledge", async () => {
@@ -291,5 +308,35 @@ describe.skipIf(!ready)('the concierge on the local model', () => {
     expect(note?.recorded?.reference, `the note's reference is the one Strapi gave. Tools: ${called.join(', ')}. Answer: ${answer}`).toBe(reference);
     // With nothing recorded (the hand-off failed), the reply must not promise contact: nobody has the question.
     if (!note?.recorded) expect(answer, `it promises contact though nothing was recorded. Tools: ${called.join(', ')}`).not.toMatch(/will (contact|reach out|get back)/i);
+  });
+});
+
+describe.skipIf(!ready || !claude)('the visit picker on Claude', () => {
+  let stopMock = () => {};
+  let token = '';
+
+  beforeAll(async () => {
+    stopMock = await ensureVerifyMock();
+    token = await createSession({ strapiUrl: STRAPI_URL, clientId, getIdToken: () => `valid.${CUSTOMER}` }).getToken();
+  });
+  afterAll(() => stopMock());
+
+  it("shows the picker for the piece on whose page the customer asks \"Can we schedule one?\", with nothing they didn't name", async () => {
+    const asked = 'Can we schedule one?';
+    const events = await converse(token, { locale: 'en', product: 'weekender-50', messages: [say('u1', asked)] });
+    const trace = traceOf(events);
+    const pickers = callsIn(events).filter((call) => call.name === CHOOSE_VISIT);
+    expect(pickers, `it shows one picker. ${trace}`).toHaveLength(1);
+    expect(pickers[0].input.productSlugs, `the picker is for the piece. ${trace}`).toEqual(['weekender-50']);
+    // Nothing was named, so nothing is filled in: the picker starts as the sheet does.
+    for (const key of ['boutique', 'date', 'time']) expect(pickers[0].input, `the model filled in ${key}. ${trace}`).not.toHaveProperty(key);
+    expect(callsIn(events).some((call) => call.name === 'resolve_date'), `it asked resolve_date, for no day. ${trace}`).toBe(false);
+    expect(saysConfirmed(textIn(events)), `the reply says a visit is confirmed. ${trace}`).toBe(false);
+    const message = await assistantMessageOf(events);
+    expect(livePickerOf([say('u1', asked), message]), `the picker waits for the customer. ${trace}`).toBe(pickers[0].id);
+  });
+
+  it("ends the demo's first suggestion in a visit picker for Ginza, the next Saturday in Tokyo and 14:00", async () => {
+    await expectTheDemoPicker(token);
   });
 });
