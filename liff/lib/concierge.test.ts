@@ -2307,6 +2307,19 @@ describe('conciergeInstructions', () => {
     }
   });
 
+  // The picker offers days from tomorrow up to two weeks ahead (bookingDays in lib/booking.ts), and puts another day
+  // back to its default without a word. Saying a day can't be requested isn't asking for one (rule 3).
+  const BOOKABLE_DAYS =
+    'Visits can be requested from tomorrow up to two weeks ahead: when the customer wants today, or a later day than that, say so in one short sentence and call choose_visit without a date.';
+
+  it('tells the model which days the picker offers, at the end of rule 4, and to say so for any other day, in both reply languages', () => {
+    for (const locale of ['en', 'ja'] as const) {
+      const text = conciergeInstructions(locale, now);
+      expect(text, locale).toContain(`For a day the calendar doesn't show ("next month"), ask the customer which day they mean. ${BOOKABLE_DAYS}\n5. Never say a visit is confirmed.`);
+      expect(text.match(/two weeks ahead/g), locale).toHaveLength(1);
+    }
+  });
+
   it('never names request_appointment, asks for no yes, and has the model write no requestedFor: the picker books', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
