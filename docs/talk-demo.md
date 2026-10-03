@@ -27,7 +27,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 | Time | Step | Do |
 |---|---|---|
 | 0:00-0:30 | UX | The app opens signed in with LINE. Browse Voyage, then the Weekender 50. Turn on **Agent view**: every screen is an MCP tool call, the same tools an agent uses. |
-| 0:30-1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line above the answer names each tool call, and cards show the pieces it found. The `Local · resolve_date` line shows the Saturday it worked out. The **Book a visit** form appears in the chat, filled in with Ginza, that Saturday and 14:00. |
+| 0:30-1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line above the answer names each tool call. The `Local · resolve_date` line shows the Saturday it worked out. Under the concierge's words, cards show the pieces it found, and the **Book a visit** form appears under them, filled in with Ginza, that Saturday and 14:00. The chat scrolls to the form's heading. |
 | 1:10-1:30 | Booking | Tap **Send request**. The visit's card replaces the form, the lines read `Local · choose_visit ✓ requested` and `MCP · request_appointment ✓`, and the concierge says the visit is requested and the boutique will confirm it on LINE. |
 | 1:30-1:50 | The request arrives | On the board, the request appears, created via `app`, with the customer masked. |
 | 1:50-2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
