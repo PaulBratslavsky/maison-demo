@@ -94,6 +94,20 @@ export const saysConfirmed = (text: string): boolean =>
     .split(CLAUSE_END)
     .some((clause) => [...clause.matchAll(CONFIRMED)].some((claim) => !STILL_TO_COME_BEFORE.test(clause.slice(0, claim.index))));
 
+/** "I've requested", "I booked", "we have reserved": a speaker who says they made the request. Not "I haven't requested". */
+const REQUESTED_BY_SPEAKER = /\b(?:I|we)(?:'ve|’ve| have)?\s+(?:just\s+|already\s+)?(?:requested|booked|reserved|scheduled|submitted)\b/i;
+/** "Your visit is requested", "the request has been sent", "an appointment was booked". */
+const REQUESTED_STATE = /\b(?:visit|appointment|request|booking|reservation)\s+(?:is|has been|was)\s+(?:now\s+)?(?:requested|booked|reserved|scheduled|sent|submitted|placed)\b/i;
+/** The same in Japanese: リクエストを送信しました, ご予約いたしました, 承りました. Not 送信しましたら ("once it is sent"). */
+const REQUESTED_JA = /(?:リクエスト|予約|手配|送信|申し込み)(?:を)?(?:いたしました|しました|致しました)(?![らか])|承りました/;
+
+/**
+ * Whether a reply, in English or Japanese, says a visit is already requested or booked. Before the customer taps Send
+ * request in the visit picker, nothing is: the model only shows the form. "Tap Send request", "once you send it" and
+ * "I've filled in Saturday at 2 pm" are fine.
+ */
+export const saysRequested = (text: string): boolean => REQUESTED_JA.test(text) || REQUESTED_BY_SPEAKER.test(text) || REQUESTED_STATE.test(text);
+
 /** The weekday names an English reply mentions ("Saturday", "Saturdays"), as written in WEEKDAYS. */
 export const weekdaysIn = (text: string): string[] => WEEKDAYS.filter((name) => new RegExp(`\\b${name}s?\\b`, 'i').test(text));
 

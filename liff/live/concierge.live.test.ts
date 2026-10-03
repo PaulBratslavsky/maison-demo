@@ -19,7 +19,7 @@ import { resolveDate } from '@/lib/resolve-date';
 import { createSession } from '@/lib/session';
 import { handOffAt } from '@/lib/tool-view';
 import { CHOOSE_VISIT, livePickerOf } from '@/lib/visit-picker';
-import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, sseEvents, strapiUp, weekdaysIn } from './support';
+import { STRAPI_URL, datesIn, ensureVerifyMock, ollamaUp, saysConfirmed, saysRequested, sseEvents, strapiUp, weekdaysIn } from './support';
 
 /** Which model answers: Claude only when asked for by name, so a run costs nothing unless someone means it to. */
 const claude = process.env.LIVE_MODEL === 'claude';
@@ -123,6 +123,7 @@ const expectTheDemoPicker = async (token: string) => {
   expect(events.some((event) => event.toolName === 'request_appointment'), `the model called request_appointment. ${trace}`).toBe(false);
   const reply = textIn(events);
   expect(saysConfirmed(reply), `the reply says the visit is confirmed. ${trace}`).toBe(false);
+  expect(saysRequested(reply), `the reply says the visit is requested before the customer sent it. ${trace}`).toBe(false);
   const year = Number(saturday.slice(0, 4));
   expect(datesIn(reply, year).filter((date) => date !== saturday), `the reply names another date. ${trace}`).toEqual([]);
   expect(weekdaysIn(reply).filter((name) => name !== 'Saturday'), `the reply names another weekday. ${trace}`).toEqual([]);
@@ -195,6 +196,31 @@ describe("the booking test's reply checks", () => {
     for (const reply of ['確定しましたらLINEでお知らせいたします。', 'ご予約が確定しましたら、LINEでお知らせいたします。', '予約が確定次第、LINEでご連絡いたします。', 'まだ確定しておりません。', 'ご予約はまだ未確定です。']) {
       expect.soft(saysConfirmed(reply), reply).toBe(false);
     }
+  });
+
+  it('tells a visit the model says it requested from one the customer still has to send', () => {
+    const requested = [
+      "I've requested a visit for Saturday, October 10 at 2pm in Ginza with these three pieces for you to see.",
+      'I have booked Saturday at 2 pm at Ginza for you.',
+      'I requested a visit to Ginza on Saturday.',
+      'Your visit is requested, and the boutique will confirm it on LINE.',
+      'The request has been sent to Ginza.',
+      'ご来店のリクエストを送信しました。',
+      '土曜日14時でご予約いたしました。',
+      'ご予約を承りました。',
+    ];
+    const notRequested = [
+      'Tap Send request to ask Ginza for Saturday at 2 pm.',
+      "I've filled in Ginza, Saturday 10 October and 2 pm: send the request when you're ready.",
+      'Once you send the request, the boutique will confirm it on LINE.',
+      "I haven't requested anything yet.",
+      'Here are three travel pieces in stock at Ginza.',
+      "I've made a short list of three travel pieces, and I've sent the details to the form below.",
+      'リクエストを送信してください。',
+      'リクエストを送信しましたら、ブティックがLINEでお知らせします。',
+    ];
+    for (const reply of requested) expect.soft(saysRequested(reply), reply).toBe(true);
+    for (const reply of notRequested) expect.soft(saysRequested(reply), reply).toBe(false);
   });
 
   it('finds the weekday names an English reply mentions', () => {
@@ -332,6 +358,7 @@ describe.skipIf(!ready || !claude)('the visit picker on Claude', () => {
     for (const key of ['boutique', 'date', 'time']) expect(pickers[0].input, `the model filled in ${key}. ${trace}`).not.toHaveProperty(key);
     expect(callsIn(events).some((call) => call.name === 'resolve_date'), `it asked resolve_date, for no day. ${trace}`).toBe(false);
     expect(saysConfirmed(textIn(events)), `the reply says a visit is confirmed. ${trace}`).toBe(false);
+    expect(saysRequested(textIn(events)), `the reply says the visit is requested before the customer sent it. ${trace}`).toBe(false);
     const message = await assistantMessageOf(events);
     expect(livePickerOf([say('u1', asked), message]), `the picker waits for the customer. ${trace}`).toBe(pickers[0].id);
   });
