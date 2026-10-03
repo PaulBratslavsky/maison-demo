@@ -27,7 +27,7 @@ describe("the hand-off's copy", () => {
   it('keeps the plain note, and words the recorded one: who has the question, where and when they reply, in English', () => {
     const copy = COPY.en.handOff;
     expect(copy.fallback).toBe("Our team answers questions like this in Maison's LINE chat.");
-    expect(copy.note('Q-4821')).toBe("Your question is with Maison's client advisors (Q-4821). They reply in your LINE chat with Maison, 11:00–20:00 Japan time.");
+    expect(copy.note('Q-4821')).toBe('Thanks for asking! Give us a few minutes: one of our client advisors will message you here with the answer. (Q-4821)');
     expect(copy.send).toBe('Send it in the LINE chat');
     expect(copy.typed('Q-4821', 'Can it hold a watch?')).toBe('Question for a Maison advisor (Q-4821): Can it hold a watch?');
   });
@@ -35,7 +35,7 @@ describe("the hand-off's copy", () => {
   it('and in Japanese', () => {
     const copy = COPY.ja.handOff;
     expect(copy.fallback).toBe('このようなご質問には、MaisonのLINEトークで担当者がお答えします。');
-    expect(copy.note('Q-4821')).toBe('ご質問（Q-4821）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。');
+    expect(copy.note('Q-4821')).toBe('ご質問ありがとうございます。少々お待ちください。クライアントアドバイザーがお調べのうえ、このLINEトークでご返信いたします（Q-4821）。');
     expect(copy.send).toBe('LINEトークで送る');
     expect(copy.typed('Q-4821', '腕時計は入りますか？')).toBe('アドバイザーへの質問（Q-4821）：腕時計は入りますか？');
   });
