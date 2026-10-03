@@ -115,7 +115,7 @@ test("the Content Manager's appointment list never returns a customer, and its s
   }
 });
 
-test.describe('the REST door at /api/maison', () => {
+test.describe('the REST API at /api/maison', () => {
   const rest = `${strapiUrl}/api/maison`;
   // Customers of their own, apart from every other test's: A books one visit (a customer may hold three open), B none.
   const CUSTOMER_A = `U${'a'.repeat(32)}`;

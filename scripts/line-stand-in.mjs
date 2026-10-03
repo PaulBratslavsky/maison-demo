@@ -1,5 +1,5 @@
 // A stand-in for LINE's Messaging API on 127.0.0.1:4010, for local checks of the follow-up: nothing reaches LINE, so
-// nothing reaches a phone. Strapi calls it when MAISON_LINE_API_BASE_URL points here (README, "Production notes").
+// nothing reaches a phone. Strapi calls it when MAISON_LINE_API_BASE_URL points here (docs/production.md, "Production notes").
 //   POST /v2/bot/message/push        answers 200 and logs the push (what Strapi sends for Let them know and Answer)
 //   GET  /v2/bot/profile/<user ID>   answers a made-up display name (what Strapi asks for when a question comes in)
 //   GET  /v2/bot/message/quota       answers the free plan's 200 messages a month (the Inquiries tab shows the month's quota)
