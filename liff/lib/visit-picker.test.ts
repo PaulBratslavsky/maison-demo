@@ -8,6 +8,7 @@ import {
   CHOOSE_VISIT,
   composerLocked,
   followScroll,
+  isPickerAwaitingAnswer,
   isWaitingPicker,
   livePickerOf,
   piecesOf,
@@ -72,6 +73,13 @@ describe('requestedVisitOf and isWaitingPicker', () => {
     expect(isWaitingPicker(waiting)).toBe(true);
     expect(isWaitingPicker(picker('input-streaming'))).toBe(true);
     expect(isWaitingPicker(requested)).toBe(false);
+  });
+
+  it("tell the one state a picker's form shows for: its call came in whole, and it waits for the answer", () => {
+    expect(isPickerAwaitingAnswer(waiting)).toBe(true);
+    expect(isPickerAwaitingAnswer(picker('input-streaming'))).toBe(false);
+    expect(isPickerAwaitingAnswer(requested)).toBe(false);
+    expect(isPickerAwaitingAnswer({ type: 'tool-resolve_date', state: 'input-available' })).toBe(false);
   });
 
   it('read only choose_visit: another tool with the same output is no picker', () => {

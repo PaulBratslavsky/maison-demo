@@ -192,7 +192,6 @@ describe('needsRetry', () => {
 
     it('is false while a picker waits for the customer, with no words after it', () => {
       expect(needsRetry([...askedToVisit, assistant(step, picker('input-available'))], false)).toBe(false);
-      expect(needsRetry([...askedToVisit, assistant(step, picker('input-streaming'))], false)).toBe(false);
       expect(needsRetry([...askedToVisit, assistant(text('Here it is.'), picker('input-available'))], false)).toBe(false);
       expect(needsRetry([...askedToVisit, assistant(step, resolveDate, step, picker('input-available'))], false)).toBe(false);
     });
@@ -201,6 +200,13 @@ describe('needsRetry', () => {
       expect(needsRetry([...askedToVisit, assistant(step, requestedVisit)], false)).toBe(false);
       expect(needsRetry([...askedToVisit, assistant(step, requestedVisit, step)], false)).toBe(false);
       expect(needsRetry([...askedToVisit, assistant(step, requestedVisit, step, text(' '))], false)).toBe(false);
+    });
+
+    // With no reply coming in, a call still at input-streaming is one the reply was cut off in: no form ever shows for it.
+    it('allows it after a choose_visit call that was cut off while it came in, and not while the reply still comes in', () => {
+      expect(needsRetry([...askedToVisit, assistant(step, picker('input-streaming'))], false)).toBe(true);
+      expect(needsRetry([...askedToVisit, assistant(step, text('Here it is.'), picker('input-streaming'))], false)).toBe(true);
+      expect(needsRetry([...askedToVisit, assistant(step, picker('input-streaming'))], true)).toBe(false);
     });
 
     it('still allows it after a picker the customer closed, when no words came after it: nothing was booked', () => {

@@ -78,6 +78,12 @@ export const requestedVisitOf = (part: PickerPart): Appointment | null => {
 /** Whether a part is a picker that waits for the customer. */
 export const isWaitingPicker = (part: PickerPart): boolean => isPicker(part) && waits(part.state);
 
+/**
+ * Whether a part is a picker whose call came in whole and waits for the customer's answer: the one state its form shows
+ * for. Once no reply is coming in, a picker still coming in (input-streaming) is one the reply was cut off in.
+ */
+export const isPickerAwaitingAnswer = (part: PickerPart): boolean => isPicker(part) && part.state === 'input-available';
+
 /** The pieces a picker is for: its call's productSlugs that are slugs, in order, each once, at most five. */
 export const piecesOf = (input: unknown): string[] => {
   const slugs = isObject(input) && Array.isArray(input.productSlugs) ? input.productSlugs : [];
