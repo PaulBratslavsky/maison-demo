@@ -47,7 +47,7 @@ export default {
         // A phone turned to landscape: at least 500 px wide, as app/globals.css has it, and under 500 px high. The concierge
         // hides its suggestion row there once the conversation has begun, so the conversation gets the room. A phone held
         // upright stays under 500 px wide, so its soft keyboard, which can leave a window wider than high, doesn't hide it.
-        // (The stage laptop is tall, and keeps it: "Yes, please." is a tap.)
+        // (The stage laptop is tall, and keeps it: a suggestion is a tap.)
         short: { raw: '(orientation: landscape) and (min-width: 500px) and (max-height: 500px)' },
       },
     },

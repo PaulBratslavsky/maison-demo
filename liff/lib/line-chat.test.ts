@@ -24,7 +24,7 @@ describe("the button's copy", () => {
 });
 
 describe("the hand-off's copy", () => {
-  it('keeps the plain note, and words the recorded one: who has the question, where and when they reply, in English', () => {
+  it('keeps the plain note, and words the recorded one: thanks, an advisor will message them here, and the reference, in English', () => {
     const copy = COPY.en.handOff;
     expect(copy.fallback).toBe("Our team answers questions like this in Maison's LINE chat.");
     expect(copy.note('Q-4821')).toBe('Thanks for asking! Give us a few minutes: one of our client advisors will message you here with the answer. (Q-4821)');

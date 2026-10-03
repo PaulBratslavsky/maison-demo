@@ -108,12 +108,12 @@ export function BookingCard({ appointment, locale }: { appointment: Appointment;
 }
 
 /**
- * The hand-off note, which handOffAt places once a message. After a hand-off Strapi recorded (`recorded`): who has the
- * question, by its reference, and where and when they reply, with "Send it in the LINE chat", a secondary button that
- * opens the chat with Maison with the question already typed in, for the customer to send (lineMessageUrl). Without
- * NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the hand-off after a search that found nothing, or the
- * model's own, failed): where the team answers, and "Chat with Maison on LINE", so a customer can always reach a person.
- * Only a recorded hand-off says the question is with the advisors.
+ * The hand-off note, which handOffAt places once a message. After a hand-off Strapi recorded (`recorded`): thanks, and
+ * that an advisor will message the customer here, with the question's reference, then "Send it in the LINE chat", a
+ * secondary button that opens the chat with Maison with the question already typed in, for the customer to send
+ * (lineMessageUrl). Without NEXT_PUBLIC_LINE_OA_ID there's no button. With nothing recorded (the hand-off after a
+ * search that found nothing, or the model's own, failed): where the team answers, and "Chat with Maison on LINE", so a
+ * customer can always reach a person. Only a recorded hand-off says the question is with the advisors.
  */
 export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | null; locale: Locale }) {
   const copy = COPY[locale].handOff;

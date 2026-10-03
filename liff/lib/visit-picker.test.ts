@@ -236,7 +236,7 @@ describe('livePickerOf', () => {
     const messages = [user('Can we schedule one?'), concierge(step, waiting, step, second)];
     expect(livePickerOf(messages)).toBe('call-2');
     expect(pickerViewOf(waiting, { live: livePickerOf(messages) === waiting.toolCallId, busy: false })).toEqual({ kind: 'unsent' });
-    // When an earlier picker is answered, it is no longer live, even if there's a later waiting picker after it.
+    // A waiting picker is no longer live once a later one in the message has its answer: the customer answered that one.
     const asked = user('Can we schedule one?');
     expect(livePickerOf([asked, concierge(step, { ...waiting, toolCallId: 'call-0' }, requested)])).toBeNull();
     expect(livePickerOf([asked, concierge(step, { ...waiting, toolCallId: 'call-0' }, requested, step, words('Your visit is requested.'))])).toBeNull();

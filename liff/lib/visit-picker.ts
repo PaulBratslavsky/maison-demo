@@ -57,6 +57,9 @@ const isPicker = (part: PickerPart): boolean => part.type === `tool-${CHOOSE_VIS
 /** A call that has no output yet: the model is still writing it (input-streaming), or it waits for the customer (input-available). */
 const waits = (state: string | undefined) => state === 'input-streaming' || state === 'input-available';
 
+/** Whether a part is a picker the customer answered. */
+const isAnsweredPicker = (part: PickerPart): boolean => isPicker(part) && part.state === 'output-available';
+
 /** A picker's answer, as the page wrote it, or null for anything else: a request with no visit to show isn't one. */
 export const visitPickerOutputOf = (output: unknown): VisitPickerOutput | null => {
   if (!isObject(output)) return null;
@@ -122,10 +125,7 @@ export const livePickerOf = (messages: readonly PickerMessage[]): string | null 
     const part = last.parts[i];
     if (isWaitingPicker(part) && typeof part.toolCallId === 'string') {
       // Check if there's an answered picker after this one
-      const hasAnsweredAfter = last.parts.slice(i + 1).some((p) => {
-        const isPickerPart = p.type === `tool-${CHOOSE_VISIT}` || (p.type === 'dynamic-tool' && p.toolName === CHOOSE_VISIT);
-        return isPickerPart && p.state === 'output-available';
-      });
+      const hasAnsweredAfter = last.parts.slice(i + 1).some(isAnsweredPicker);
       if (!hasAnsweredAfter) {
         return part.toolCallId;
       }
@@ -157,9 +157,6 @@ const isCall = (part: PickerPart): boolean => part.type === 'dynamic-tool' || pa
 
 /** The parts of a message's last step: those after its last step-start. */
 const lastStepOf = (message: PickerMessage) => message.parts.slice(message.parts.findLastIndex((part) => part.type === 'step-start') + 1);
-
-/** Whether a part is a picker the customer answered. */
-const isAnsweredPicker = (part: PickerPart): boolean => isPicker(part) && part.state === 'output-available';
 
 /**
  * The step rule for the resume: the last step of the last message holds an answered picker, and every other call in that

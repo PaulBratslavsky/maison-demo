@@ -680,6 +680,7 @@ describe('the visit picker: choose_visit', () => {
       { productSlugs: ['weekender-50'], date: '10 October' },
       { productSlugs: ['weekender-50'], time: '2 pm' },
       { productSlugs: ['weekender-50'], time: '14:00:00' },
+      { productSlugs: ['weekender-50'], time: '24:00' }, // the 24-hour clock ends at 23:59
       { productSlugs: ['weekender-50'], note: 'For my father.' }, // a key it doesn't have
     ];
     for (const input of refused) {
@@ -2337,7 +2338,7 @@ describe('conciergeInstructions', () => {
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
       expect(text, locale).toContain(`\n${RULE_9}\n${RULE_10}`);
-      // The reply leaves where and when the advisors reply to the note, and says a question is with them only once it is (by hand_off_to_staff, or search_knowledge's own hand-off): in this reply or an earlier one.
+      // The reply leaves the details to the note, and says a question is with the advisors only once it is (by hand_off_to_staff, or search_knowledge's own hand-off): in this reply or an earlier one.
       expect(text, locale).not.toMatch(/answers questions like this in the LINE chat/);
       expect(text, locale).not.toMatch(/button below/);
       expect(text, locale).not.toMatch(/Don't mention the LINE chat yourself/);
