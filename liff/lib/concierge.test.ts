@@ -6,7 +6,7 @@ import { APICallError, RetryError, dynamicTool, jsonSchema, readUIMessageStream,
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, turnFactsOf, turnReplyOf, withAutoHandOff } from './concierge';
+import { SURFACE_HEADER, asksToVisit, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, turnFactsOf, turnReplyOf, withAutoHandOff } from './concierge';
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
 import { handOffAt } from './tool-view';
@@ -826,6 +826,73 @@ describe('the visit picker: choose_visit', () => {
     await converse({ messages, locale: 'en', product: 'weekender-50' }, { createMcpClient: resumed.createMcpClient });
     await vi.waitFor(() => expect(resumed.close).toHaveBeenCalled());
     expect(logged).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The safety net's first condition: the customer's latest message asks to book or visit. A plain question about hours or
+// a product doesn't, so the concierge answers it as it would.
+describe('asksToVisit', () => {
+  // Paul's five messages in production on 3 October, in order: only the third and the fifth ask for a visit.
+  const production: Array<[string, boolean]> = [
+    ['When is a good time to come into to the store', false],
+    ['Yes', false],
+    ['Can I book a visit?', true],
+    ['What do you have', false],
+    ['I would like to book a visit to see cabin case', true],
+  ];
+
+  it("reads Paul's production messages as he meant them", () => {
+    for (const [text, asks] of production) expect.soft(asksToVisit(text), text).toBe(asks);
+  });
+
+  it('hears a visit asked for in English: book, visit, appointment, schedule, reserve, or seeing a piece in person or at a boutique', () => {
+    const asks = [
+      'Can I book a visit?',
+      'I would like to book a visit to see cabin case',
+      'BOOK one for Saturday, please.',
+      'Booking for two, please.',
+      'I want to visit the Ginza boutique.',
+      'Can I make an appointment?',
+      'Can we schedule one?',
+      'Could I reserve a time on Saturday?',
+      "I'd like a reservation for Saturday.",
+      'Can I see it in person?',
+      'I want to see them in person',
+      'Could I see this in person?',
+      "I'd love to see these in person.",
+      'Can I see the Weekender 50 in person?',
+      'Can I see it in Ginza?',
+      'Can I see it at the boutique?',
+      'Could I see them at the Omotesando boutique on Friday?',
+    ];
+    for (const text of asks) expect.soft(asksToVisit(text), text).toBe(true);
+  });
+
+  it('hears a visit asked for in Japanese: 予約, 来店, 見に行, 伺い', () => {
+    const asks = ['来店を予約できますか？', '予約したいです。', '土曜日に来店したいです。', '実物を見に行きたいです。', '土曜日に伺いたいです。', 'お伺いしてもよろしいですか？'];
+    for (const text of asks) expect.soft(asksToVisit(text), text).toBe(true);
+  });
+
+  it("doesn't hear one in a plain question about hours or a product, or in a word that only contains one", () => {
+    const plain = [
+      'What time do you open?',
+      'When is a good time to come in?',
+      'What do you have?',
+      'What do you have',
+      'Yes',
+      'How do I care for the leather?',
+      'Can it hold a watch?',
+      'Is it in stock in Ginza?',
+      'Can I see it?',
+      'Let me see, what do you have in Ginza?',
+      'A notebook for my father?',
+      'Do your visitors get gift wrapping?',
+      'こんにちは',
+      '営業時間は何時からですか？',
+      'おすすめは何ですか？',
+      '',
+    ];
+    for (const text of plain) expect.soft(asksToVisit(text), text).toBe(false);
   });
 });
 

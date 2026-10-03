@@ -464,6 +464,20 @@ const loggedReplyOf = (content: ReadonlyArray<{ type: string; text?: string; too
   return showedPicker ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
 };
 
+/** English words that ask for a visit, as whole words in any case: "visitor" and "notebook" don't count. */
+const VISIT_WORDS = /\b(?:book(?:ing)?|visit(?:s|ing)?|appointments?|schedul(?:e|ing)|reserv(?:e|ation|ations))\b/i;
+/** Seeing a piece in person, in a boutique's city or at a boutique, in one clause: "see the Cabin Case 55 in person", "see it at the boutique". */
+const SEE_IN_PERSON = /\bsee\b[^.,;!?]{0,60}?\b(?:in person|(?:in|at) (?:the |your |a )?(?:ginza|omotesando|osaka|shinsaibashi|boutique|store|shop))\b/i;
+/** The same in Japanese: 予約 (a booking), 来店 (coming to the boutique), 見に行 (going to see), 伺い and お伺い (calling on). */
+const VISIT_WORDS_JA = /予約|来店|見に行|伺い/;
+
+/**
+ * Whether a customer's message asks to book or visit, in English or Japanese: the first condition of the visit picker's
+ * safety net (handleConcierge). A plain question about hours or a product ("What time do you open?", "When is a good
+ * time to come in?", "What do you have?") doesn't.
+ */
+export const asksToVisit = (text: string): boolean => VISIT_WORDS.test(text) || SEE_IN_PERSON.test(text) || VISIT_WORDS_JA.test(text);
+
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
 const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string; product?: unknown } | null => {
   try {
