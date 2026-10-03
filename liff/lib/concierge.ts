@@ -579,7 +579,7 @@ const JA_PLACE_OR_DAY = /店舗|ブティック|お店|銀座|表参道|心斎�
  * checking, changing or cancelling one, a pre-order (予約注文, 予約販売), not coming in (来店しなくても), or asking about
  * something (について伺い, 伺いしたいこと).
  */
-const NOT_A_REQUEST_JA = /予約は必要|予約が必要|予約の確認|予約を確認|予約の変更|予約を変更|キャンセル|予約注文|予約販売|来店しなくても|来店せず|について伺い|伺いしたいこと/;
+const NOT_A_REQUEST_JA = /予約は必要|予約が必要|予約の確認|予約を確認|予約の変更|予約を変更|キャンセル|予約注文|予約販売|来店しなくても|来店せず|について伺い|伺いしたいこと|を伺い|をお伺い/;
 
 /**
  * Whether a customer's message asks for a new visit, in the words of a request, in English or Japanese: the first

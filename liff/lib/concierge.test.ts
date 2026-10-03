@@ -1031,6 +1031,11 @@ describe('asksToVisit', () => {
       '来店せずに予約できますか？',
       '銀座のお店について伺いたいです。',
       '明日、銀座のお店にお伺いしたいことがあります。',
+      // 伺う after を is "to ask about" something, even beside a place or a day
+      '銀座店の営業時間を伺いたいです。',
+      '表参道のお店の場所を伺いたいです。',
+      '土曜日の営業時間を伺いたいです。',
+      '銀座店の営業時間をお伺いしたいです。',
     ];
     for (const text of excluded) expect.soft(asksToVisit(text), text).toBe(false);
   });
