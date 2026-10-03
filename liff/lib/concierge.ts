@@ -38,8 +38,15 @@ const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 
 const LOG_TIMEOUT_MS = 5000;
 /** How many days the calendar in the instructions covers, today first. */
 const CALENDAR_DAYS = 14;
-/** How long the visit picker's extra pass may take (handleConcierge). The customer has the first reply meanwhile. */
+/** How long the visit picker's extra pass may take at most (handleConcierge). The customer has the first reply meanwhile. */
 const PICKER_PASS_TIMEOUT_MS = 20_000;
+/** The least time the extra pass is worth starting with: with less left, it is skipped. */
+const PICKER_PASS_MIN_MS = 5_000;
+/**
+ * How long a turn may run, from the request's start to the end of the extra pass: the route's maxDuration (60 seconds,
+ * app/api/concierge/route.ts) less the log's LOG_TIMEOUT_MS, which comes after the pass.
+ */
+const TURN_BUDGET_MS = 55_000;
 /** The extra pass's steps at most: resolve_date for a day the customer named, choose_visit, and one to spare. */
 const PICKER_PASS_STEPS = 3;
 /** What the server's log says when the extra pass shows no picker, before the reason. */
@@ -509,6 +516,9 @@ const visitRequestedIn = (messages: UIMessage[]): boolean =>
 const callsMyAppointments = (content: ReadonlyArray<{ type: string; toolName?: string }>): boolean =>
   content.some((part) => part.type === 'tool-call' && part.toolName === 'my_appointments');
 
+/** Seconds, for the server's log: 15 for 15000, 4.2 for 4200. */
+const secondsOf = (ms: number): number => Number((ms / 1000).toFixed(1));
+
 /** The tool calls in the conversation's earlier replies that came back whole, as the page sends them back (toolPartOf): each tool's name and result. */
 const earlierResultsOf = (messages: UIMessage[]): Array<{ toolName: string; output: unknown }> =>
   messages.flatMap((message) =>
@@ -614,6 +624,8 @@ const isWellFormed = (message: unknown): message is UIMessage =>
  * own session token goes to Strapi unchanged; the route adds no credential of its own.
  */
 export async function handleConcierge(request: Request, deps: ConciergeDeps): Promise<Response> {
+  // When the request started, for the extra pass's share of the route's time (TURN_BUDGET_MS), and the "now" of the turn.
+  const startedAt = deps.now?.() ?? new Date();
   const authorization = request.headers.get('authorization') ?? '';
   if (!isCustomerSession(authorization)) {
     return Response.json({ error: 'Sign in with LINE first.' }, { status: 401 });
@@ -653,7 +665,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
   };
 
   try {
-    const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
+    const now = startedAt; // one "now" for the instructions and for resolve_date
     // log_inquiry is the app's own call, made once a turn is over. The model is never offered it: the log says what happened, not what the model says happened.
     // Nor request_appointment: the customer books in the visit picker (choose_visit), which calls it with their own session.
     const { log_inquiry: logTool, request_appointment: _bookedInThePicker, ...mcpTools } = await mcp.tools();
@@ -738,6 +750,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
      *   call (callsMyAppointments): that customer asked about the visits they have;
      * - a piece is known: the page's, or one that search_products or view_product returned in this conversation, in an
      *   earlier reply or in this turn. Without one, asking which piece is the right reply.
+     * The caller then checks the time left (pickerPassBudget).
      */
     const needsPickerPass = (turn: TurnRecord): boolean =>
       !resumed &&
@@ -748,17 +761,27 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       (piece !== null || [...earlierResultsOf(messages), ...turn.toolResults].some((result) => piecesFoundBy(result).length > 0));
 
     /**
+     * How long the extra pass may take: what is left of TURN_BUDGET_MS since the request started, PICKER_PASS_TIMEOUT_MS
+     * at most. Or what is left, when that is under PICKER_PASS_MIN_MS: the pass is then skipped.
+     */
+    const pickerPassBudget = (): { ms: number } | { left: number } => {
+      const left = TURN_BUDGET_MS - ((deps.now?.() ?? new Date()).getTime() - startedAt.getTime());
+      return left < PICKER_PASS_MIN_MS ? { left } : { ms: Math.min(PICKER_PASS_TIMEOUT_MS, left) };
+    };
+
+    /**
      * The extra pass: the same model, instructions and tools (choose_visit's check of its pieces included), with only
      * resolve_date and choose_visit active and a tool call required. A step after the first must call choose_visit, so a
      * day the customer named is resolved first (rule 4) and the picker follows. It stops at the call, or after
-     * PICKER_PASS_STEPS. Its messages are the conversation and the turn's own, without the reply's words when they come
-     * last: Claude Sonnet 5 refuses a request that ends with the assistant's turn (a prefill) with a 400.
+     * PICKER_PASS_STEPS, and is cut off after `budgetMs`. Its messages are the conversation and the turn's own, without
+     * the reply's words when they come last: Claude Sonnet 5 refuses a request that ends with the assistant's turn (a
+     * prefill) with a 400.
      *
      * Its parts (without its start) are returned only when it ended whole with a picker. Otherwise it returns why it
      * didn't, or null when the customer left, which isn't a failure. Nothing of a pass that fails reaches the page.
      */
-    const pickerPass = async (turnMessages: ModelMessage[]): Promise<(TurnRecord & { parts: Part[] }) | { why: string | null }> => {
-      const timeout = AbortSignal.timeout(PICKER_PASS_TIMEOUT_MS);
+    const pickerPass = async (turnMessages: ModelMessage[], budgetMs: number): Promise<(TurnRecord & { parts: Part[] }) | { why: string | null }> => {
+      const timeout = AbortSignal.timeout(budgetMs);
       // Set by the callbacks below, so not narrowed to its first value.
       let end = undefined as TurnRecord | undefined;
       let error: unknown;
@@ -791,7 +814,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
         error ??= cause;
       }
       if (request.signal.aborted) return { why: null };
-      if (timeout.aborted) return { why: `it took longer than ${PICKER_PASS_TIMEOUT_MS / 1000} seconds` };
+      if (timeout.aborted) return { why: `it took longer than ${secondsOf(budgetMs)} seconds` };
       if (error !== undefined) return { why: describeModelError(error, deps.modelLabel, deps.modelFix) };
       if (!end || !showsPicker(end.content)) return { why: 'it ended without a visit picker' };
       return { ...end, parts };
@@ -818,10 +841,13 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       // ended when the extra pass showed no picker.
       onEnd: async (event) => {
         let turn: TurnRecord = { content: event.content, toolResults: event.toolResults };
-        if (!failed && needsPickerPass(turn)) {
+        const budget = !failed && needsPickerPass(turn) ? pickerPassBudget() : null;
+        if (budget && 'left' in budget) {
+          console.warn(NO_PICKER, `the turn had ${secondsOf(Math.max(0, budget.left))} seconds left, under the ${secondsOf(PICKER_PASS_MIN_MS)} the pass needs`);
+        } else if (budget) {
           const turnMessages = [...event.responseMessages];
           while (turnMessages.at(-1)?.role === 'assistant') turnMessages.pop();
-          const pass = await pickerPass(turnMessages);
+          const pass = await pickerPass(turnMessages, budget.ms);
           if ('parts' in pass) {
             added.resolve(pass.parts); // before the log, which the page doesn't wait for
             turn = { content: [...turn.content, ...pass.content], toolResults: [...turn.toolResults, ...pass.toolResults] };

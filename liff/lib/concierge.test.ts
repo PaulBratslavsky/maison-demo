@@ -1106,10 +1106,10 @@ describe("the visit picker's safety net", () => {
   const toolNamesOf = (model: MockLanguageModelV4, index: number) => model.doStreamCalls[index].tools?.map((entry) => entry.name).sort();
   const wordsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta).join('');
   /** One turn through the route, with a log_inquiry that logs: the events, the message the page builds, and the log's spy, once the client has closed. */
-  const converse = async (body: Record<string, unknown>, model: MockLanguageModelV4, tools: Record<string, unknown> = {}) => {
+  const converse = async (body: Record<string, unknown>, model: MockLanguageModelV4, tools: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) => {
     const log = logInquiry();
     const { createMcpClient, close } = fakeMcp({ ...tools, log_inquiry: log.tool });
-    const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model }));
+    const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model, ...overrides }));
     expect(response.status).toBe(200);
     const events = eventsOf(await response.text());
     await vi.waitFor(() => expect(close).toHaveBeenCalled());
@@ -1335,6 +1335,47 @@ describe("the visit picker's safety net", () => {
         expect(model.doStreamCalls, `${asked}: the reply's own two calls, and no extra one`).toHaveLength(2);
       }
       expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  /** deps.now as a clock: the request's start on its first call, and `laterMs` after it on every call after that. */
+  const clockAt = (laterMs: number) => {
+    const start = new Date('2026-10-07T01:00:00Z').getTime();
+    let calls = 0;
+    return () => new Date(start + (calls++ === 0 ? 0 : laterMs));
+  };
+
+  // The route may run for 60 seconds, and the log after the extra pass may take 5 of them.
+  it("gives the extra pass what is left of the turn's 55 seconds, 20 at most, and skips it with the warning when under 5 would be left", async () => {
+    await quietly(async (warn) => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      try {
+        const body = { messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' };
+        // 30 seconds gone: 20 are left of 25.
+        const early = modelOf(step(words(SLIPPED)), picks());
+        await converse(body, early, {}, { now: clockAt(30_000) });
+        expect(early.doStreamCalls).toHaveLength(2);
+        expect(timeout).toHaveBeenCalledWith(20_000);
+        // 40 seconds gone: 15 are left.
+        timeout.mockClear();
+        const later = modelOf(step(words(SLIPPED)), picks());
+        const { message } = await converse(body, later, {}, { now: clockAt(40_000) });
+        expect(later.doStreamCalls).toHaveLength(2);
+        expect(timeout).toHaveBeenCalledWith(15_000);
+        expect(pickerIn(message)).toMatchObject({ state: 'input-available' });
+        expect(warn).not.toHaveBeenCalled();
+        // 51 seconds gone: 4 would be left, so no extra pass, and the first reply stays.
+        const late = modelOf(step(words(SLIPPED)));
+        const { message: kept, log } = await converse(body, late, {}, { now: clockAt(51_000) });
+        expect(late.doStreamCalls).toHaveLength(1);
+        expect(pickerIn(kept)).toBeUndefined();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(NO_PICKER, 'the turn had 4 seconds left, under the 5 the pass needs');
+        expect(log).toHaveBeenCalledTimes(1);
+        expect(log.mock.calls[0][0]).toMatchObject({ reply: SLIPPED });
+      } finally {
+        timeout.mockRestore();
+      }
     });
   });
 
