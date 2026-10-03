@@ -196,3 +196,20 @@ export const resumesOncePerAnswer = () => {
  * A message sent then would move past the picker, which would read "No request sent." over a visit being booked.
  */
 export const composerLocked = (busy: boolean, pickerSending: boolean): boolean => busy || pickerSending;
+
+/**
+ * Where the concierge page's follow-scroll goes when the conversation changes. `following`: the page follows the
+ * conversation (the customer hasn't scrolled up to read). `form`: the live picker whose form is on the page (its call's
+ * id), or null. `shown`: the picker this has already placed. Gives where to go, and the picker placed from then on.
+ * - `picker`: a form is there for the first time: to its top, once, so the customer sees the heading and the boutique
+ *   prepared, not only Send request and Not now. A form that first appears while the customer reads further up counts
+ *   as placed, so the page never jumps to it later.
+ * - `stay`: that form still waits (the reply's tail and the inquiry log change the page again), or the customer reads
+ *   further up.
+ * - `end`: the newest words, as before, once no form waits: the customer answered it, or wrote past it.
+ */
+export const followScroll = ({ following, form, shown }: { following: boolean; form: string | null; shown: string | null }): { to: 'picker' | 'end' | 'stay'; shown: string | null } => {
+  if (form !== null && form !== shown) return { to: following ? 'picker' : 'stay', shown: form };
+  if (!following || form !== null) return { to: 'stay', shown };
+  return { to: 'end', shown };
+};

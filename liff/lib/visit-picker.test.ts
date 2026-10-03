@@ -7,6 +7,7 @@ import type { BoutiqueInfo } from './types';
 import {
   CHOOSE_VISIT,
   composerLocked,
+  followScroll,
   isWaitingPicker,
   livePickerOf,
   piecesOf,
@@ -424,5 +425,27 @@ describe('composerLocked', () => {
     expect(composerLocked(true, false)).toBe(true);
     expect(composerLocked(false, true)).toBe(true);
     expect(composerLocked(true, true)).toBe(true);
+  });
+});
+
+describe('followScroll', () => {
+  it("shows a live picker's top once, the first time its form is there, while the page follows the conversation", () => {
+    expect(followScroll({ following: true, form: 'call-1', shown: null })).toEqual({ to: 'picker', shown: 'call-1' });
+    // The reply's tail (busy ending, the inquiry log) changes the page again: the form stays where it is.
+    expect(followScroll({ following: true, form: 'call-1', shown: 'call-1' })).toEqual({ to: 'stay', shown: 'call-1' });
+    // A later picker shows its top in turn.
+    expect(followScroll({ following: true, form: 'call-2', shown: 'call-1' })).toEqual({ to: 'picker', shown: 'call-2' });
+  });
+
+  it('follows the newest words as before once no form waits: the customer answered it, or wrote past it', () => {
+    expect(followScroll({ following: true, form: null, shown: 'call-1' })).toEqual({ to: 'end', shown: 'call-1' });
+    expect(followScroll({ following: true, form: null, shown: null })).toEqual({ to: 'end', shown: null });
+  });
+
+  it('moves nothing while the customer reads further up, and never jumps to a form they scrolled past later', () => {
+    expect(followScroll({ following: false, form: null, shown: null })).toEqual({ to: 'stay', shown: null });
+    expect(followScroll({ following: false, form: 'call-1', shown: null })).toEqual({ to: 'stay', shown: 'call-1' });
+    // Back at the end of the conversation, with the same form still there.
+    expect(followScroll({ following: true, form: 'call-1', shown: 'call-1' })).toEqual({ to: 'stay', shown: 'call-1' });
   });
 });

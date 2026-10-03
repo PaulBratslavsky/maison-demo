@@ -16,9 +16,11 @@ import { getMaison } from '@/lib/maison';
 import { pieceSlugOf } from '@/lib/piece-slug';
 import { errorOf, errorText } from '@/lib/status';
 import { tunnelHeaders } from '@/lib/tunnel';
-import { CHOOSE_VISIT, composerLocked, livePickerOf, resumesOncePerAnswer } from '@/lib/visit-picker';
+import { CHOOSE_VISIT, composerLocked, followScroll, livePickerOf, resumesOncePerAnswer } from '@/lib/visit-picker';
 
 const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments', 'hand_off_to_staff'];
+/** The space left above a visit picker's form when the conversation goes to its top: the list's own padding (p-5). */
+const PICKER_TOP_GAP = 20;
 
 /**
  * The concierge, as in the mockup: a title bar with the "N MCP tools" button (Screen's `title`); the customer's messages
@@ -69,12 +71,21 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
   const retry = needsRetry(messages, busy);
 
   // The conversation scrolls inside the screen. It follows the newest words as they stream in, until the customer
-  // scrolls up to read; sending a message, or scrolling back to the end, makes it follow again.
+  // scrolls up to read; sending a message, or scrolling back to the end, makes it follow again. When a visit picker's
+  // form appears, it goes to the form's top instead, once, and stays there while the form waits (followScroll).
   const conversation = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const placedPicker = useRef<string | null>(null);
   useEffect(() => {
     const list = conversation.current;
-    if (list && following.current) list.scrollTop = list.scrollHeight;
+    if (!list) return;
+    // Only the live picker shows its form (components/visit-picker.tsx).
+    const form = list.querySelector<HTMLElement>('[data-testid="visit-picker"]');
+    const { to, shown } = followScroll({ following: following.current, form: form ? livePickerOf(messages) : null, shown: placedPicker.current });
+    placedPicker.current = shown;
+    // Inside the conversation only, with the list's padding above the form: scrollIntoView could move LINE's whole page.
+    if (to === 'picker' && form) list.scrollTop += form.getBoundingClientRect().top - list.getBoundingClientRect().top - PICKER_TOP_GAP;
+    else if (to === 'end') list.scrollTop = list.scrollHeight;
   }, [messages, busy, error]);
 
   // The visit pickers: which one may send, and where the customer's answer goes: useChat's addToolOutput, by the call's
