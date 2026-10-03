@@ -4,7 +4,7 @@
  * NEXT_PUBLIC_MAISON_CLIENT_ID to liff/.env), or Strapi or the model isn't there. In LINE mode it refuses to run
  * (live/support.ts). Two modes:
  * - The local model, the default. It always uses Ollama, even when an API key is set, so it costs nothing and runs offline.
- * - Claude, opt-in: `LIVE_MODEL=claude npm run test:live` runs the visit picker's two cases on Claude, with the key the
+ * - Claude, opt-in: `LIVE_MODEL=claude npm run test:live` runs the visit picker's three cases on Claude, with the key the
  *   app uses from liff/.env (ANTHROPIC_API_KEY, or AI_GATEWAY_API_KEY). Skipped without one. The key is never printed:
  *   the test only checks that one is set.
  */
@@ -376,5 +376,62 @@ describe.skipIf(!ready || !claude)('the visit picker on Claude', () => {
 
   it("ends the demo's first suggestion in a visit picker for Ginza, the next Saturday in Tokyo and 14:00", async () => {
     await expectTheDemoPicker(token);
+  });
+
+  // Paul's conversation in production on 3 October, as Strapi Cloud logged it: what he asked and what the concierge
+  // replied. To the last message, the concierge replied in words with no picker, once. The "What do you have" reply goes
+  // back as the page sends it, with its search_products call before its words, so the Cabin Case 55 is a piece known
+  // from an earlier turn: the safety net's extra pass can run even when this turn searches for nothing.
+  // This case mostly checks the model's own choose_visit call: Claude rarely slips, so the extra pass seldom runs here.
+  // The unit tests in lib/concierge.test.ts are what check the extra pass.
+  const PRODUCTION: Array<[string, string]> = [
+    [
+      'When is a good time to come into to the store',
+      'Our boutiques in Ginza and Omotesando are open daily from 11:00 to 20:00, while Osaka Shinsaibashi keeps the same hours but is closed on Tuesdays. Any time in that window works well, so just let me know which boutique, day and time suit you and I can set up the visit.',
+    ],
+    ['Yes', "I'd love to set that up — could you tell me which piece or pieces you'd like to see at the boutique?"],
+    ['Can I book a visit?', 'Of course — which piece or pieces would you like to see during your visit?'],
+    [
+      'What do you have',
+      'Here are a few highlights: the Voyage Trunk 110, a grand travel trunk that can be personalized; the Cabin Case 55, a versatile personalizable trunk available at all our boutiques; and the Weekender 50, a stylish travel bag also open to personalization. Would you like to see any of these in person, or shall I narrow things down by budget or occasion?',
+    ],
+  ];
+  /** The search behind "What do you have", as search_products answers it (its structuredContent, and the same as text). */
+  const highlights = {
+    products: [
+      { slug: 'voyage-trunk-110', name: 'Voyage Trunk 110', category: 'trunk', priceJpy: 2800000, imageUrl: null, occasions: ['travel', 'wedding'], personalizable: true, inStockAt: ['ginza'] },
+      { slug: 'cabin-case-55', name: 'Cabin Case 55', category: 'trunk', priceJpy: 690000, imageUrl: null, occasions: ['travel', 'new-job'], personalizable: true, inStockAt: ['ginza', 'omotesando', 'osaka'] },
+      { slug: 'weekender-50', name: 'Weekender 50', category: 'travel', priceJpy: 385000, imageUrl: null, occasions: ['travel', 'birthday', 'anniversary'], personalizable: true, inStockAt: ['ginza', 'omotesando'] },
+    ],
+  };
+
+  it("ends Paul's production conversation in a visit picker for the Cabin Case 55, from the model's own call or the extra pass", async () => {
+    const history = PRODUCTION.flatMap(([asked, replied], index): UIMessage[] => {
+      const searched =
+        asked === 'What do you have'
+          ? [
+              { type: 'step-start' as const },
+              {
+                type: 'dynamic-tool' as const,
+                toolName: 'search_products',
+                toolCallId: 'toolu_history_search',
+                state: 'output-available' as const,
+                input: { locale: 'en' },
+                output: { content: [{ type: 'text', text: JSON.stringify(highlights) }], structuredContent: highlights },
+              },
+              { type: 'step-start' as const },
+            ]
+          : [];
+      return [say(`u${index}`, asked), { id: `a${index}`, role: 'assistant', parts: [...searched, { type: 'text', text: replied }] }];
+    });
+    const messages = [...history, say('ulast', 'I would like to book a visit to see cabin case')];
+    const events = await converse(token, { locale: 'en', messages });
+    const trace = traceOf(events);
+    const message = await assistantMessageOf(events);
+    const live = livePickerOf([...messages, message]);
+    expect(live, `the turn ends in a picker that waits for the customer. ${trace}`).not.toBeNull();
+    const picker = callsIn(events).find((call) => call.name === CHOOSE_VISIT && call.id === live);
+    expect(picker?.input.productSlugs, `the picker is for the Cabin Case 55. ${trace}`).toContain('cabin-case-55');
+    expect(saysRequested(textIn(events)), `the reply says the visit is requested before the customer sent it. ${trace}`).toBe(false);
   });
 });

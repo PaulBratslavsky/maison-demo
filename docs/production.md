@@ -19,7 +19,7 @@ Set these in the Vercel project's **Settings** → **Environment Variables**.
 |---|---|---|---|
 | `NEXT_PUBLIC_LIFF_MOCK` | Turns the LIFF mock off, so customers sign in with LINE. It also turns on the app's routes for `/mcp`, the token endpoint and `/uploads`. | Yes | `false`. Set it: `liff/.env.example` has `true`, and any value but `false` runs the mock, which Strapi refuses in production. |
 | `NEXT_PUBLIC_LIFF_ID` | The LIFF app that signs customers in, and the "Open in LINE" link outside LINE. | Yes | Your production LIFF app's LIFF ID. The LIFF app's Endpoint URL is the Vercel app's URL. |
-| `NEXT_PUBLIC_STRAPI_URL` | Where the browser reaches Strapi: the LINE sign-in token exchange and `/mcp`. It's also the base of relative media URLs. | Yes | The Strapi Cloud URL: https, with no trailing slash. |
+| `NEXT_PUBLIC_STRAPI_URL` | Where the browser reaches Strapi: the LINE sign-in token exchange and `/mcp`. It's also the base of relative media URLs. | Yes | The Vercel app's own https origin, with no trailing slash. The app's routes pass `/mcp`, the token endpoint and `/uploads` on to `STRAPI_URL`, so the browser only ever calls the app. |
 | `NEXT_PUBLIC_MAISON_CLIENT_ID` | The "Maison app" OAuth client. The app refuses to start without it. | Yes | The client ID from step 9 of [First-time setup on Strapi Cloud](#first-time-setup-on-strapi-cloud). |
 | `STRAPI_URL` | Where the app's server reaches Strapi: the concierge's MCP calls, the Home page text and the app's routes above. Its default, `http://127.0.0.1:1338`, doesn't exist on Vercel. | Yes | The Strapi Cloud URL: https, with no trailing slash. |
 | `ANTHROPIC_API_KEY` | The concierge's model, Claude Sonnet 5. | Yes, or `AI_GATEWAY_API_KEY` | A secret: your Anthropic API key. |
@@ -30,7 +30,7 @@ Set these in the Vercel project's **Settings** → **Environment Variables**.
 - **Redeploy after any change.** Vercel applies a changed variable to new deployments only, and Next.js builds the `NEXT_PUBLIC_` values into the app.
 - **Without a model key,** the concierge calls Ollama on localhost, which doesn't exist on Vercel.
 - **Leave the laptop's settings unset:** `NEXT_PUBLIC_DEMO_LINE_USER_ID` (the mock's customer), `OLLAMA_MODEL` and `OLLAMA_BASE_URL` (the local model), `LINE_MODE_LIFF_ID`, `LINE_MODE_CHANNEL_ID` and `LINE_MODE_DOMAIN` (`npm run mode:line`), and `LINE_LOGIN_CHANNEL_ID` and `MOCK_LINE_VERIFY_PORT` (the verify mock).
-- **`NEXT_PUBLIC_STRAPI_URL` can be the app's own origin instead.** The app's routes then pass `/mcp`, the token endpoint and `/uploads` on to `STRAPI_URL`, as in [option B](line-setup.md#option-b-the-real-app-inside-line), and Strapi Cloud needs no `MAISON_APP_ORIGIN`.
+- **`NEXT_PUBLIC_STRAPI_URL` can be the Strapi Cloud URL instead.** The browser then calls Strapi Cloud directly, and Strapi Cloud needs `MAISON_APP_ORIGIN` set to the Vercel app's origin, for CORS.
 
 ### Strapi on Strapi Cloud
 
@@ -42,7 +42,7 @@ Set these under the project's **Settings** → **Variables**, for its environmen
 | `ENCRYPTION_KEY` | Strapi encrypts admin token keys with it, and oauth-mcp-manager needs it for customer sign-in. | Yes | A secret random value. Set it before you create the admin tokens, and never change it afterwards. |
 | `PUBLIC_URL` | Strapi's public address: the admin, absolute media URLs and oauth-mcp-manager's metadata. The production config has no default. | Yes | The Strapi Cloud URL: https, with no trailing slash. Not the app's origin: the admin is served here. |
 | `LINE_LOGIN_CHANNEL_ID` | Turns on LINE sign-in. Strapi checks each ID token with LINE, for this channel. Unset, customers can't sign in. | Yes | Your LINE Login channel's ID, digits only: the channel that holds the production LIFF app. Never the mock's `1234567890`. |
-| `MAISON_APP_ORIGIN` | Adds the app's origin to Strapi's CORS, so the browser can call the token endpoint and `/mcp`. | Yes | The Vercel app's https origin: scheme and host, with no path and no trailing slash. |
+| `MAISON_APP_ORIGIN` | Adds the app's origin to Strapi's CORS, so the browser can call the token endpoint and `/mcp` on Strapi Cloud directly. | Only when `NEXT_PUBLIC_STRAPI_URL` is the Strapi Cloud URL | The Vercel app's https origin: scheme and host, with no path and no trailing slash. |
 | `MAISON_LIFF_URL` | The base of the link in each LINE confirmation, followed by `/visits/<reference>`. Unset, Strapi sends no confirmations. | Yes | `https://liff.line.me/` followed by your LIFF ID, with no trailing slash. Strapi refuses to start with one. |
 | `LINE_CHANNEL_ACCESS_TOKEN` | Sends visit confirmations and staff replies on LINE. Unset, nothing is sent, and the board shows "not sent". | Yes | A secret: your Messaging API channel's access token. |
 | `AI_API_KEY` | Labels customer inquiries. Unset, labelling is off, and inquiries wait under **Not labelled**. | No, but recommended | A secret: an Anthropic API key. |
@@ -63,7 +63,7 @@ Redeploy after changing a variable: press **Save & deploy** in the **Variables**
 Never run `npm run setup` against Strapi Cloud. On a new Strapi Cloud project, these steps do by hand what it does locally:
 
 1. **Node version.** The AI SDK needs Node 22.12 or later. Set it under the environment's **Configuration** → **Basic information** (Strapi's [Cloud project settings](https://docs.strapi.io/cloud/projects/settings)).
-2. **Variables.** Set the variables in [Strapi on Strapi Cloud](#strapi-on-strapi-cloud), then deploy. `MAISON_APP_ORIGIN` needs the Vercel app's origin: create the Vercel project first, or set this variable in step 10.
+2. **Variables.** Set the variables in [Strapi on Strapi Cloud](#strapi-on-strapi-cloud), then deploy.
 3. **The first admin.** Open `/admin` on the Strapi Cloud URL and fill in the registration form: first name, last name, email and password. The first admin is a Super Admin (Strapi's [Role-Based Access Control](https://docs.strapi.io/cms/features/rbac)). Create the customer token (step 7) and the client (step 9) as the same admin: a client can only map an admin token its creator owns. For a narrow service admin instead, see [The customer token](#the-customer-token).
 4. **Check that sign-in is ready.** Open **MCP OAuth** in the sidebar. It should show no "Strapi's MCP server is disabled" or "Encryption key missing" alert, and **Connection details** should read "LINE sign-in is on for channel" with your channel's ID. If not, fix `MCP_ENABLED`, `ENCRYPTION_KEY` or `LINE_LOGIN_CHANNEL_ID`, and redeploy.
 5. **The demo catalog.** Open **Maison** in the sidebar and press **Load demo catalog** under **Demo data** (the plugin's [admin page](../strapi/src/plugins/maison/README.md#the-admin-page)). It adds the `ja` and `en` locales, 3 boutiques, 3 collections and 12 products in both languages, their stock, and 16 product knowledge entries in English. It leaves an existing catalog alone. The Home page's text needs no step: Strapi writes and publishes it on a new database.
@@ -90,7 +90,7 @@ Never run `npm run setup` against Strapi Cloud. On a new Strapi Cloud project, t
    - **Admin token:** Maison customer. Only your own tokens are listed.
 
    Press **Create**, and copy the **Client ID**. A LINE client has no secret. Strapi's docs don't cover this plugin: see the [oauth-mcp-manager README](https://github.com/PaulBratslavsky/strapi-oauth-mcp-manager#readme).
-10. **The app on Vercel.** Set the variables in [The app on Vercel](#the-app-on-vercel), with the Client ID from step 9 as `NEXT_PUBLIC_MAISON_CLIENT_ID`. Then redeploy the app. If you left `MAISON_APP_ORIGIN` out in step 2, set it on Strapi Cloud now and redeploy Strapi.
+10. **The app on Vercel.** Set the variables in [The app on Vercel](#the-app-on-vercel), with the Client ID from step 9 as `NEXT_PUBLIC_MAISON_CLIENT_ID`. Then redeploy the app.
 11. **The ops agent.** Give it the "Maison ops" key from step 8 as `MAISON_OPS_AUTH="Bearer <key>"`, with the Strapi Cloud URL followed by `/mcp` in place of `http://localhost:1338/mcp` ([Ops tools for an agent](ops-tools.md)). The key goes into no variable on Vercel or Strapi Cloud.
 
 Later:
@@ -139,7 +139,7 @@ The service admin then creates both the token and the "Maison app" client ([Firs
 
 - **Never set `LINE_VERIFY_URL`** in production.
 - **Serve everything over https.** On Strapi Cloud, `PUBLIC_URL` is the Strapi Cloud URL, because the admin is served there. Only [option B](line-setup.md#option-b-the-real-app-inside-line)'s tunnel sets it to the app's origin.
-- **`MAISON_APP_ORIGIN`** adds one origin to Strapi's CORS, for an app or website that calls Strapi from the browser on another origin. On Strapi Cloud, that's the Vercel app.
+- **`MAISON_APP_ORIGIN`** adds one origin to Strapi's CORS, for an app or website that calls Strapi from the browser on another origin. The Vercel app needs it only when its `NEXT_PUBLIC_STRAPI_URL` is the Strapi Cloud URL.
 - **Bind to 127.0.0.1 on a laptop.** The demo does it for Strapi, the app and the verify mock. On Strapi Cloud, leave `HOST` unset: the production config listens on `0.0.0.0`, so Cloud's proxy can reach Strapi.
 
 ### The Public role
