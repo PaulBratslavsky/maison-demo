@@ -105,12 +105,27 @@ export const pickerPrefill = (input: unknown, now: Date): VisitChoice => {
 /**
  * The picker that may send: the last one waiting in the newest message, when that message is the concierge's. Its call's
  * id, or null. A picker in an older message is one the customer moved past, and so is one the customer wrote after.
+ * A waiting picker is live only if no answered picker comes after it in the message.
  */
 export const livePickerOf = (messages: readonly PickerMessage[]): string | null => {
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return null;
-  const live = last.parts.filter((part) => isWaitingPicker(part) && typeof part.toolCallId === 'string').at(-1);
-  return live?.toolCallId ?? null;
+
+  // Find the last waiting picker that has no answered picker after it
+  for (let i = last.parts.length - 1; i >= 0; i--) {
+    const part = last.parts[i];
+    if (isWaitingPicker(part) && typeof part.toolCallId === 'string') {
+      // Check if there's an answered picker after this one
+      const hasAnsweredAfter = last.parts.slice(i + 1).some((p) => {
+        const isPickerPart = p.type === `tool-${CHOOSE_VISIT}` || (p.type === 'dynamic-tool' && p.toolName === CHOOSE_VISIT);
+        return isPickerPart && p.state === 'output-available';
+      });
+      if (!hasAnsweredAfter) {
+        return part.toolCallId;
+      }
+    }
+  }
+  return null;
 };
 
 /**
