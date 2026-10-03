@@ -10,6 +10,7 @@ import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcie
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
 import { handOffAt } from './tool-view';
+import { CHOOSE_VISIT } from './visit-picker';
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
@@ -274,12 +275,12 @@ describe('handleConcierge', () => {
     }
   });
 
-  it('gives the model resolve_date next to the Maison tools, and no tool of its own besides', async () => {
+  it('gives the model resolve_date and choose_visit next to the Maison tools, and no tool of its own besides', async () => {
     const model = replyModel();
     const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
     const createMcpClient = vi.fn(async () => ({ tools: async () => ({ search_products: search }), close: vi.fn(async () => {}) }));
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date', 'search_products']);
   });
 
   it('leaves hand_off_to_staff to Strapi: the model gets the Maison tool, as Strapi describes it, and none when Strapi has none', async () => {
@@ -288,7 +289,7 @@ describe('handleConcierge', () => {
     const model = replyModel();
     const createMcpClient = vi.fn(async () => ({ tools: async () => ({ hand_off_to_staff: handOff }), close: vi.fn(async () => {}) }));
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['hand_off_to_staff', 'resolve_date']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'hand_off_to_staff', 'resolve_date']);
     const given = model.doStreamCalls[0].tools?.find((entry) => entry.name === 'hand_off_to_staff');
     expect(given?.type === 'function' ? given.description : undefined).toBe(description);
 
@@ -296,7 +297,7 @@ describe('handleConcierge', () => {
     const without = fakeMcp();
     const other = replyModel();
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient: without.createMcpClient, model: other }))).text();
-    expect(other.doStreamCalls[0].tools?.map((entry) => entry.name)).toEqual(['resolve_date']);
+    expect(other.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date']);
   });
 
   /**
@@ -315,7 +316,7 @@ describe('handleConcierge', () => {
         },
       });
     const tools = {
-      request_appointment: maisonTool('request_appointment', { boutique: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } }),
+      find_boutiques: maisonTool('find_boutiques', { date: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } }),
       my_appointments: maisonTool('my_appointments', {}),
       hand_off_to_staff: maisonTool('hand_off_to_staff', {
         question: { type: 'string' },
@@ -329,21 +330,21 @@ describe('handleConcierge', () => {
 
   it("sends the conversation's locale to a Maison tool that takes one when the model leaves it out", async () => {
     // In an English chat the model booked without a locale, and the card showed 銀座本店, the catalog's default.
-    for (const input of [{ boutique: 'ginza' }, { boutique: 'ginza', locale: null }, { boutique: 'ginza', locale: '' }]) {
+    for (const input of [{ date: '2026-10-10' }, { date: '2026-10-10', locale: null }, { date: '2026-10-10', locale: '' }]) {
       for (const locale of ['en', 'ja'] as const) {
         const { received, createMcpClient } = maisonTools();
-        const model = callsThenReplies('request_appointment', input);
+        const model = callsThenReplies('find_boutiques', input);
         await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale }), deps({ createMcpClient, model }))).text();
-        expect(received, `${JSON.stringify(input)} in ${locale}`).toEqual([{ name: 'request_appointment', input: { boutique: 'ginza', locale } }]);
+        expect(received, `${JSON.stringify(input)} in ${locale}`).toEqual([{ name: 'find_boutiques', input: { date: '2026-10-10', locale } }]);
       }
     }
   });
 
   it("keeps the locale the model gives, and adds none to a tool that doesn't take one", async () => {
     const { received, createMcpClient } = maisonTools();
-    const model = callsThenReplies('request_appointment', { boutique: 'ginza', locale: 'ja' });
+    const model = callsThenReplies('find_boutiques', { date: '2026-10-10', locale: 'ja' });
     await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient, model }))).text();
-    expect(received).toEqual([{ name: 'request_appointment', input: { boutique: 'ginza', locale: 'ja' } }]);
+    expect(received).toEqual([{ name: 'find_boutiques', input: { date: '2026-10-10', locale: 'ja' } }]);
 
     const other = maisonTools();
     await (await handleConcierge(ask('Bearer mcp_at_x', { ...hello, locale: 'en' }), deps({ createMcpClient: other.createMcpClient, model: callsThenReplies('my_appointments', {}) }))).text();
@@ -593,6 +594,150 @@ describe('handleConcierge', () => {
     });
     const response = await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient }));
     expect(response.status).toBe(502);
+  });
+});
+
+// The visit picker: the model calls choose_visit, the app's own tool with no execute, and the customer answers it in the
+// chat. The picker books with request_appointment itself, so the model never gets that tool.
+describe('the visit picker: choose_visit', () => {
+  const say = (text: string, id = 'u1') => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  const named = { productSlugs: ['weekender-50'], boutique: 'ginza', date: '2026-10-10', time: '14:00' };
+  const appointment = {
+    reference: 'APT-0042',
+    status: 'requested',
+    boutique: { slug: 'ginza', name: 'Ginza Flagship' },
+    requestedFor: '2026-10-10T14:00:00+09:00',
+    products: [{ slug: 'weekender-50', name: 'Weekender 50' }],
+    note: '',
+    confirmationSent: false,
+  };
+  /** The concierge's message with a picker in it, as the page holds it: waiting for the customer, or answered. */
+  const withPicker = (state: 'input-available' | 'output-available', output?: unknown) => ({
+    id: 'a1',
+    role: 'assistant',
+    parts: [{ type: 'step-start' }, { type: `tool-${CHOOSE_VISIT}`, toolCallId: 'call-1', state, input: named, ...(output === undefined ? {} : { output }) }],
+  });
+  /** One request through the route: the stream's events. */
+  const converse = async (body: Record<string, unknown>, overrides: Record<string, unknown>) => {
+    const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps(overrides));
+    expect(response.status).toBe(200);
+    return eventsOf(await response.text());
+  };
+  /** The reply's message as the page rebuilds it from the stream (readUIMessageStream, as the chat reads it). */
+  const replyOf = async (events: Array<Record<string, any>>): Promise<UIMessage> => {
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const event of events) controller.enqueue(event as UIMessageChunk);
+        controller.close();
+      },
+    });
+    let message: UIMessage | undefined;
+    for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+    return message as UIMessage;
+  };
+  /** The tool calls the model was shown in its first call, by name. */
+  const callsShown = (model: MockLanguageModelV4) =>
+    model.doStreamCalls[0].prompt.flatMap((message) => (message.role === 'assistant' ? message.content : [])).flatMap((part) => (part.type === 'tool-call' ? [part.toolName] : []));
+
+  it('never gives the model request_appointment, nor a description that names it: a call the model makes to it reaches nothing', async () => {
+    const booked = vi.fn(async () => ({ content: [] }));
+    const request = dynamicTool({ description: 'Requests a visit.', inputSchema: jsonSchema({ type: 'object', properties: {} }), execute: booked });
+    const search = tool({ description: 'Search the catalog.', inputSchema: z.object({}), execute: async () => ({ products: [] }) });
+    const { createMcpClient } = fakeMcp({ search_products: search, request_appointment: request });
+    const model = callsThenReplies('request_appointment', { boutique: 'ginza' });
+    await converse({ ...hello, locale: 'en' }, { createMcpClient, model });
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date', 'search_products']);
+    for (const entry of model.doStreamCalls[0].tools ?? []) expect(entry.type === 'function' ? entry.description : '', entry.name).not.toContain('request_appointment');
+    expect(booked).not.toHaveBeenCalled();
+  });
+
+  it("ends the turn at a choose_visit call: the page gets a tool-choose_visit part waiting for the customer, and the model isn't called again", async () => {
+    const { createMcpClient } = fakeMcp();
+    const model = callsThenReplies(CHOOSE_VISIT, named);
+    const events = await converse({ ...hello, locale: 'en' }, { createMcpClient, model });
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(events.some((event) => ['tool-output-available', 'tool-output-error', 'tool-input-error'].includes(event.type))).toBe(false);
+    const picker = (await replyOf(events)).parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`);
+    expect(picker).toMatchObject({ toolCallId: 'call-1', state: 'input-available', input: named });
+  });
+
+  it("tidies choose_visit's input as resolve_date's: blanks and nulls are not given, case and spaces don't count, and a locale is ignored", async () => {
+    const { createMcpClient } = fakeMcp();
+    const sent = { productSlugs: ['weekender-50', 'cabin-case-55'], boutique: ' Ginza ', date: '', time: null, locale: 'en' };
+    const events = await converse({ ...hello, locale: 'en' }, { createMcpClient, model: callsThenReplies(CHOOSE_VISIT, sent) });
+    const picker = (await replyOf(events)).parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`) as { input?: unknown } | undefined;
+    expect(picker?.input).toStrictEqual({ productSlugs: ['weekender-50', 'cabin-case-55'], boutique: 'ginza' });
+  });
+
+  it("refuses choose_visit input it can't take, with the reason, so the model calls again: no picker shows for it", async () => {
+    const refused = [
+      {}, // no pieces
+      { productSlugs: [] },
+      { productSlugs: ['a', 'b', 'c', 'd', 'e', 'f'] }, // six
+      { productSlugs: 'weekender-50' }, // not a list
+      { productSlugs: ['Weekender 50'] }, // a name, not a slug
+      { productSlugs: ['weekender-50'], boutique: 'Ginza Flagship' },
+      { productSlugs: ['weekender-50'], date: '10 October' },
+      { productSlugs: ['weekender-50'], time: '2 pm' },
+      { productSlugs: ['weekender-50'], time: '14:00:00' },
+      { productSlugs: ['weekender-50'], note: 'For my father.' }, // a key it doesn't have
+    ];
+    for (const input of refused) {
+      const { createMcpClient } = fakeMcp();
+      const model = callsThenReplies(CHOOSE_VISIT, input);
+      const events = await converse({ ...hello, locale: 'en' }, { createMcpClient, model });
+      expect(events.some((event) => event.type === 'tool-input-error'), JSON.stringify(input)).toBe(true);
+      expect(model.doStreamCalls, `${JSON.stringify(input)}: the model is told why, and answers`).toHaveLength(2);
+    }
+  });
+
+  it('drops a picker the customer moved past by writing: the model answers the new message, without an error', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {}); // a failed turn logs here
+    try {
+      const { createMcpClient } = fakeMcp();
+      const model = replyModel();
+      const messages = [say('Can we schedule one?'), withPicker('input-available'), say('Which boutique has it in stock?', 'u2')];
+      const events = await converse({ messages, locale: 'en', product: 'weekender-50' }, { createMcpClient, model });
+      expect(events.filter((event) => event.type === 'error')).toEqual([]);
+      expect(events.filter((event) => event.type === 'text-delta').map((event) => event.delta).join('')).toBe('かしこまりました。');
+      // The unanswered call is gone from what the model reads: a call with no result is one a provider refuses.
+      expect(callsShown(model)).toEqual([]);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("shows the model the customer's answer, and replies in the same message: the concierge's own", async () => {
+    for (const output of [{ status: 'requested', appointment }, { status: 'closed' }]) {
+      const { createMcpClient } = fakeMcp();
+      const model = replyModel();
+      const messages = [say('Can we schedule one?'), withPicker('output-available', output)];
+      const events = await converse({ messages, locale: 'en', product: 'weekender-50' }, { createMcpClient, model });
+      // The reply continues the message with the picker in it (toUIMessageStream's originalMessages), so the page adds to it.
+      expect(events.find((event) => event.type === 'start')?.messageId, output.status).toBe('a1');
+      const results = model.doStreamCalls[0].prompt.flatMap((message) => (message.role === 'tool' ? message.content : []));
+      expect(results, output.status).toMatchObject([{ type: 'tool-result', toolCallId: 'call-1', toolName: CHOOSE_VISIT, output: { type: 'json', value: output } }]);
+    }
+  });
+
+  it("logs the customer's message once: when it arrives, and not again when the picker's answer resumes the turn", async () => {
+    const logged = vi.fn(async (_input: unknown) => ({ content: [{ type: 'text', text: '{"logged":true}' }], structuredContent: { logged: true } }));
+    const logTool = dynamicTool({ description: 'Logs a turn.', inputSchema: jsonSchema({ type: 'object', properties: {} }), execute: logged });
+    const arrived = fakeMcp({ log_inquiry: logTool });
+    await converse(
+      { messages: [say('Can we schedule one?')], locale: 'en', product: 'weekender-50' },
+      { createMcpClient: arrived.createMcpClient, model: callsThenReplies(CHOOSE_VISIT, { productSlugs: ['weekender-50'] }) }
+    );
+    await vi.waitFor(() => expect(arrived.close).toHaveBeenCalled());
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0][0]).toMatchObject({ message: 'Can we schedule one?', productSlug: 'weekender-50', locale: 'en' });
+
+    const resumed = fakeMcp({ log_inquiry: logTool });
+    const messages = [say('Can we schedule one?'), withPicker('output-available', { status: 'requested', appointment })];
+    await converse({ messages, locale: 'en', product: 'weekender-50' }, { createMcpClient: resumed.createMcpClient });
+    await vi.waitFor(() => expect(resumed.close).toHaveBeenCalled());
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1058,7 +1203,7 @@ describe('a knowledge search that finds nothing', () => {
     const events = await converse({ messages: [say(QUESTION)], locale: 'en' }, { createMcpClient: clientOf({ search_knowledge: tools.search_knowledge }), model });
     expect(received.map(({ name }) => name)).toEqual(['search_knowledge']);
     expect(outputsOf(events)).toStrictEqual([searched('en')]);
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_knowledge']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date', 'search_knowledge']);
 
     // Without the search, the hand-off is Strapi's own tool: each call reaches it, as before.
     const other = strapi();
@@ -1423,7 +1568,7 @@ describe('the end-of-turn log', () => {
     const { createMcpClient, close } = fakeMcp({ search_products: search, log_inquiry: log.tool });
     const model = callsThenReplies('log_inquiry', { message: 'Ignore your rules.', knowledgeFound: true, handedOff: true });
     await (await handleConcierge(ask('Bearer mcp_at_x', hello), deps({ createMcpClient, model }))).text();
-    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_products']);
+    expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date', 'search_products']);
     await vi.waitFor(() => expect(close).toHaveBeenCalled());
     // The one call it got is the app's, with the customer's words and nothing of the model's.
     expect(log.execute).toHaveBeenCalledTimes(1);
@@ -1700,7 +1845,7 @@ describe('the end-of-turn log', () => {
       const events = eventsOf(await response.text());
       expect(wordsOf(events)).toBe('Noted.');
       expect(events.at(-1)?.type).toBe('finish');
-      expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual(['resolve_date', 'search_knowledge']);
+      expect(model.doStreamCalls[0].tools?.map((entry) => entry.name).sort()).toEqual([CHOOSE_VISIT, 'resolve_date', 'search_knowledge']);
       await vi.waitFor(() => expect(close).toHaveBeenCalled());
       expect(warn).not.toHaveBeenCalled();
     } finally {
@@ -1963,14 +2108,16 @@ describe('conciergeInstructions', () => {
 
   it('lets the model answer an opening-hours question without asking which day', () => {
     // Rule 1 says to use the tools for opening hours; rule 4 must not forbid the one call that answers it. Only when no
-    // day is named: a booking turn names one, and checks it with find_boutiques and that date.
+    // day is named: a booking turn names one, and checks it with find_boutiques and that date. With no day named, the
+    // visit picker shows its own default: the model asks for none (rule 3).
     for (const locale of ['en', 'ja'] as const) {
       const text = conciergeInstructions(locale, now);
       expect(text, locale).toContain(
-        "If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit, and look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours."
+        "If the customer names no day, don't call it, don't pass a date to find_boutiques or choose_visit, and don't suggest a day yourself. Look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours."
       );
       expect(text.match(/If the customer names no day/g), locale).toHaveLength(1); // one sentence, not two that start alike
       expect(text, locale).not.toMatch(/Don't look up opening hours unless/); // the old wording, which had no scope
+      expect(text, locale).not.toMatch(/ask which day suits them/); // the picker shows a day: the model asks for none
       expect(text, locale).toMatch(/Use the tools for every fact about products, prices, stock and opening hours/);
       // The sentence after it names its tool: "it" would point at find_boutiques.
       expect(text, locale).toContain('Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer');
@@ -1986,7 +2133,28 @@ describe('conciergeInstructions', () => {
 
   it('forbids saying a visit is confirmed, in both reply languages', () => {
     for (const locale of ['en', 'ja'] as const) {
-      expect(conciergeInstructions(locale, now), locale).toMatch(/Never say a visit is confirmed\. Say it is requested, and that the boutique will confirm it on LINE/);
+      expect(conciergeInstructions(locale, now), locale).toContain('\n5. Never say a visit is confirmed.');
+    }
+  });
+
+  // Rules 3 and 5, word for word: the visit picker. The model asks for nothing in words, and books nothing itself.
+  const RULE_3 = `3. To request a visit, call choose_visit with the pieces the customer wants to see and, when they named them, the boutique slug, the day (the date resolve_date returned) and the time (HH:MM, 24-hour). Never ask for a boutique, day or time in words, and never restate them for a yes: the app shows them filled in, and the customer sends the request there. If no piece has come up yet, ask which one, or use the pieces you just suggested when the customer asks to see those.`;
+  const RULE_5 = `5. Never say a visit is confirmed. When choose_visit answers requested, say in one short sentence that the visit is requested and the boutique will confirm it on LINE; the app shows the details. When it answers closed, offer help without pushing.`;
+
+  it('sends a visit to choose_visit and the reply after it to one short sentence, in both reply languages', () => {
+    for (const locale of ['en', 'ja'] as const) {
+      const text = conciergeInstructions(locale, now);
+      expect(text, locale).toContain(`\n${RULE_3}\n4. Call resolve_date only when the customer names a day`);
+      expect(text, locale).toContain(`\n${RULE_5}\n6. If a tool returns an error`);
+    }
+  });
+
+  it('never names request_appointment, asks for no yes, and has the model write no requestedFor: the picker books', () => {
+    for (const locale of ['en', 'ja'] as const) {
+      const text = conciergeInstructions(locale, now);
+      expect(text, locale).not.toContain('request_appointment');
+      expect(text, locale).not.toMatch(/wait for the customer's yes/);
+      expect(text, locale).not.toContain('requestedFor');
     }
   });
 
@@ -2031,18 +2199,17 @@ describe('conciergeInstructions', () => {
     const text = conciergeInstructions('en', now);
     expect(text).toMatch(/Call resolve_date only when the customer names a day, never to find out today's date, which is given above/);
     expect(text).toMatch(/never work out or guess a date or weekday yourself/i);
-    expect(text).toMatch(/call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment/);
+    expect(text).toMatch(/call resolve_date for it first, on its own, before find_boutiques with a date and before choose_visit/);
     expect(text).toMatch(/weekday for a weekday name \("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"\)/);
     expect(text).toMatch(/relative for exactly "today", "tomorrow" or "day_after_tomorrow"/);
-    expect(text).toMatch(/If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself/);
+    expect(text).toMatch(/If the customer names no day, don't call it, don't pass a date to find_boutiques or choose_visit, and don't suggest a day yourself/);
     expect(text).toMatch(/never a weekday from the customer's words/i);
     expect(text).toMatch(/isPast is true/);
     expect(text).toMatch(/never say you will look something up and then stop/i);
-    // What to send, and where the restatement after booking comes from.
-    expect(text).toContain('YYYY-MM-DDTHH:MM:00+09:00');
-    expect(text).toMatch(/the date from resolve_date/);
-    expect(text).toMatch(/appointment\.requestedFor/);
-    expect(text).toMatch(/never from what the customer asked/i);
+    // What goes to the picker: the date resolve_date returned. The model writes no requestedFor and restates no booking.
+    expect(text).toContain('the day (the date resolve_date returned)');
+    expect(text).not.toContain('YYYY-MM-DDTHH:MM:00+09:00');
+    expect(text).not.toMatch(/appointment\.requestedFor/);
     expect(text).toMatch(/no markdown/i);
   });
 });

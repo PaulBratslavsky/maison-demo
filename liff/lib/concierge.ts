@@ -19,6 +19,7 @@ import { tokyoDays } from './format';
 import { pieceSlugOf } from './piece-slug';
 import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
 import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
+import { CHOOSE_VISIT } from './visit-picker';
 
 /** Tells the Maison plugin a call came from the concierge. Informational; never used for identity. */
 export const SURFACE_HEADER = 'x-maison-surface';
@@ -47,7 +48,8 @@ export { pieceSlugOf };
 /**
  * The concierge's instructions, built for each request. Dates are what a small model gets wrong: on the local model
  * "Saturday" came out as Friday, even with a calendar in front of it. So it never works a date out. It asks
- * resolve_date, uses what that returns, and restates the visit from what the booking returns. The calendar is only
+ * resolve_date, and passes what that returns to choose_visit: the customer checks the visit, and sends it, in the app's
+ * picker (lib/visit-picker.ts). The calendar is only
  * context: Tokyo's (lib/format.ts), whatever time zone the server runs in, with the weekdays in the reply's language.
  * For a customer who came from a piece's page (Ask about this piece), `piece` is its slug (pieceSlugOf), and a last
  * paragraph, after the rules, says that "it" and "this" mean that piece.
@@ -64,9 +66,9 @@ ${calendar}
 Rules:
 1. Use the tools for every fact about products, prices, stock and opening hours. Never invent products, prices, availability or hours. Name products exactly as the tools return them. Call the tools you need in this reply and answer from their results: never say you will look something up and then stop.
 2. Search broadly first. For a gift, use search_products with the occasion (occasion "travel" for someone who travels), the budget (maxPriceJpy) and the boutique (inStockAt). Add a category or collection only when the customer asks for one. If a search finds nothing, drop a filter and search again before saying nothing fits.
-3. Before calling request_appointment, restate the boutique, the day (the weekday and date resolve_date returned), the time and the products in one short sentence, and wait for the customer's yes.
-4. Call resolve_date only when the customer names a day, never to find out today's date, which is given above.${locale === 'ja' ? ' 日付が出ていないご相談では resolve_date を呼ばないでください。' : ''} Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before request_appointment: weekday for a weekday name ("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"), relative for exactly "today", "tomorrow" or "day_after_tomorrow" ("the day after tomorrow", 明後日), date for any other day: a calendar date, or a day you read off the calendar, such as "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques, and don't suggest a day yourself: ask which day suits them when they want to visit, and look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours. Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean. Write requestedFor as YYYY-MM-DDTHH:MM:00+09:00: the date from resolve_date, then T and the time in 24-hour form (2 pm is T14:00:00+09:00).
-5. Never say a visit is confirmed. Say it is requested, and that the boutique will confirm it on LINE. After request_appointment, restate the boutique, date and time from the tool's result (appointment.boutique.name and appointment.requestedFor), with the weekday resolve_date returned for that date, never from what the customer asked for.
+3. To request a visit, call choose_visit with the pieces the customer wants to see and, when they named them, the boutique slug, the day (the date resolve_date returned) and the time (HH:MM, 24-hour). Never ask for a boutique, day or time in words, and never restate them for a yes: the app shows them filled in, and the customer sends the request there. If no piece has come up yet, ask which one, or use the pieces you just suggested when the customer asks to see those.
+4. Call resolve_date only when the customer names a day, never to find out today's date, which is given above.${locale === 'ja' ? ' 日付が出ていないご相談では resolve_date を呼ばないでください。' : ''} Never work out or guess a date or weekday yourself. When the customer names a day ("Saturday", "tomorrow", "10 October"), call resolve_date for it first, on its own, before find_boutiques with a date and before choose_visit: weekday for a weekday name ("Saturday": week "this"; "next week's Saturday", 来週の土曜日: week "next"), relative for exactly "today", "tomorrow" or "day_after_tomorrow" ("the day after tomorrow", 明後日), date for any other day: a calendar date, or a day you read off the calendar, such as "in 3 days". If the customer names no day, don't call it, don't pass a date to find_boutiques or choose_visit, and don't suggest a day yourself. Look up opening hours only when they ask about them, by calling find_boutiques without a date, which lists each boutique's weekly hours. Use the date resolve_date returns, and the weekday it returns when you speak of that day, never a weekday from the customer's words. If isPast is true, that day has gone: ask for another day. For a day the calendar doesn't show ("next month"), ask the customer which day they mean.
+5. Never say a visit is confirmed. When choose_visit answers requested, say in one short sentence that the visit is requested and the boutique will confirm it on LINE; the app shows the details. When it answers closed, offer help without pushing.
 6. If a tool returns an error, follow its hint. not_found means a slug was wrong: look it up with the tool the hint names, never guess. An input validation error means fix the arguments and call again. Otherwise ask the customer.
 7. ${locale === 'ja' ? 'Reply in polite Japanese (keigo).' : 'Reply in English.'} Pass locale "${locale}" to every tool that takes one, so names match your reply and the app's cards. Keep replies to two or three short sentences of plain text: no markdown, no bold, no numbered or bulleted lists. The app shows product cards, so don't repeat their details.
 8. Suggest at most three products at a time.
@@ -122,9 +124,48 @@ const resolveDateInput = z.preprocess(
 const resolveDateTool = (locale: 'ja' | 'en', now: Date) =>
   tool({
     description:
-      'Works out which day the customer means, on Tokyo\'s calendar, so you never work out a date or weekday yourself. Call it only when the customer has named a day, never to look up today\'s date or to suggest a day, and call it before find_boutiques with a date and before request_appointment. Give exactly one of: weekday (a weekday name, with week "this" for "Saturday" or "next" for "next week\'s Saturday", 来週の土曜日), relative ("today", "tomorrow" or "day_after_tomorrow", 明後日), or date (YYYY-MM-DD, to get its weekday). It returns the date as YYYY-MM-DD, the weekday\'s name in the customer\'s language, and isPast, whether that day has already gone.',
+      'Works out which day the customer means, on Tokyo\'s calendar, so you never work out a date or weekday yourself. Call it only when the customer has named a day, never to look up today\'s date or to suggest a day, and call it before find_boutiques with a date and before choose_visit. Give exactly one of: weekday (a weekday name, with week "this" for "Saturday" or "next" for "next week\'s Saturday", 来週の土曜日), relative ("today", "tomorrow" or "day_after_tomorrow", 明後日), or date (YYYY-MM-DD, to get its weekday). It returns the date as YYYY-MM-DD, the weekday\'s name in the customer\'s language, and isPast, whether that day has already gone.',
     inputSchema: resolveDateInput,
     execute: async (query) => resolveDate(query, locale, now),
+  });
+
+/** A slug, as the Maison tools take one (slugInput): lower-case letters, digits and hyphens. */
+const SLUG = /^[a-z0-9-]{1,120}$/;
+
+/**
+ * choose_visit's input: a strict object, as resolve_date's, so a key it doesn't have is refused with its name, and the
+ * same tidying (tidyInput): blanks and nulls mean "not given", case and spaces don't count, and a locale is ignored. The
+ * picker checks the rest against the boutiques' hours and stock (lib/visit-picker.ts): a day or a time the call gets wrong
+ * falls back, and is never sent as it is.
+ */
+const chooseVisitInput = z.preprocess(
+  tidyInput,
+  z.strictObject({
+    productSlugs: z
+      .array(z.string().regex(SLUG, 'Use product slugs, such as "weekender-50".'))
+      .min(1)
+      .max(5)
+      .describe('The pieces the customer wants to see: 1 to 5 product slugs, from search_products or view_product.'),
+    boutique: z.string().regex(SLUG, 'Use a boutique slug, such as "ginza".').optional().describe('Only when the customer named a boutique: its slug, such as "ginza".'),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD: the date resolve_date returned.').optional().describe('Only when the customer named a day: the date resolve_date returned, YYYY-MM-DD.'),
+    time: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM, 24-hour: 2 pm is "14:00".')
+      .optional()
+      .describe('Only when the customer named a time: HH:MM, 24-hour, such as "14:00" for 2 pm.'),
+  })
+);
+
+/**
+ * The app's own tool for a visit: it shows the customer the visit picker, the product page's booking form, filled in
+ * from the call. It has no execute: the model's call ends the step loop and reaches the browser as a tool-choose_visit
+ * part waiting for its output, which the picker adds (addToolOutput) once the customer has sent the request or closed it.
+ */
+const chooseVisitTool = () =>
+  tool({
+    description:
+      'Shows the customer the visit picker in the chat: the form to request a boutique visit, filled in with what you pass. Pass productSlugs, the pieces to see, and only what the customer named: the boutique slug, the date resolve_date returned, and the time as HH:MM (24-hour). The customer checks it and sends the request there, so your reply stops here until they answer. It answers status "requested", with the visit, once the customer has sent it, or status "closed" when they closed the picker without a request.',
+    inputSchema: chooseVisitInput,
   });
 
 export interface ConciergeDeps {
@@ -438,18 +479,25 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
   try {
     const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
     // log_inquiry is the app's own call, made once a turn is over. The model is never offered it: the log says what happened, not what the model says happened.
-    const { log_inquiry: logTool, ...mcpTools } = await mcp.tools();
+    // Nor request_appointment: the customer books in the visit picker (choose_visit), which calls it with their own session.
+    const { log_inquiry: logTool, request_appointment: _bookedInThePicker, ...mcpTools } = await mcp.tools();
     const question = lastQuestionOf(messages);
+    /**
+     * A request whose last message is the concierge's own carries the customer's answer to a visit picker, and the reply
+     * goes on in that message (resumesAfterPicker in lib/visit-picker.ts). Its turn was logged when the customer's message
+     * arrived: one inquiry per customer message.
+     */
+    const resumed = messages.at(-1)?.role === 'assistant';
     // The Maison tools, with the chat's locale, and with the hand-off an empty knowledge search makes on its own.
     const maisonTools = withAutoHandOff(await withConversationLocale(mcpTools, locale), { question, piece, locale });
-    const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now) };
+    const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now), [CHOOSE_VISIT]: chooseVisitTool() };
     /**
      * Logs the finished turn in Strapi as an inquiry, for the staff's Inquiries tab. Nothing is logged without the tool (a
      * token without the permission) or without a question to log. A log that fails, is refused or runs past LOG_TIMEOUT_MS
      * never changes the customer's turn: the reply is already written, so the log only warns, and this never throws.
      */
     const logTurn = async (event: { content: Parameters<typeof turnReplyOf>[0]; toolResults: Parameters<typeof turnFactsOf>[0] }) => {
-      if (!logTool?.execute || question === '') return;
+      if (!logTool?.execute || question === '' || resumed) return;
       // The call's own limit, not the request's signal: a customer who closes the chat after the last word doesn't cut the log.
       const timeout = AbortSignal.timeout(LOG_TIMEOUT_MS);
       let why: string | undefined;
@@ -484,8 +532,10 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       model: deps.model,
       instructions: conciergeInstructions(locale, now, piece),
       // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as
-      // they did in that turn, and not as the raw MCP result.
-      messages: await convertToModelMessages(messages, { tools }),
+      // they did in that turn, and not as the raw MCP result. A visit picker the customer moved past by writing has no
+      // answer: a call without a result is one the model call refuses (MissingToolResultsError), so it is left out, and
+      // the model answers the new message (ignoreIncompleteToolCalls).
+      messages: await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true }),
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
