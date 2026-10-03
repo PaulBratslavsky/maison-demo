@@ -272,14 +272,24 @@ describe('toolView: choose_visit', () => {
   const appointment = { reference: 'APT-0042', status: 'requested', boutique: { slug: 'ginza', name: 'Ginza Flagship' }, requestedFor: '2026-10-10T14:00:00+09:00', products: [], note: '', confirmationSent: false };
   const call = { toolName: 'choose_visit', toolCallId: 'call-1', input: { productSlugs: ['weekender-50'], boutique: 'ginza', date: '2026-10-10', time: '14:00' } };
 
-  it('shows a picker waiting for the customer as a local line with …, and hands the page nothing', () => {
-    for (const state of ['input-streaming', 'input-available']) {
+  // A waiting picker isn't a running call: "…" read as loading, and stayed above "No request sent." once the customer moved on.
+  it('shows a picker waiting for the customer as its local line with no mark, a call still coming in with …, and hands the page nothing', () => {
+    for (const [state, line] of [
+      ['input-available', 'Local · choose_visit'],
+      ['input-streaming', 'Local · choose_visit …'],
+    ]) {
       const view = toolView({ ...call, state }, 'en');
-      expect(view.line, state).toBe('Local · choose_visit …');
+      expect(view.line, state).toBe(line);
       expect(view.failed, state).toBe(false);
       expect(view.appointment, state).toBeNull();
       expect(view.requestLine, state).toBeNull();
     }
+    expect(toolView({ ...call, state: 'input-available' }, 'ja').line).toBe('Local · choose_visit');
+  });
+
+  it('keeps … for any other call that waits for its result', () => {
+    expect(toolView({ toolName: 'resolve_date', state: 'input-available' }, 'en').line).toBe('Local · resolve_date …');
+    expect(toolView({ toolName: 'find_boutiques', state: 'input-available' }, 'en').line).toBe('MCP · find_boutiques …');
   });
 
   it("shows a requested visit as ✓ requested, with the line of the request_appointment call the picker made, and hands the page the visit's card", () => {

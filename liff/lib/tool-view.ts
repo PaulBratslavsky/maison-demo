@@ -96,11 +96,11 @@ const recordedBy = (part: ToolPart): RecordedHandOff | null => {
 
 /**
  * What a tool call shows in the chat, built from its structuredContent, never from the model's text: its line ("MCP ·
- * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "Local · choose_visit ✓ requested", "… ✕
- * boutique_closed"), the products a search found, the appointment a request made (request_appointment's, or the one the
- * visit picker's answer carries, with `requestLine` for the call the picker made), and the question a hand-off recorded:
- * the model's own call to hand_off_to_staff, or the app's, which a search that found nothing carries (handOffAt decides
- * where a message's note goes).
+ * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "Local · choose_visit" while the picker
+ * waits for the customer, "Local · choose_visit ✓ requested", "… ✕ boutique_closed"), the products a search found, the
+ * appointment a request made (request_appointment's, or the one the visit picker's answer carries, with `requestLine`
+ * for the call the picker made), and the question a hand-off recorded: the model's own call to hand_off_to_staff, or the
+ * app's, which a search that found nothing carries (handOffAt decides where a message's note goes).
  */
 export const toolView = (part: ToolPart, locale: Locale) => {
   const t = COPY[locale];
@@ -108,15 +108,19 @@ export const toolView = (part: ToolPart, locale: Locale) => {
   const { error, failed, data } = outcomeOf(part);
   const list = Object.values(data ?? {}).find(Array.isArray) as unknown[] | undefined;
   const answer = local && !failed ? localAnswer(part) : null;
-  const status = part.state.startsWith('input')
-    ? '…'
-    : failed
-      ? `✕ ${error?.code ?? 'error'}`
-      : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
+  // A picker whose call came in whole waits for the customer, not for a result: no mark, as "…" reads like loading.
+  const status =
+    part.toolName === CHOOSE_VISIT && part.state === 'input-available'
+      ? ''
+      : part.state.startsWith('input')
+        ? '…'
+        : failed
+          ? `✕ ${error?.code ?? 'error'}`
+          : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
   const appointment =
     part.toolName === 'request_appointment' ? ((data?.appointment as Appointment | undefined) ?? null) : part.toolName === CHOOSE_VISIT ? pickedVisit(part) : null;
   return {
-    line: `${local ? 'Local' : 'MCP'} · ${part.toolName} ${status}`,
+    line: `${local ? 'Local' : 'MCP'} · ${part.toolName}${status ? ` ${status}` : ''}`,
     failed,
     products: part.toolName === 'search_products' && Array.isArray(data?.products) ? (data.products as ProductCard[]) : null,
     appointment,
