@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { needsRetry } from './chat-retry';
 
-type Part = { type: string; text?: string; toolName?: string; state?: string; output?: unknown; errorText?: string };
+type Part = { type: string; text?: string; toolName?: string; toolCallId?: string; state?: string; output?: unknown; errorText?: string };
 
 const text = (value: string) => ({ type: 'text', text: value });
 const resolveDate = { type: 'tool-resolve_date' }; // the concierge's own tool
@@ -179,5 +179,37 @@ describe('needsRetry', () => {
     expect(needsRetry([...askedAboutBitcoin, assistant(knowledge('input-available'))], false)).toBe(true);
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, knowledge('input-available'))], false)).toBe(true); // a second search is under way
     expect(needsRetry([...askedAboutBitcoin, assistant(foundNothing, knowledge('output-available', refusal))], false)).toBe(true); // the last search was refused
+  });
+
+  // The visit picker (lib/visit-picker.ts). Asking again drops the reply: a waiting picker with it, or, after a request,
+  // the reply is asked for again, and the visit could be booked twice.
+  describe('with a visit picker', () => {
+    const picker = (state: string, output?: unknown): Part => ({ type: 'tool-choose_visit', toolCallId: 'call-1', state, ...(output === undefined ? {} : { output }) });
+    const requestedVisit = picker('output-available', { status: 'requested', appointment: { reference: 'APT-0042', status: 'requested' } });
+    const closedPicker = picker('output-available', { status: 'closed' });
+    const askedToVisit = [user('Can we schedule one?')];
+    const step = { type: 'step-start' };
+
+    it('is false while a picker waits for the customer, with no words after it', () => {
+      expect(needsRetry([...askedToVisit, assistant(step, picker('input-available'))], false)).toBe(false);
+      expect(needsRetry([...askedToVisit, assistant(step, picker('input-streaming'))], false)).toBe(false);
+      expect(needsRetry([...askedToVisit, assistant(text('Here it is.'), picker('input-available'))], false)).toBe(false);
+      expect(needsRetry([...askedToVisit, assistant(step, resolveDate, step, picker('input-available'))], false)).toBe(false);
+    });
+
+    it('is false once the picker requested a visit, with no words after it, and after an empty reply to it', () => {
+      expect(needsRetry([...askedToVisit, assistant(step, requestedVisit)], false)).toBe(false);
+      expect(needsRetry([...askedToVisit, assistant(step, requestedVisit, step)], false)).toBe(false);
+      expect(needsRetry([...askedToVisit, assistant(step, requestedVisit, step, text(' '))], false)).toBe(false);
+    });
+
+    it('still allows it after a picker the customer closed, when no words came after it: nothing was booked', () => {
+      expect(needsRetry([...askedToVisit, assistant(step, closedPicker, step)], false)).toBe(true);
+      expect(needsRetry([...askedToVisit, assistant(step, closedPicker, step, text('Happy to help with anything else.'))], false)).toBe(false);
+    });
+
+    it('allows it on a later reply that is empty, when the visit was requested in an earlier one', () => {
+      expect(needsRetry([...askedToVisit, assistant(step, requestedVisit, step, text('Requested.')), user('Anything else for him?'), assistant(searchProducts)], false)).toBe(true);
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { handOffAt } from './tool-view';
+import { isWaitingPicker, requestedVisitOf } from './visit-picker';
 
 /** What the chat needs from a message part: its text, or the tool call it records. */
 interface ChatPart {
@@ -43,6 +44,9 @@ const mayHaveBooked = (part: ChatPart): boolean => {
  * check, only a cap of 3 open requests. The call's chip (and the visit's card) shows what happened, and the customer can
  * still write.
  *
+ * Nor when the reply holds a visit picker that waits for the customer, or the visit one requested (lib/visit-picker.ts):
+ * asking again would drop the picker, or ask for the reply after a booking again, and book twice.
+ *
  * Nor when the chat shows the reply's hand-off note (handOffAt in lib/tool-view.ts), under a hand-off that went through
  * (the model's call, or the one the app made for a search that found nothing) or, when nothing was recorded, under a
  * search that found nothing: the note and the LINE chat button are the answer, so a reply that ends there, with no words
@@ -55,6 +59,7 @@ export const needsRetry = (messages: readonly ChatMessage[], busy: boolean): boo
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return false;
   if (last.parts.some(mayHaveBooked)) return false;
+  if (last.parts.some((part) => isWaitingPicker(part) || requestedVisitOf(part) !== null)) return false;
   const note = handOffAt(last.parts);
   if (note && note.kind !== 'failed_hand_off') return false;
   const end = last.parts.filter(shown).at(-1);

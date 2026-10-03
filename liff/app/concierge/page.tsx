@@ -4,7 +4,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { use, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
-import { AssistantParts } from '@/components/chat-parts';
+import { AssistantParts, type PickerContext } from '@/components/chat-parts';
 import { ErrorNote } from '@/components/error-note';
 import { useMaison } from '@/components/maison-provider';
 import { Screen } from '@/components/screen';
@@ -16,6 +16,7 @@ import { getMaison } from '@/lib/maison';
 import { pieceSlugOf } from '@/lib/piece-slug';
 import { errorOf, errorText } from '@/lib/status';
 import { tunnelHeaders } from '@/lib/tunnel';
+import { CHOOSE_VISIT, composerLocked, livePickerOf, resumesAfterPicker } from '@/lib/visit-picker';
 
 const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments', 'hand_off_to_staff'];
 
@@ -53,9 +54,14 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
       }),
     []
   );
-  const { messages, sendMessage, regenerate, status, error } = useChat({ transport });
+  // After the customer answers a visit picker, the chat goes on by itself, and only then: never after a turn that ended
+  // on Strapi's tools (resumesAfterPicker, as useChat's sendAutomaticallyWhen).
+  const { messages, sendMessage, regenerate, status, error, addToolOutput } = useChat({ transport, sendAutomaticallyWhen: resumesAfterPicker });
   const [draft, setDraft] = useState('');
+  // A picker's request on its way: no message may move past the picker until it has its answer.
+  const [pickerSending, setPickerSending] = useState(false);
   const busy = status === 'submitted' || status === 'streaming';
+  const locked = composerLocked(busy, pickerSending);
   const failure = error ? errorOf(error) : null;
   // A reply that ended with nothing to read (tool calls, then no words): offer to ask again.
   const retry = needsRetry(messages, busy);
@@ -69,9 +75,22 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
     if (list && following.current) list.scrollTop = list.scrollHeight;
   }, [messages, busy, error]);
 
+  // The visit pickers: which one may send, and where the customer's answer goes: useChat's addToolOutput, by the call's
+  // id. Writing the answer resubmits the chat (resumesAfterPicker).
+  const picker: PickerContext = {
+    live: livePickerOf(messages),
+    busy,
+    answer: (toolCallId, output) => {
+      setPickerSending(false);
+      following.current = true;
+      void addToolOutput({ tool: CHOOSE_VISIT, toolCallId, output });
+    },
+    onSending: setPickerSending,
+  };
+
   const send = (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || locked) return;
     following.current = true;
     void sendMessage({ text: trimmed });
     setDraft('');
@@ -111,7 +130,7 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
               </div>
             ) : (
               <div key={message.id} data-testid={`message-${message.role}`} className="flex flex-col gap-3.5 text-[14px] leading-[1.55]">
-                <AssistantParts parts={message.parts} locale={locale} />
+                <AssistantParts parts={message.parts} locale={locale} picker={picker} />
               </div>
             )
           )}
@@ -142,7 +161,7 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
             <button
               key={suggestion}
               type="button"
-              disabled={busy}
+              disabled={locked}
               onClick={() => send(suggestion)}
               className="min-h-[44px] max-w-[85%] shrink-0 border border-hairline px-3 py-2 text-left text-[13px] leading-snug disabled:text-mist"
             >
@@ -161,7 +180,7 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
           />
           <button
             type="submit"
-            disabled={busy || !draft.trim()}
+            disabled={locked || !draft.trim()}
             className="flex h-11 shrink-0 items-center bg-ink px-[18px] text-[11px] font-medium uppercase tracking-[0.2em] text-paper disabled:bg-hairline disabled:text-mist"
           >
             {t.send}

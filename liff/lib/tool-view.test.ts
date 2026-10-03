@@ -44,6 +44,7 @@ describe('toolView', () => {
     const view = toolView({ toolName: 'request_appointment', state: 'output-available', output }, 'en');
     expect(view.appointment).toEqual(appointment);
     expect(view.line).toBe('MCP · request_appointment ✓');
+    expect(view.requestLine).toBeNull(); // its own line says it: only the picker's call needs one more
     expect(view.products).toBeNull();
     expect(view.handOff).toBeNull();
   });
@@ -262,6 +263,57 @@ describe('toolView: search_knowledge that handed the question to staff', () => {
     // And a search reads its handOff, not a question of the kind a hand-off has.
     const mixed = { content: [], structuredContent: { entries: [], ...recorded('Q-0007').structuredContent } };
     expect(toolView({ ...call, state: 'output-available', output: mixed }, 'en').handOff).toBeNull();
+  });
+});
+
+// The visit picker's call (lib/visit-picker.ts): the concierge's own tool, answered by the customer in the chat. Its
+// request_appointment call is made in the browser, outside the conversation, so its line comes from the picker's answer.
+describe('toolView: choose_visit', () => {
+  const appointment = { reference: 'APT-0042', status: 'requested', boutique: { slug: 'ginza', name: 'Ginza Flagship' }, requestedFor: '2026-10-10T14:00:00+09:00', products: [], note: '', confirmationSent: false };
+  const call = { toolName: 'choose_visit', toolCallId: 'call-1', input: { productSlugs: ['weekender-50'], boutique: 'ginza', date: '2026-10-10', time: '14:00' } };
+
+  it('shows a picker waiting for the customer as a local line with …, and hands the page nothing', () => {
+    for (const state of ['input-streaming', 'input-available']) {
+      const view = toolView({ ...call, state }, 'en');
+      expect(view.line, state).toBe('Local · choose_visit …');
+      expect(view.failed, state).toBe(false);
+      expect(view.appointment, state).toBeNull();
+      expect(view.requestLine, state).toBeNull();
+    }
+  });
+
+  it("shows a requested visit as ✓ requested, with the line of the request_appointment call the picker made, and hands the page the visit's card", () => {
+    const view = toolView({ ...call, state: 'output-available', output: { status: 'requested', appointment } }, 'en');
+    expect(view.line).toBe('Local · choose_visit ✓ requested');
+    expect(view.requestLine).toBe('MCP · request_appointment ✓');
+    expect(view.appointment).toEqual(appointment);
+    expect(view.failed).toBe(false);
+    // The same in Japanese: the lines have no words of the copy in them.
+    expect(toolView({ ...call, state: 'output-available', output: { status: 'requested', appointment } }, 'ja').line).toBe('Local · choose_visit ✓ requested');
+  });
+
+  it('shows a closed picker as ✓ closed, with no request line and no card', () => {
+    const view = toolView({ ...call, state: 'output-available', output: { status: 'closed' } }, 'en');
+    expect(view.line).toBe('Local · choose_visit ✓ closed');
+    expect(view.requestLine).toBeNull();
+    expect(view.appointment).toBeNull();
+  });
+
+  it("hands the page no card for an answer it can't read, and shows a refused call as a red ✕", () => {
+    for (const output of [{ status: 'requested' }, { status: 'requested', appointment: {} }, null, 'requested']) {
+      const view = toolView({ ...call, state: 'output-available', output }, 'en');
+      expect(view.appointment, JSON.stringify(output)).toBeNull();
+      expect(view.requestLine, JSON.stringify(output)).toBeNull();
+      expect(view.line, JSON.stringify(output)).toBe('Local · choose_visit ✓');
+    }
+    // Input the schema refused: the SDK answers it as an error, and the model calls again.
+    const refused = toolView({ toolName: 'choose_visit', state: 'output-error', errorText: 'Invalid input' }, 'en');
+    expect(refused.line).toBe('Local · choose_visit ✕ error');
+    expect(refused.failed).toBe(true);
+  });
+
+  it('keeps the call id the picker answers by', () => {
+    expect(toolPartOf({ type: 'tool-choose_visit', toolCallId: 'call-1', state: 'input-available' } as { type: string })).toMatchObject({ toolName: 'choose_visit', toolCallId: 'call-1' });
   });
 });
 

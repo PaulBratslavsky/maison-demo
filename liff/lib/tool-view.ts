@@ -3,10 +3,13 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { COPY } from './copy';
 import { toolErrorOf } from './mcp';
 import type { Appointment, Locale, ProductCard } from './types';
+import { CHOOSE_VISIT, visitPickerOutputOf } from './visit-picker';
 
 /** What the chat needs from AI SDK 7's dynamic-tool UI part (MCP tools arrive as dynamic tools). */
 export interface ToolPart {
   toolName: string;
+  /** The call's id: the visit picker hands its answer to the chat by it (addToolOutput). */
+  toolCallId?: string;
   state: string;
   /** What the model sent the tool. */
   input?: unknown;
@@ -24,14 +27,27 @@ export const toolPartOf = (part: { type: string }): ToolPart | null => {
   return null;
 };
 
-/** The concierge's own tool. It isn't a Maison tool, so its line says "Local", not "MCP". */
-const LOCAL_TOOLS = ['resolve_date'];
+/** The concierge's own tools. They aren't Maison tools, so their lines say "Local", not "MCP". */
+const LOCAL_TOOLS = ['resolve_date', CHOOSE_VISIT];
 
 /** What `resolve_date` returned, for its line: the weekday and date the model was given. */
 const resolvedDay = (output: unknown): string | null => {
   const day = output as { date?: unknown; weekday?: unknown } | null;
   return typeof day?.date === 'string' && typeof day.weekday === 'string' ? `${day.weekday} ${day.date}` : null;
 };
+
+/** What a local tool's line says after its ✓: the day resolve_date worked out, or the customer's answer to the visit picker. */
+const localAnswer = (part: ToolPart): string | null =>
+  part.toolName === CHOOSE_VISIT ? (visitPickerOutputOf(part.output)?.status ?? null) : resolvedDay(part.output);
+
+/** The visit an answered picker requested: request_appointment's own appointment, which the picker handed the chat. */
+const pickedVisit = (part: ToolPart): Appointment | null => {
+  const answer = part.state === 'output-available' ? visitPickerOutputOf(part.output) : null;
+  return answer?.status === 'requested' ? answer.appointment : null;
+};
+
+/** The line of the request_appointment call the picker made in the browser, which isn't in the conversation: under the picker's own. */
+const PICKER_REQUEST_LINE = 'MCP · request_appointment ✓';
 
 /**
  * What a call gave back: whether it failed (it broke on the way, or Maison refused it with an isError result), and,
@@ -80,27 +96,31 @@ const recordedBy = (part: ToolPart): RecordedHandOff | null => {
 
 /**
  * What a tool call shows in the chat, built from its structuredContent, never from the model's text: its line ("MCP ·
- * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "… ✕ boutique_closed"), the products a
- * search found, the appointment a request made, and the question a hand-off recorded: the model's own call to
- * hand_off_to_staff, or the app's, which a search that found nothing carries (handOffAt decides where a message's note
- * goes).
+ * search_products ✓ 5 results", "Local · resolve_date ✓ Saturday 2026-10-10", "Local · choose_visit ✓ requested", "… ✕
+ * boutique_closed"), the products a search found, the appointment a request made (request_appointment's, or the one the
+ * visit picker's answer carries, with `requestLine` for the call the picker made), and the question a hand-off recorded:
+ * the model's own call to hand_off_to_staff, or the app's, which a search that found nothing carries (handOffAt decides
+ * where a message's note goes).
  */
 export const toolView = (part: ToolPart, locale: Locale) => {
   const t = COPY[locale];
   const local = LOCAL_TOOLS.includes(part.toolName);
   const { error, failed, data } = outcomeOf(part);
   const list = Object.values(data ?? {}).find(Array.isArray) as unknown[] | undefined;
-  const answer = local && !failed ? resolvedDay(part.output) : null;
+  const answer = local && !failed ? localAnswer(part) : null;
   const status = part.state.startsWith('input')
     ? '…'
     : failed
       ? `✕ ${error?.code ?? 'error'}`
       : `✓${answer ? ` ${answer}` : list ? ` ${t.results(list.length)}` : ''}`;
+  const appointment =
+    part.toolName === 'request_appointment' ? ((data?.appointment as Appointment | undefined) ?? null) : part.toolName === CHOOSE_VISIT ? pickedVisit(part) : null;
   return {
     line: `${local ? 'Local' : 'MCP'} · ${part.toolName} ${status}`,
     failed,
     products: part.toolName === 'search_products' && Array.isArray(data?.products) ? (data.products as ProductCard[]) : null,
-    appointment: part.toolName === 'request_appointment' ? ((data?.appointment as Appointment | undefined) ?? null) : null,
+    appointment,
+    requestLine: part.toolName === CHOOSE_VISIT && appointment ? PICKER_REQUEST_LINE : null,
     handOff: recordedBy(part),
   };
 };

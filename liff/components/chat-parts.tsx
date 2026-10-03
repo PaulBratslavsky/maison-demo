@@ -10,8 +10,10 @@ import { visitTime, yen } from '@/lib/format';
 import { lineMessageUrl } from '@/lib/line-chat';
 import { handOffAt, toolPartOf, toolView, type RecordedHandOff } from '@/lib/tool-view';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
+import { CHOOSE_VISIT, pickerViewOf, type VisitPickerOutput } from '@/lib/visit-picker';
 import { LineChat } from './line-chat';
 import { ProductImage } from './product-grid';
+import { VisitPicker } from './visit-picker';
 
 function Lines({ lines }: { lines: Line[] }) {
   return (
@@ -135,14 +137,28 @@ export function HandOffNote({ recorded, locale }: { recorded: RecordedHandOff | 
   );
 }
 
+/** What the concierge page tells the parts about its visit pickers (lib/visit-picker.ts). */
+export interface PickerContext {
+  /** The picker that may send (livePickerOf): its call's id, or null. */
+  live: string | null;
+  /** A reply is coming in: the live picker waits for it to end. */
+  busy: boolean;
+  /** Hands the customer's answer to the chat for the call `toolCallId` (useChat's addToolOutput), which goes on by itself. */
+  answer: (toolCallId: string, output: VisitPickerOutput) => void;
+  /** Tells the page a picker's request is on its way (true), or ended in a problem (false): the composer waits meanwhile. */
+  onSending: (sending: boolean) => void;
+}
+
 /**
  * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
  * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note,
  * once, under the line handOffAt names (a hand-off that went through: the model's hand_off_to_staff, or a search that
  * found nothing and carries the one the app made; otherwise, with the plain note, the last search that found nothing, or
- * a hand-off that failed), and the pieces a search found under the message's words.
+ * a hand-off that failed), and the pieces a search found under the message's words. A visit picker sits under its line
+ * (pickerViewOf): its form while it's the live one, then the visit's card, or a short line once closed or moved past.
  */
-export function AssistantParts({ parts, locale }: { parts: Array<{ type: string; text?: string }>; locale: Locale }) {
+export function AssistantParts({ parts, locale, picker }: { parts: Array<{ type: string; text?: string }>; locale: Locale; picker: PickerContext }) {
+  const t = COPY[locale];
   const blocks: ReactNode[] = [];
   const found: ReactNode[] = [];
   let lines: ReactNode[] = [];
@@ -171,6 +187,28 @@ export function AssistantParts({ parts, locale }: { parts: Array<{ type: string;
     if (!tool) return;
     const view = toolView(tool, locale);
     lines.push(<ToolLine key={index} text={view.line} failed={view.failed} />);
+    if (view.requestLine) lines.push(<ToolLine key={`request-${index}`} text={view.requestLine} failed={false} />);
+    if (tool.toolName === CHOOSE_VISIT) {
+      const toolCallId = tool.toolCallId ?? '';
+      const shown = pickerViewOf(tool, { live: toolCallId !== '' && toolCallId === picker.live, busy: picker.busy });
+      if (shown.kind === 'form') {
+        cards.push(
+          <VisitPicker
+            key={`picker-${index}`}
+            input={tool.input}
+            canSend={shown.canSend}
+            onAnswer={(output) => picker.answer(toolCallId, output)}
+            onSending={picker.onSending}
+          />
+        );
+      } else if (shown.kind === 'closed' || shown.kind === 'unsent') {
+        cards.push(
+          <p key={`picker-${index}`} data-testid="picker-note" className="text-body text-graphite">
+            {shown.kind === 'closed' ? t.pickerClosed : t.pickerUnsent}
+          </p>
+        );
+      }
+    }
     if (view.appointment) {
       cards.push(
         <div key={`card-${index}`} className="flex flex-col gap-2.5">

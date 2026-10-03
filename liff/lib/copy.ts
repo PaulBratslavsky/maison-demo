@@ -104,7 +104,12 @@ export const COPY = {
     send: '送信',
     // Under a reply that ended with nothing to read, beside `retry`'s button (the concierge page).
     noReply: '返信を受け取れませんでした。',
-    suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', 'はい、お願いします。'],
+    suggestions: ['旅好きの友人へのギフトを40万円以内で探しています。土曜日の14時に銀座で見られますか？', '来店を予約できますか？'],
+    // The concierge's visit picker (components/visit-picker.tsx): the button beside Send request, and the lines that take
+    // the picker's place when the customer closed it, or moved past it by writing.
+    notNow: '今回は見送る',
+    pickerClosed: 'リクエストせずに閉じました。',
+    pickerUnsent: 'リクエストは送信されていません。',
     pieceSuggestions: ['名入れはできますか？', 'お手入れ方法を教えてください。', 'どのブティックに在庫がありますか？'],
     results: (n: number) => `${n}件`,
     noProducts: 'このコレクションには、まだ商品がありません。',
@@ -204,7 +209,10 @@ export const COPY = {
     placeholder: 'Write a message',
     send: 'Send',
     noReply: 'No reply came back.',
-    suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Yes, please.'],
+    suggestions: ["I'm looking for a gift under ¥400,000 for a friend who travels. Could I see it in Ginza on Saturday at 2 pm?", 'Can I book a visit?'],
+    notNow: 'Not now',
+    pickerClosed: 'Closed without a request.',
+    pickerUnsent: 'No request sent.',
     pieceSuggestions: ['Can I have it personalized?', 'How do I care for it?', 'Which boutique has it in stock?'],
     results: (n: number) => `${n} result${n === 1 ? '' : 's'}`,
     noProducts: 'Nothing in this collection yet.',
