@@ -2928,6 +2928,80 @@ On Paul's phone, through the tunnel (option B, as the README's "Each time" descr
 
 ---
 
+### Task 6: Warmer words for a hand-off (Paul, 3 October)
+
+Paul asked for the hand-off to sound human: "thanks for asking, give me a few minutes while I look that up and I will message back with the answer". The words are written for the boutiques' open hours; Paul covers what happens after hours in the slides. Run it after Task 4 (which creates `liff/lib/copy.test.ts` and edits `copy.ts`) and before Task 5, so the checks by hand see the new words.
+
+**Files:**
+- Modify: `liff/lib/copy.ts` (`handOff.note`, Japanese and English)
+- Modify: `liff/lib/concierge.ts` (rule 9's closing sentence)
+- Test: `liff/lib/line-chat.test.ts` (the two `copy.note('Q-4821')` expectations), `liff/lib/concierge.test.ts` (`RULE_9`)
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: nothing other tasks use.
+
+- [ ] **Step 1: Update the tests first**
+
+In `liff/lib/line-chat.test.ts`, the English expectation becomes:
+
+```ts
+    expect(copy.note('Q-4821')).toBe('Thanks for asking! Give us a few minutes: one of our client advisors will message you here with the answer. (Q-4821)');
+```
+
+and the Japanese one:
+
+```ts
+    expect(copy.note('Q-4821')).toBe('ご質問ありがとうございます。少々お待ちください。クライアントアドバイザーがお調べのうえ、このLINEトークでご返信いたします（Q-4821）。');
+```
+
+In `liff/lib/concierge.test.ts`, in `RULE_9`, replace this sentence:
+
+```
+Then say in one short sentence that you couldn't find a reliable answer and have passed the question to Maison's client advisors: the app shows the customer where and when they reply.
+```
+
+with:
+
+```
+Then thank the customer and say in one short sentence that one of Maison's client advisors will look into it and message them here on LINE with the answer: the app shows the details.
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `npm test --prefix liff -- lib/line-chat.test.ts lib/concierge.test.ts`
+Expected: FAIL: the two `copy.note` expectations and the rule 9 test, against the old words.
+
+- [ ] **Step 3: The note's words**
+
+In `liff/lib/copy.ts`, `ja.handOff.note` becomes:
+
+```ts
+      note: (reference: string) => `ご質問ありがとうございます。少々お待ちください。クライアントアドバイザーがお調べのうえ、このLINEトークでご返信いたします（${reference}）。`,
+```
+
+and `en.handOff.note`:
+
+```ts
+      note: (reference: string) => `Thanks for asking! Give us a few minutes: one of our client advisors will message you here with the answer. (${reference})`,
+```
+
+- [ ] **Step 4: Rule 9's sentence**
+
+In `liff/lib/concierge.ts`, replace the same sentence as in Step 1 (`Then say in one short sentence that you couldn't find a reli…`) with the new one. The rest of rule 9, including "never promise a time yourself", stays: the app's note carries "a few minutes", the model doesn't.
+
+- [ ] **Step 5: Run the tests to see them pass, then everything**
+
+Run: `npm test --prefix liff -- lib/line-chat.test.ts lib/concierge.test.ts`, then `npm test --prefix liff` and `npm run typecheck --prefix liff`.
+Expected: all pass; `tsc --noEmit` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add liff/lib/copy.ts liff/lib/concierge.ts liff/lib/line-chat.test.ts liff/lib/concierge.test.ts
+git commit -m "feat(liff): a hand-off thanks the customer and says an advisor will message them shortly" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- liff/lib/copy.ts liff/lib/concierge.ts liff/lib/line-chat.test.ts liff/lib/concierge.test.ts
+```
+
 ## Decisions made while planning
 
 The controller's rulings on what the planner found. The spec was updated to match.
@@ -2940,3 +3014,4 @@ The controller's rulings on what the planner found. The spec was updated to matc
    - A refused `choose_visit` call shows only its red line.
    - A time between the half-hours goes to the half-hour it falls in.
 5. **Open for Paul:** picker bookings are recorded as created via `app`, not `concierge`, because the browser's MCP connection can't carry the concierge's header. Task 5 changes the README's line to `app`. The alternative, routing the call through the app's server, is a design change. See the spec's open question 3.
+6. **Paul's hand-off words (3 October), Task 6:** the note thanks the customer and promises a reply in a few minutes, written for open hours; Paul covers after hours in the slides. The concierge's rule 9 sentence gets the same tone and still never promises a time itself. Task 6 runs after Task 4 and before Task 5.
