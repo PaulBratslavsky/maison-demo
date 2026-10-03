@@ -139,6 +139,8 @@ The concierge prepares a visit, and the customer books it with one tap.
 - **Only the newest picker can send,** and not while a reply is coming in. While its request is on its way, Send and the suggestions wait. A picker the customer moved past by typing reads "No request sent.", and the concierge answers the new message.
 - **The model never books.** It isn't offered `request_appointment`, and it never says a visit is confirmed.
 
+**The safety net.** The model decides whether to call `choose_visit`, and in production it once asked for the boutique, day and time in words instead. So when the customer asks to book or visit, a piece is known (the page's, or one that `search_products` or `view_product` returned in the conversation), and a reply that ended without an error made no `choose_visit` call, the app's server runs one extra model pass. That pass has only `resolve_date` and `choose_visit`, and must call `choose_visit`, after `resolve_date` for a day the customer named. Its parts continue the same reply, so the picker appears under the concierge's words and every rule above applies. If the pass fails, takes longer than 20 seconds or shows no picker, the customer keeps the first reply and the server's log says why. The turn is logged once, after both passes.
+
 ### Product knowledge and staff hand-off
 
 For care, sizing, delivery, repairs, warranty, gift wrapping and similar questions, the concierge calls `search_knowledge` and answers only from the entries it returns.
