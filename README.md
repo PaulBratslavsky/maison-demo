@@ -218,6 +218,6 @@ LIVE_MODEL=claude npm run test:live   # the visit picker's cases on Claude, with
 | [Ops tools for an agent](docs/ops-tools.md) | The ops tools, and how to connect Claude Desktop |
 | [Testing](docs/testing.md) | Unit, browser, API and live tests, and Maison's own suites |
 | [Deploying and running in production](docs/production.md) | Production notes, and the steps on Strapi Cloud |
-| [The Maison plugin in this repo](docs/maison-plugin.md) | The plugin's copy, and how to update it |
+| [The Maison plugin in this repo](docs/maison-plugin.md) | Where the plugin lives, how it shares Strapi's packages, and how to work on it |
 | [Running the talk demo](docs/talk-demo.md) | The talk's setup, checklist, 3-minute run, rehearsal and backup video |
 | [The Maison plugin's README](strapi/src/plugins/maison/README.md) | The plugin's full reference: tools, routes, permissions and admin pages |

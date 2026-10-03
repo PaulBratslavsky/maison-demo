@@ -7,7 +7,7 @@ This page describes the parts of the Maison demo and how they connect: the repos
 | Path | What it is |
 |---|---|
 | `strapi/` | A Strapi 5.55.1 app (TypeScript), made with `create-strapi`. It uses SQLite locally, and has the `pg` driver for PostgreSQL |
-| `strapi/src/plugins/maison/` | The Maison plugin: content types, thirteen MCP tools and a prompt, REST routes, admin routes, the Maison page and the Homepage widgets, and the demo catalog. A local plugin, copied from [strapi-store-demo-mcp](https://github.com/PaulBratslavsky/strapi-store-demo-mcp) (see [The Maison plugin in this repo](maison-plugin.md)) |
+| `strapi/src/plugins/maison/` | The Maison plugin: content types, thirteen MCP tools and a prompt, REST routes, admin routes, the Maison page and the Homepage widgets, and the demo catalog. A local plugin that lives in this repo (see [The Maison plugin in this repo](maison-plugin.md)) |
 | `strapi-oauth-mcp-manager` | From npm: OAuth for Strapi's MCP server, with customer sign-in by LINE ID token exchange |
 | `strapi/src/api/home-page/` | The Home page single type: the words on the app's Home screen, in English and Japanese. Strapi writes the starting text when there's no Home page, and never overwrites an edit |
 | `strapi/scripts/maison-setup.mjs` | `npm run setup` |
