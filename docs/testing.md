@@ -20,12 +20,12 @@ Three commands run the demo's tests from the repo root, and Maison's own suites 
 
 **The local model** (the default) always uses Ollama, even when a Claude key is set, so it costs nothing and runs offline. It checks that:
 - the demo's gift question is answered from the catalog tools, and names only products they returned
-- the demo's first suggestion asks `resolve_date`, then ends in a visit picker for Ginza, the next Saturday in Tokyo and 14:00, for pieces a search in that turn returned. Nothing is booked: the model doesn't call `request_appointment`, and the reply doesn't say a visit is confirmed or name another day
+- the demo's first suggestion asks `resolve_date`, then ends in a visit picker for Ginza, the next Saturday in Tokyo and 14:00, for pieces a search in that turn returned. Nothing is booked: the model doesn't call `request_appointment`, and the reply doesn't say a visit is confirmed, doesn't say it is requested before the customer sends it, and names no other day
 - "How do I care for the leather?" is answered from Maison's product knowledge
 - "Can I pay in bitcoin?" shows the hand-off note, with Strapi's reference only when Strapi recorded the question
 
 **Claude** runs with `LIVE_MODEL=claude npm run test:live`, with the key the app uses from `liff/.env`: `ANTHROPIC_API_KEY`, or `AI_GATEWAY_API_KEY`. It is skipped without one, and only checks that a key is set, never printing it. Each run calls Claude, which costs money. It checks the visit picker's two cases:
-- "Can we schedule one?", asked from the Weekender 50's page, shows one picker for that piece, with no boutique, day or time filled in, and no call to `resolve_date`
+- "Can we schedule one?", asked from the Weekender 50's page, shows one picker for that piece, with no boutique, day or time filled in, no call to `resolve_date`, and a reply that says no visit is confirmed or requested
 - the demo's first suggestion ends in the same picker as on the local model
 
 **What it leaves in the demo database:** each turn is logged as an inquiry, and the bitcoin test leaves a question for staff open until you reset or answer it. Strapi allows a customer five questions open or taken: past that, nothing is recorded, and the test still passes, on the plain note. Reset between rehearsals.
