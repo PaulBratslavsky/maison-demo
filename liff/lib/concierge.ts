@@ -411,6 +411,21 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
     .join('\n\n')
     .trim();
 
+/** What the log says of a turn that ended at a visit picker, for the staff who read it: the concierge's words aren't the whole of what it did. */
+const PICKER_NOTE = '(The concierge showed a visit picker so the customer can request a visit.)';
+
+/**
+ * The reply a finished turn is logged with: its words (turnReplyOf), and, when the turn holds a choose_visit call, the
+ * note above on a paragraph of its own, or alone when no words came before the call. A turn that ends at the call has
+ * nothing after it: the customer's answer comes in a later request, which isn't logged, so without the note staff's
+ * labeller would see a customer with no answer. A call the schema refused (`invalid`) showed no picker, and doesn't count.
+ */
+const loggedReplyOf = (content: ReadonlyArray<{ type: string; text?: string; toolName?: string; invalid?: boolean }>): string => {
+  const words = turnReplyOf(content);
+  const showedPicker = content.some((part) => part.type === 'tool-call' && part.toolName === CHOOSE_VISIT && part.invalid !== true);
+  return showedPicker ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
+};
+
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
 const parseBody = (raw: Uint8Array): { messages?: unknown[]; locale?: string; product?: unknown } | null => {
   try {
@@ -496,7 +511,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
      * token without the permission) or without a question to log. A log that fails, is refused or runs past LOG_TIMEOUT_MS
      * never changes the customer's turn: the reply is already written, so the log only warns, and this never throws.
      */
-    const logTurn = async (event: { content: Parameters<typeof turnReplyOf>[0]; toolResults: Parameters<typeof turnFactsOf>[0] }) => {
+    const logTurn = async (event: { content: Parameters<typeof loggedReplyOf>[0]; toolResults: Parameters<typeof turnFactsOf>[0] }) => {
       if (!logTool?.execute || question === '' || resumed) return;
       // The call's own limit, not the request's signal: a customer who closes the chat after the last word doesn't cut the log.
       const timeout = AbortSignal.timeout(LOG_TIMEOUT_MS);
@@ -506,8 +521,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
         const answer = await logTool.execute(
           {
             message: question,
-            // A long turn is logged cut to what the tool takes: refused whole, it wouldn't be logged at all.
-            reply: cutTo(turnReplyOf(event.content), MAX_REPLY),
+            // A long turn is logged cut to what the tool takes (the note included): refused whole, it wouldn't be logged at all.
+            reply: cutTo(loggedReplyOf(event.content), MAX_REPLY),
             knowledgeFound,
             handedOff,
             ...(questionReference ? { questionReference } : {}),

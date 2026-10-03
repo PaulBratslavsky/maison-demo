@@ -1530,6 +1530,38 @@ describe('the end-of-turn log', () => {
         },
       ],
     });
+  /** A model that says `before`, then calls a tool with `input`, and nothing after: a turn that ends at a call the tool has no execute for (choose_visit). */
+  const speaksThenCalls = (before: string, toolName: string, input: unknown) =>
+    new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 't1' },
+              { type: 'text-delta', id: 't1', delta: before },
+              { type: 'text-end', id: 't1' },
+              { type: 'tool-call', toolCallId: 'call-1', toolName, input: JSON.stringify(input) },
+              { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+            ],
+          }),
+        },
+      ],
+    });
+  /**
+   * A model that calls choose_visit with `first` and then, once it is told why that was refused, with `second`: the
+   * second call is a valid one, so the turn ends there.
+   */
+  const callsTwice = (first: unknown, second: unknown) =>
+    new MockLanguageModelV4({
+      doStream: [first, second].map((input, index) => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'tool-call', toolCallId: `call-${index + 1}`, toolName: CHOOSE_VISIT, input: JSON.stringify(input) },
+            { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+          ],
+        }),
+      })) as any,
+    });
   /**
    * A model that calls search_knowledge in its first step and fails in its second: the call throws (`how` is 'throws'), or
    * its stream gives some words and then an error chunk ('error chunk'). A step has finished by then, so the SDK still
@@ -1649,6 +1681,45 @@ describe('the end-of-turn log', () => {
     });
     const input = await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, tools, model);
     expect(input).toMatchObject({ reply: '', knowledgeFound: true });
+  });
+
+  // A turn that ends at a visit picker (the model's choose_visit call, which has no execute) has no words after it: the
+  // customer's answer comes in a later request, which isn't logged (one inquiry per customer message). So the log says what
+  // the concierge did, or the labeller sees a customer with no answer and every visit request lands in Needs an answer.
+  const PICKER_NOTE = '(The concierge showed a visit picker so the customer can request a visit.)';
+  const picker = { productSlugs: ['weekender-50'] };
+
+  it('logs the note as the reply of a turn that ends at a visit picker with no words before it, in either chat language', async () => {
+    for (const locale of ['en', 'ja']) {
+      const input = await loggedBy({ messages: [say('Can we schedule one?')], locale }, {}, callsThenReplies(CHOOSE_VISIT, picker));
+      expect(input, locale).toStrictEqual({ message: 'Can we schedule one?', reply: PICKER_NOTE, knowledgeFound: false, handedOff: false, locale });
+    }
+  });
+
+  it('logs the words before the call, a blank line and then the note, and shows the customer only the words', async () => {
+    const log = logInquiry();
+    const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+    const model = speaksThenCalls('Here are the boutiques.', CHOOSE_VISIT, picker);
+    const events = eventsOf(await (await handleConcierge(ask('Bearer mcp_at_x', { messages: [say('Can we schedule one?')], locale: 'en' }), deps({ createMcpClient, model }))).text());
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    expect(log.execute).toHaveBeenCalledTimes(1);
+    expect(log.execute.mock.calls[0][0]).toMatchObject({ reply: `Here are the boutiques.\n\n${PICKER_NOTE}` });
+    expect(wordsOf(events)).toBe('Here are the boutiques.'); // the note is for staff: it never reaches the chat
+  });
+
+  it("logs a refused choose_visit call as any other turn: no picker showed, so the note isn't true", async () => {
+    // The model is told why its call was refused, and answers: that reply is the turn's.
+    expect(await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, {}, callsThenReplies(CHOOSE_VISIT, {}))).toMatchObject({ reply: 'Noted.' });
+    // Refused, then a call that shows the picker: the note once.
+    expect(await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, {}, callsTwice({}, picker))).toMatchObject({ reply: PICKER_NOTE });
+  });
+
+  it("cuts the reply to the 8000 characters after the note is added, as it cuts any reply", async () => {
+    const input = (await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, {}, speaksThenCalls('x'.repeat(9000), CHOOSE_VISIT, picker))) as { reply: string };
+    expect(input.reply).toBe('x'.repeat(8000));
+    // A reply that fits with its note is whole.
+    const fits = (await loggedBy({ messages: [say(QUESTION)], locale: 'en' }, {}, speaksThenCalls('x'.repeat(7000), CHOOSE_VISIT, picker))) as { reply: string };
+    expect(fits.reply).toBe(`${'x'.repeat(7000)}\n\n${PICKER_NOTE}`);
   });
 
   it('cuts the reply it logs to the 8000 characters log_inquiry takes, so a long turn is logged and not refused whole, and the customer still reads all of it', async () => {
