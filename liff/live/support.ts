@@ -94,19 +94,34 @@ export const saysConfirmed = (text: string): boolean =>
     .split(CLAUSE_END)
     .some((clause) => [...clause.matchAll(CONFIRMED)].some((claim) => !STILL_TO_COME_BEFORE.test(clause.slice(0, claim.index))));
 
-/** "I've requested", "I booked", "we have reserved": a speaker who says they made the request. Not "I haven't requested". */
-const REQUESTED_BY_SPEAKER = /\b(?:I|we)(?:'ve|’ve| have)?\s+(?:just\s+|already\s+)?(?:requested|booked|reserved|scheduled|submitted)\b/i;
-/** "Your visit is requested", "the request has been sent", "an appointment was booked". */
-const REQUESTED_STATE = /\b(?:visit|appointment|request|booking|reservation)\s+(?:is|has been|was)\s+(?:now\s+)?(?:requested|booked|reserved|scheduled|sent|submitted|placed)\b/i;
-/** The same in Japanese: リクエストを送信しました, ご予約いたしました, 承りました. Not 送信しましたら ("once it is sent"). */
-const REQUESTED_JA = /(?:リクエスト|予約|手配|送信|申し込み)(?:を)?(?:いたしました|しました|致しました)(?![らか])|承りました/;
+/** "I've requested", "we have placed", "I've sent your request": a speaker who says they made the request. Not "I haven't requested", and not "I've sent the details to the form". */
+const REQUESTED_BY_SPEAKER =
+  /\b(?:I|we)(?:['’]ve| have)?\s+(?:(?:just|already|now|successfully)\s+)*(?:(?:requested|booked|reserved|scheduled|submitted|arranged|placed)\b|(?:sent|made|filed|put in|set up)\s+(?:the|your|a|an)\s+(?:(?:visit|boutique|appointment)\s+)?(?:request|booking|reservation|appointment|visit)\b)/i;
+/** "Your visit is requested", "your visit to Ginza on Saturday has been booked", "the request is all sent". */
+const REQUESTED_STATE =
+  /\b(?:visit|appointment|request|booking|reservation)\b[^.!?;:\n]{0,50}?\b(?:is|was|has\s+(?:(?:now|already)\s+)?been)\s+(?:(?:now|all|already|officially)\s+)*(?:requested|booked|reserved|scheduled|submitted|sent|placed)\b/i;
+/** "You're booked for Saturday", "you have been booked in". */
+const YOURE_BOOKED = /\byou(?:['’]re| are| have been|['’]ve been)\s+(?:(?:all|now|already)\s+)*booked\b/i;
+/** A request still to come: "when you tap Send request", "once you send it". */
+const REQUEST_STILL_TO_COME = /\b(?:once|when|whenever|after|as soon as|until|till|before|if|whether)\b/i;
+/**
+ * The same in Japanese: リクエストをお送りしました, ご予約いたしました, ご予約を承りました, ご予約が完了しました. Not
+ * 送信しましたら ("once it is sent"), and not ご要望を承りました ("I have your wishes"), which claims no request.
+ */
+const REQUESTED_JA =
+  /(?:リクエスト|予約|手配|送信|お送り|お取り|申し込み|受け付け|登録|確保)(?:を)?(?:いたしました|致しました|しました)(?![らか後])|(?:予約|リクエスト)(?:を|は|が)?(?:承りました|受け付けました|済み|完了(?:いたし|し)(?:ました|ております))|リクエストを送りました/;
 
 /**
  * Whether a reply, in English or Japanese, says a visit is already requested or booked. Before the customer taps Send
- * request in the visit picker, nothing is: the model only shows the form. "Tap Send request", "once you send it" and
- * "I've filled in Saturday at 2 pm" are fine.
+ * request in the visit picker, nothing is: the model only shows the form. A clause about a request still to come is
+ * fine ("the request is sent when you tap Send request", "once you send it"), and so are "tap Send request" and "I've
+ * filled in Saturday at 2 pm". "Once you tap Send request, your request is sent" is caught: the comma starts a clause.
  */
-export const saysRequested = (text: string): boolean => REQUESTED_JA.test(text) || REQUESTED_BY_SPEAKER.test(text) || REQUESTED_STATE.test(text);
+export const saysRequested = (text: string): boolean =>
+  REQUESTED_JA.test(text) ||
+  text
+    .split(CLAUSE_END)
+    .some((clause) => !REQUEST_STILL_TO_COME.test(clause) && (REQUESTED_BY_SPEAKER.test(clause) || REQUESTED_STATE.test(clause) || YOURE_BOOKED.test(clause)));
 
 /** The weekday names an English reply mentions ("Saturday", "Saturdays"), as written in WEEKDAYS. */
 export const weekdaysIn = (text: string): string[] => WEEKDAYS.filter((name) => new RegExp(`\\b${name}s?\\b`, 'i').test(text));

@@ -547,8 +547,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     /**
      * choose_visit's check of its pieces: one find_boutiques call with them, as the picker will make. Only Strapi's
      * not_found refuses the call. Anything else lets it through: no find_boutiques for this token, a refusal the model
-     * can't put right, a call that breaks, or one that takes longer than PIECES_CHECK_TIMEOUT_MS. The form then shows its
-     * own error, with Try again.
+     * can't put right, a call that breaks, or one that takes longer than PIECES_CHECK_TIMEOUT_MS. The form then makes its
+     * own find_boutiques call, and shows its own error, with Try again, only if that fails too.
      */
     const unknownPieces: UnknownPieces = async (productSlugs) => {
       if (!findBoutiques) return null;

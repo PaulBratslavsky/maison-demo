@@ -54,7 +54,7 @@ Follow "Before going on stage" and "The 3-minute run" three times in local mode,
 
 Expected:
 - **Each step works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.
-- **The concierge never says a visit is confirmed.** It says the visit is requested, and that the boutique will confirm it on LINE.
+- **The concierge never says a visit is confirmed.** Before **Send request** it doesn't say the visit is requested. After it, it says the visit is requested, and that the boutique will confirm it on LINE.
 - **Book a visit works with the network off.** Strapi, the app, the mock and the local model all run on the laptop. Only the LINE confirmation fails: its row says "not sent", and **Send again** sends it once the network is back.
 
 Check these once, in the admin:

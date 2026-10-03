@@ -208,6 +208,13 @@ describe("the booking test's reply checks", () => {
       'ご来店のリクエストを送信しました。',
       '土曜日14時でご予約いたしました。',
       'ご予約を承りました。',
+      "I've sent the request to Ginza.",
+      "I've set up your visit for Saturday at 2 pm.",
+      "You're booked for Saturday at 2 pm at Ginza.",
+      'Your visit to Ginza on Saturday at 2 pm is requested.',
+      'Your visit is all booked.',
+      'リクエストをお送りしました。',
+      'ご予約が完了しました。',
     ];
     const notRequested = [
       'Tap Send request to ask Ginza for Saturday at 2 pm.',
@@ -218,6 +225,10 @@ describe("the booking test's reply checks", () => {
       "I've made a short list of three travel pieces, and I've sent the details to the form below.",
       'リクエストを送信してください。',
       'リクエストを送信しましたら、ブティックがLINEでお知らせします。',
+      'The request is sent when you tap Send request.',
+      'Your request is sent to Ginza once you tap Send.',
+      'ご要望を承りました。フォームをご用意しました。',
+      'ご来店のご希望を承ります。',
     ];
     for (const reply of requested) expect.soft(saysRequested(reply), reply).toBe(true);
     for (const reply of notRequested) expect.soft(saysRequested(reply), reply).toBe(false);
