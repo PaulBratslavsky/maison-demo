@@ -201,10 +201,10 @@ LIVE_MODEL=claude npm run test:live   # the visit picker's cases on Claude, with
 
 ## Deployment
 
-- **The app** (`liff/`) deploys to [Vercel](https://vercel.com) as a Next.js project. Its settings are the Vercel project's environment variables, with the names in `liff/.env.example`.
+- **The app** (`liff/`) deploys to [Vercel](https://vercel.com) as a Next.js project. Its settings are the Vercel project's environment variables, listed in [Production settings](docs/production.md#production-settings).
 - **Strapi** (`strapi/`) deploys to [Strapi Cloud](https://strapi.io/cloud). Never run `npm run setup` against it: the steps there are done by hand.
 
-> The Strapi Cloud steps and the production notes are in [Deploying and running in production](docs/production.md).
+> The production settings for Vercel and Strapi Cloud, the [first-time setup on Strapi Cloud](docs/production.md#first-time-setup-on-strapi-cloud) and the production notes are in [Deploying and running in production](docs/production.md).
 
 ---
 
@@ -217,7 +217,7 @@ LIVE_MODEL=claude npm run test:live   # the visit picker's cases on Claude, with
 | [Running Maison as a LINE MINI App](docs/line-mini-app.md) | The integration slide, what's ready for QBurst, and running the app on a LINE MINI App channel |
 | [Ops tools for an agent](docs/ops-tools.md) | The ops tools, and how to connect Claude Desktop |
 | [Testing](docs/testing.md) | Unit, browser, API and live tests, and Maison's own suites |
-| [Deploying and running in production](docs/production.md) | Production notes, and the steps on Strapi Cloud |
+| [Deploying and running in production](docs/production.md) | The production settings, the first-time setup on Strapi Cloud, and production notes |
 | [The Maison plugin in this repo](docs/maison-plugin.md) | Where the plugin lives, how it shares Strapi's packages, and how to work on it |
 | [Running the talk demo](docs/talk-demo.md) | The talk's setup, checklist, 3-minute run, rehearsal and backup video |
 | [The Maison plugin's README](strapi/src/plugins/maison/README.md) | The plugin's full reference: tools, routes, permissions and admin pages |
