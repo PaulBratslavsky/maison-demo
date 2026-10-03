@@ -50,10 +50,10 @@ Set these under the project's **Settings** → **Variables**, for its environmen
 | `MCP_ENABLED` | Strapi's MCP server at `/mcp`, where Maison's tools live. | No | `true`, the default. Leave it unset. |
 
 Never set these on Strapi Cloud:
-- **`DATABASE_*`.** Strapi Cloud injects its own PostgreSQL connection, and stops when you add one of these (Strapi's [Database](https://docs.strapi.io/cloud/advanced/database) page).
+- **`DATABASE_*`.** Strapi Cloud injects its own PostgreSQL connection, and stops injecting it when you add one of these (Strapi's [Database](https://docs.strapi.io/cloud/advanced/database) page).
 - **`HOST` and `PORT`.** The production config listens on `0.0.0.0` and on Cloud's port. `HOST=127.0.0.1`, as in `strapi/.env.example`, would cut Strapi off from Cloud's proxy.
 - **`NODE_ENV`.** Strapi Cloud sets it to `production`.
-- **`LINE_VERIFY_URL`, `MAISON_LINE_API_BASE_URL` and `AI_BASE_URL`.** They point at stand-ins on a laptop.
+- **`LINE_VERIFY_URL`, `MAISON_LINE_API_BASE_URL` and `AI_BASE_URL`.** On a laptop they point at the verify mock, the LINE stand-in and a local model.
 - **`DEMO_ADMIN_EMAIL`, `DEMO_ADMIN_PASSWORD`, `STRAPI_URL`, `MAISON_SETUP_LIFF_ENV` and `MAISON_SETUP_OPS_TOKEN_FILE`.** They're inputs for `npm run setup`, which never runs against Strapi Cloud. Strapi doesn't read them.
 
 Redeploy after changing a variable: press **Save & deploy** in the **Variables** tab, or **Trigger deployment** on the project dashboard (Strapi's [Cloud deployments management](https://docs.strapi.io/cloud/projects/deploys)).
@@ -83,8 +83,8 @@ Never run `npm run setup` against Strapi Cloud. On a new Strapi Cloud project, t
    - **Token duration:** Unlimited
    - **Plugins** tab → **Maison:** tick only "MCP: send appointment confirmations".
 
-   Save, and copy the key Strapi shows: it's shown only once. Skip this token if no agent retries confirmations.
-9. **The "Maison app" client.** Open **MCP OAuth** → **OAuth clients**. If another client with the **LINE sign-in** badge is active, turn off its **Active** switch first: only one LINE client can be active, and turning it off ends its sessions. Then press **Add client**:
+   Save, and copy the key Strapi shows. Skip this token if no agent retries confirmations.
+9. **The "Maison app" client.** Open **MCP OAuth** in the sidebar, and go to its **OAuth clients** section. If another client with the **LINE sign-in** badge is active, turn off its **Active** switch first: only one LINE client can be active, and turning it off ends its sessions. Then press **Add client**:
    - **Name:** `Maison app`
    - **Customer sign-in:** "LINE: customers sign in with LINE". **Redirect URIs** and **Client type** then disappear.
    - **Admin token:** Maison customer. Only your own tokens are listed.
