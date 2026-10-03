@@ -133,40 +133,61 @@ const resolveDateTool = (locale: 'ja' | 'en', now: Date) =>
 const SLUG = /^[a-z0-9-]{1,120}$/;
 
 /**
+ * Strapi's reason when a choose_visit call names a piece it doesn't know (find_boutiques' not_found), or null when it
+ * knows every piece or the check couldn't tell.
+ */
+type UnknownPieces = (productSlugs: string[]) => Promise<string | null>;
+
+/**
  * choose_visit's input: a strict object, as resolve_date's, so a key it doesn't have is refused with its name, and the
  * same tidying (tidyInput): blanks and nulls mean "not given", case and spaces don't count, and a locale is ignored. The
  * picker checks the rest against the boutiques' hours and stock (lib/visit-picker.ts): a day or a time the call gets wrong
- * falls back, and is never sent as it is.
+ * falls back, and is never sent as it is. A piece can't fall back: Strapi refuses the picker's whole find_boutiques call
+ * for a piece it doesn't know, which would leave a form with no boutiques. So input with nothing else wrong is checked
+ * with `unknownPieces`, and Strapi's reason refuses the call: the model reads it and calls again (rule 6).
  */
-const chooseVisitInput = z.preprocess(
-  tidyInput,
-  z.strictObject({
-    productSlugs: z
-      .array(z.string().regex(SLUG, 'Use product slugs, such as "weekender-50".'))
-      .min(1)
-      .max(5)
-      .describe('The pieces the customer wants to see: 1 to 5 product slugs, from search_products or view_product.'),
-    boutique: z.string().regex(SLUG, 'Use a boutique slug, such as "ginza".').optional().describe('Only when the customer named a boutique: its slug, such as "ginza".'),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD: the date resolve_date returned.').optional().describe('Only when the customer named a day: the date resolve_date returned, YYYY-MM-DD.'),
-    time: z
-      .string()
-      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM, 24-hour: 2 pm is "14:00".')
-      .optional()
-      .describe('Only when the customer named a time: HH:MM, 24-hour, such as "14:00" for 2 pm.'),
-  })
-);
+const chooseVisitInput = (unknownPieces: UnknownPieces) =>
+  z.preprocess(
+    tidyInput,
+    z
+      .strictObject({
+        productSlugs: z
+          .array(z.string().regex(SLUG, 'Use product slugs, such as "weekender-50".'))
+          .min(1)
+          .max(5)
+          .describe('The pieces the customer wants to see: 1 to 5 product slugs, from search_products or view_product.'),
+        boutique: z.string().regex(SLUG, 'Use a boutique slug, such as "ginza".').optional().describe('Only when the customer named a boutique: its slug, such as "ginza".'),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD: the date resolve_date returned.').optional().describe('Only when the customer named a day: the date resolve_date returned, YYYY-MM-DD.'),
+        time: z
+          .string()
+          .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM, 24-hour: 2 pm is "14:00".')
+          .optional()
+          .describe('Only when the customer named a time: HH:MM, 24-hour, such as "14:00" for 2 pm.'),
+      })
+      .superRefine(
+        async ({ productSlugs }, context) => {
+          const reason = await unknownPieces(productSlugs);
+          if (reason !== null) context.addIssue({ code: 'custom', path: ['productSlugs'], message: reason });
+        },
+        // Only for input with nothing else wrong: the check is a call to Strapi.
+        { when: (payload) => payload.issues.length === 0 }
+      )
+  );
 
 /**
  * The app's own tool for a visit: it shows the customer the visit picker, the product page's booking form, filled in
  * from the call. It has no execute: the model's call ends the step loop and reaches the browser as a tool-choose_visit
  * part waiting for its output, which the picker adds (addToolOutput) once the customer has sent the request or closed it.
  */
-const chooseVisitTool = () =>
+const chooseVisitTool = (unknownPieces: UnknownPieces) =>
   tool({
     description:
       'Shows the customer the visit picker in the chat: the form to request a boutique visit, filled in with what you pass. Pass productSlugs, the pieces to see, and only what the customer named: the boutique slug, the date resolve_date returned, and the time as HH:MM (24-hour). The customer checks it and sends the request there, so your reply stops here until they answer. It answers status "requested", with the visit, once the customer has sent it, or status "closed" when they closed the picker without a request.',
-    inputSchema: chooseVisitInput,
+    inputSchema: chooseVisitInput(unknownPieces),
   });
+
+/** How long choose_visit's check of its pieces may take: Strapi is close, and the reply waits for it. */
+const PIECES_CHECK_TIMEOUT_MS = 5000;
 
 export interface ConciergeDeps {
   model: LanguageModel;
@@ -300,6 +321,23 @@ const recordedResult = (question: RecordedQuestion) => {
 const refusalTextOf = (answer: unknown): string | undefined => {
   const item = isObject(answer) && answer.isError === true && Array.isArray(answer.content) ? answer.content.find((part) => isObject(part) && part.type === 'text') : undefined;
   return isObject(item) && typeof item.text === 'string' ? item.text.slice(0, 300) : undefined;
+};
+
+/**
+ * Strapi's words for a not_found refusal, as a Maison tool answers one (an isError result with its error as JSON): its
+ * message and its hint. Null for any other answer.
+ */
+const notFoundOf = (answer: unknown): string | null => {
+  const item = isObject(answer) && answer.isError === true && Array.isArray(answer.content) ? answer.content.find((part) => isObject(part) && part.type === 'text') : undefined;
+  if (!isObject(item) || typeof item.text !== 'string') return null;
+  let error: unknown;
+  try {
+    error = (JSON.parse(item.text) as { error?: unknown } | null)?.error;
+  } catch {
+    return null; // not JSON: no refusal of Strapi's
+  }
+  if (!isObject(error) || error.code !== 'not_found' || typeof error.message !== 'string') return null;
+  return [error.message, error.hint].filter((words) => typeof words === 'string' && words !== '').join(' ');
 };
 
 /** What a hand-off that recorded nothing says, for the log: Strapi's refusal as it gave it, or that its answer has no reference. */
@@ -505,7 +543,24 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     const resumed = messages.at(-1)?.role === 'assistant';
     // The Maison tools, with the chat's locale, and with the hand-off an empty knowledge search makes on its own.
     const maisonTools = withAutoHandOff(await withConversationLocale(mcpTools, locale), { question, piece, locale });
-    const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now), [CHOOSE_VISIT]: chooseVisitTool() };
+    const findBoutiques = mcpTools.find_boutiques?.execute;
+    /**
+     * choose_visit's check of its pieces: one find_boutiques call with them, as the picker will make. Only Strapi's
+     * not_found refuses the call. Anything else lets it through: no find_boutiques for this token, a refusal the model
+     * can't put right, a call that breaks, or one that takes longer than PIECES_CHECK_TIMEOUT_MS. The form then shows its
+     * own error, with Try again.
+     */
+    const unknownPieces: UnknownPieces = async (productSlugs) => {
+      if (!findBoutiques) return null;
+      try {
+        const signal = AbortSignal.any([request.signal, AbortSignal.timeout(PIECES_CHECK_TIMEOUT_MS)]);
+        const answer = await findBoutiques({ productSlugs, locale }, { toolCallId: 'check-pieces', messages: [], context: undefined, abortSignal: signal });
+        return notFoundOf(answer);
+      } catch {
+        return null;
+      }
+    };
+    const tools = { ...maisonTools, resolve_date: resolveDateTool(locale, now), [CHOOSE_VISIT]: chooseVisitTool(unknownPieces) };
     /**
      * Logs the finished turn in Strapi as an inquiry, for the staff's Inquiries tab. Nothing is logged without the tool (a
      * token without the permission) or without a question to log. A log that fails, is refused or runs past LOG_TIMEOUT_MS

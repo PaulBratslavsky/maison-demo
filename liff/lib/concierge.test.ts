@@ -691,6 +691,93 @@ describe('the visit picker: choose_visit', () => {
     }
   });
 
+  /** find_boutiques as the MCP client gives it, answering with `answer`: each input it gets is recorded. */
+  const findBoutiques = (answer: (options: { abortSignal?: AbortSignal }) => Promise<unknown>) => {
+    const received: unknown[] = [];
+    const properties = { productSlugs: { type: 'array', items: { type: 'string' } }, date: { type: 'string' }, locale: { type: 'string', enum: ['ja', 'en'] } };
+    const findTool = dynamicTool({
+      description: 'Lists boutiques.',
+      inputSchema: jsonSchema({ type: 'object', properties, additionalProperties: false }),
+      execute: async (input, options) => {
+        received.push(input);
+        return answer(options);
+      },
+    });
+    return { received, ...fakeMcp({ find_boutiques: findTool }) };
+  };
+  /** Strapi's refusal, as a Maison tool answers it: an isError result with its error as JSON. */
+  const refusal = (code: string, message: string, hint: string) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message, hint } }) }] });
+  const NOT_FOUND = refusal('not_found', 'No published product "weekender-5".', 'Call search_products to find valid product slugs.');
+  const BOUTIQUES = { content: [{ type: 'text', text: '{"date":null,"boutiques":[]}' }], structuredContent: { date: null, boutiques: [] } };
+  /** What the model was shown of its refused calls, the step after them: the errors' text, with the JSON's quotes unescaped. */
+  const errorsShown = (model: MockLanguageModelV4) =>
+    model.doStreamCalls[1].prompt
+      .flatMap((message) => (message.role === 'tool' ? message.content : []))
+      .map((part) => (part.type === 'tool-result' && part.output.type === 'error-text' ? part.output.value : ''))
+      .join('\n')
+      .replaceAll('\\"', '"');
+
+  // The picker asks find_boutiques for the pieces, and Strapi refuses the whole call for one it doesn't know: a picker
+  // with no boutiques to offer, which Try again can't mend. So the call is checked first, and refused as the model's.
+  it("refuses choose_visit for a piece Strapi doesn't know, with Strapi's own words, so the model looks it up and calls again: no picker shows", async () => {
+    const strapi = findBoutiques(async () => NOT_FOUND);
+    const model = callsThenReplies(CHOOSE_VISIT, { productSlugs: ['weekender-5'], boutique: 'ginza' });
+    const events = await converse({ ...hello, locale: 'en' }, { createMcpClient: strapi.createMcpClient, model });
+    const picker = (await replyOf(events)).parts.find((part) => part.type === `tool-${CHOOSE_VISIT}` || part.type === 'dynamic-tool');
+    expect(picker).toMatchObject({ state: 'output-error' });
+    expect(events.some((event) => event.type === 'tool-input-error')).toBe(true);
+    expect(model.doStreamCalls).toHaveLength(2);
+    expect(errorsShown(model)).toContain('No published product "weekender-5". Call search_products to find valid product slugs.');
+    expect(strapi.received).toEqual([{ productSlugs: ['weekender-5'], locale: 'en' }]);
+  });
+
+  it('shows the picker when Strapi knows every piece: one find_boutiques call for them, in the chat language', async () => {
+    const strapi = findBoutiques(async () => BOUTIQUES);
+    const model = callsThenReplies(CHOOSE_VISIT, { productSlugs: ['weekender-50', 'cabin-case-55'] });
+    const events = await converse({ ...hello, locale: 'ja' }, { createMcpClient: strapi.createMcpClient, model });
+    expect(strapi.received).toEqual([{ productSlugs: ['weekender-50', 'cabin-case-55'], locale: 'ja' }]);
+    expect(model.doStreamCalls).toHaveLength(1);
+    const picker = (await replyOf(events)).parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`);
+    expect(picker).toMatchObject({ state: 'input-available', input: { productSlugs: ['weekender-50', 'cabin-case-55'] } });
+  });
+
+  it('asks Strapi nothing for input the schema refuses already', async () => {
+    for (const input of [{ productSlugs: ['Weekender 50'] }, { productSlugs: ['weekender-50'], note: 'For my father.' }, { productSlugs: ['weekender-50'], time: '2 pm' }]) {
+      const strapi = findBoutiques(async () => NOT_FOUND);
+      const events = await converse({ ...hello, locale: 'en' }, { createMcpClient: strapi.createMcpClient, model: callsThenReplies(CHOOSE_VISIT, input) });
+      expect(events.some((event) => event.type === 'tool-input-error'), JSON.stringify(input)).toBe(true);
+      expect(strapi.received, JSON.stringify(input)).toEqual([]);
+    }
+  });
+
+  // Anything but not_found can't be put right by the model: the form then shows its own error, with Try again.
+  it('shows the picker when the check fails otherwise: Strapi refuses for another reason, the call breaks or hangs, or the token has no find_boutiques', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    // The real signal, but quick: the five seconds' wait isn't what is under test.
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(ms === 5000 ? 20 : ms));
+    try {
+      const hangs = ({ abortSignal }: { abortSignal?: AbortSignal }) => new Promise((_, reject) => abortSignal?.addEventListener('abort', () => reject(abortSignal.reason)));
+      const failures: Record<string, ReturnType<typeof fakeMcp>> = {
+        'not signed in': findBoutiques(async () => refusal('not_signed_in', 'No signed-in LINE customer is attached to this session.', 'Sign in again.')),
+        'plain text': findBoutiques(async () => ({ isError: true, content: [{ type: 'text', text: 'Internal error' }] })),
+        breaks: findBoutiques(async () => Promise.reject(new TypeError('fetch failed'))),
+        hangs: findBoutiques(hangs),
+        'no find_boutiques': fakeMcp(),
+      };
+      for (const [name, { createMcpClient }] of Object.entries(failures)) {
+        const model = callsThenReplies(CHOOSE_VISIT, { productSlugs: ['weekender-50'] });
+        const events = await converse({ ...hello, locale: 'en' }, { createMcpClient, model });
+        expect(events.some((event) => event.type === 'tool-input-error'), name).toBe(false);
+        expect(model.doStreamCalls, name).toHaveLength(1);
+        const picker = (await replyOf(events)).parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`);
+        expect(picker, name).toMatchObject({ state: 'input-available' });
+      }
+      expect(timeout).toHaveBeenCalledWith(5000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it('drops a picker the customer moved past by writing: the model answers the new message, without an error', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {}); // a failed turn logs here
     try {
