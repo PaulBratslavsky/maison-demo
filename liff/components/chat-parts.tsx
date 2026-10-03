@@ -8,6 +8,7 @@ import { config } from '@/lib/config';
 import { COPY } from '@/lib/copy';
 import { visitTime, yen } from '@/lib/format';
 import { lineMessageUrl } from '@/lib/line-chat';
+import { messageLayout } from '@/lib/message-layout';
 import { handOffAt, toolPartOf, toolView, type RecordedHandOff } from '@/lib/tool-view';
 import type { Appointment, Locale, ProductCard } from '@/lib/types';
 import { CHOOSE_VISIT, pickerViewOf, type VisitPickerOutput } from '@/lib/visit-picker';
@@ -150,49 +151,39 @@ export interface PickerContext {
 }
 
 /**
- * An assistant message, in the mockup's order: its words and tool lines as they came, a run of tool lines kept together,
- * with a booking card right under the lines that made it, "Chat with Maison on LINE" under the card, the hand-off note,
- * once, under the line handOffAt names (a hand-off that went through: the model's hand_off_to_staff, or a search that
- * found nothing and carries the one the app made; otherwise, with the plain note, the last search that found nothing, or
- * a hand-off that failed), and the pieces a search found under the message's words. A visit picker sits under its line
- * (pickerViewOf): its form while it's the live one, then the visit's card, or a short line once closed or moved past.
+ * An assistant message, in the mockup's order (messageLayout in lib/message-layout.ts): its words and tool lines as they
+ * came, a run of tool lines kept together, with a booking card right under the lines that made it, "Chat with Maison on
+ * LINE" under the card, the hand-off note, once, under the line handOffAt names (a hand-off that went through: the
+ * model's hand_off_to_staff, or a search that found nothing and carries the one the app made; otherwise, with the plain
+ * note, the last search that found nothing, or a hand-off that failed), and the pieces a search found under the
+ * message's words, above any visit picker after them. A visit picker sits under its line (pickerViewOf): its form while
+ * it's the live one, then the visit's card, or a short line once closed or moved past.
  */
 export function AssistantParts({ parts, locale, picker }: { parts: Array<{ type: string; text?: string }>; locale: Locale; picker: PickerContext }) {
   const t = COPY[locale];
-  const blocks: ReactNode[] = [];
-  const found: ReactNode[] = [];
-  let lines: ReactNode[] = [];
-  let cards: ReactNode[] = [];
+  const layout = messageLayout<ReactNode>((lines, key) => (
+    <div key={`lines-${key}`} className="flex flex-col gap-1">
+      {lines}
+    </div>
+  ));
   const note = handOffAt(parts);
-  const endRun = () => {
-    if (lines.length > 0) {
-      blocks.push(
-        <div key={`lines-${blocks.length}`} className="flex flex-col gap-1">
-          {lines}
-        </div>
-      );
-    }
-    blocks.push(...cards);
-    lines = [];
-    cards = [];
-  };
   parts.forEach((part, index) => {
     if (part.type === 'text') {
       if (!part.text?.trim()) return;
-      endRun();
-      blocks.push(<ChatText key={index} text={part.text} />);
+      layout.words(<ChatText key={index} text={part.text} />);
       return;
     }
     const tool = toolPartOf(part);
     if (!tool) return;
     const view = toolView(tool, locale);
-    lines.push(<ToolLine key={index} text={view.line} failed={view.failed} />);
-    if (view.requestLine) lines.push(<ToolLine key={`request-${index}`} text={view.requestLine} failed={false} />);
+    if (tool.toolName === CHOOSE_VISIT) layout.picker();
+    layout.line(<ToolLine key={index} text={view.line} failed={view.failed} />);
+    if (view.requestLine) layout.line(<ToolLine key={`request-${index}`} text={view.requestLine} failed={false} />);
     if (tool.toolName === CHOOSE_VISIT) {
       const toolCallId = tool.toolCallId ?? '';
       const shown = pickerViewOf(tool, { live: toolCallId !== '' && toolCallId === picker.live, busy: picker.busy });
       if (shown.kind === 'form') {
-        cards.push(
+        layout.card(
           <VisitPicker
             key={`picker-${index}`}
             input={tool.input}
@@ -202,7 +193,7 @@ export function AssistantParts({ parts, locale, picker }: { parts: Array<{ type:
           />
         );
       } else if (shown.kind === 'closed' || shown.kind === 'unsent') {
-        cards.push(
+        layout.card(
           <p key={`picker-${index}`} data-testid="picker-note" className="text-body text-graphite">
             {shown.kind === 'closed' ? t.pickerClosed : t.pickerUnsent}
           </p>
@@ -210,7 +201,7 @@ export function AssistantParts({ parts, locale, picker }: { parts: Array<{ type:
       }
     }
     if (view.appointment) {
-      cards.push(
+      layout.card(
         <div key={`card-${index}`} className="flex flex-col gap-2.5">
           <BookingCard appointment={view.appointment} locale={locale} />
           <LineChat />
@@ -218,15 +209,9 @@ export function AssistantParts({ parts, locale, picker }: { parts: Array<{ type:
       );
     }
     if (note && index === note.index) {
-      cards.push(<HandOffNote key={`hand-off-${index}`} recorded={note.recorded} locale={locale} />);
+      layout.card(<HandOffNote key={`hand-off-${index}`} recorded={note.recorded} locale={locale} />);
     }
-    if (view.products) found.push(<ProductSuggestions key={`found-${index}`} products={view.products} locale={locale} />);
+    if (view.products) layout.grid(<ProductSuggestions key={`found-${index}`} products={view.products} locale={locale} />);
   });
-  endRun();
-  return (
-    <>
-      {blocks}
-      {found}
-    </>
-  );
+  return <>{layout.blocks()}</>;
 }
