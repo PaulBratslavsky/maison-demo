@@ -16,7 +16,7 @@ import { getMaison } from '@/lib/maison';
 import { pieceSlugOf } from '@/lib/piece-slug';
 import { errorOf, errorText } from '@/lib/status';
 import { tunnelHeaders } from '@/lib/tunnel';
-import { CHOOSE_VISIT, composerLocked, livePickerOf, resumesAfterPicker } from '@/lib/visit-picker';
+import { CHOOSE_VISIT, composerLocked, livePickerOf, resumesOncePerAnswer } from '@/lib/visit-picker';
 
 const CONCIERGE_TOOLS = ['browse_collections', 'search_products', 'view_product', 'find_boutiques', 'search_knowledge', 'request_appointment', 'my_appointments', 'hand_off_to_staff'];
 
@@ -54,9 +54,11 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
       }),
     []
   );
-  // After the customer answers a visit picker, the chat goes on by itself, and only then: never after a turn that ended
-  // on Strapi's tools (resumesAfterPicker, as useChat's sendAutomaticallyWhen).
-  const { messages, sendMessage, regenerate, status, error, addToolOutput } = useChat({ transport, sendAutomaticallyWhen: resumesAfterPicker });
+  // After the customer answers a visit picker, the chat goes on by itself, once for each answer, and only then: never
+  // after a turn that ended on Strapi's tools (resumesOncePerAnswer, as useChat's sendAutomaticallyWhen). It is made once
+  // for the chat, so the answers it has resumed for outlast every render.
+  const [resumesAfterAnswer] = useState(resumesOncePerAnswer);
+  const { messages, sendMessage, regenerate, status, error, addToolOutput } = useChat({ transport, sendAutomaticallyWhen: resumesAfterAnswer });
   const [draft, setDraft] = useState('');
   // A picker's request on its way: no message may move past the picker until it has its answer.
   const [pickerSending, setPickerSending] = useState(false);
@@ -76,7 +78,7 @@ export default function ConciergePage({ searchParams }: { searchParams: Promise<
   }, [messages, busy, error]);
 
   // The visit pickers: which one may send, and where the customer's answer goes: useChat's addToolOutput, by the call's
-  // id. Writing the answer resubmits the chat (resumesAfterPicker).
+  // id. Writing the answer resubmits the chat (resumesOncePerAnswer).
   const picker: PickerContext = {
     live: livePickerOf(messages),
     busy,

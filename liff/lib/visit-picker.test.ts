@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { Chat } from '@ai-sdk/react';
+import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
+import { describe, expect, it, vi } from 'vitest';
 
 import { bookingState, isBookableDate } from './booking';
 import type { BoutiqueInfo } from './types';
@@ -12,9 +14,11 @@ import {
   pickerViewOf,
   requestedVisitOf,
   resumesAfterPicker,
+  resumesOncePerAnswer,
   visitPickerOutputOf,
   type PickerMessage,
   type PickerPart,
+  type VisitPickerOutput,
 } from './visit-picker';
 
 // 11:30 on Thursday 1 October 2026 in Tokyo. The form's chips run from Friday 2 to Thursday 15 October, and its default day
@@ -279,15 +283,138 @@ describe('resumesAfterPicker', () => {
     expect(resumesAfterPicker({ messages: [asked, concierge(step, requested, running)] })).toBe(false);
   });
 
-  it("stops once the concierge's reply has continued the message, even when that reply was empty", () => {
+  // A reply with no content at all never gets its step into the chat's messages: resumesOncePerAnswer covers that one.
+  it("stops once the concierge's reply has continued the message in a new step, words or an empty text part", () => {
     expect(resumesAfterPicker({ messages: [asked, concierge(step, requested, step, words('Your visit is requested.'))] })).toBe(false);
-    expect(resumesAfterPicker({ messages: [asked, concierge(step, requested, step)] })).toBe(false);
     expect(resumesAfterPicker({ messages: [asked, concierge(step, closed, step, words(''))] })).toBe(false);
   });
 
   it('never resubmits when the customer spoke last, or there is nothing', () => {
     expect(resumesAfterPicker({ messages: [asked, concierge(step, requested), user('Thank you.')] })).toBe(false);
     expect(resumesAfterPicker({ messages: [] })).toBe(false);
+  });
+});
+
+describe('resumesOncePerAnswer', () => {
+  const asked = user('Can we schedule one?');
+
+  it('resubmits once for each answer: the same answered picker never again, though the message still ends with it', () => {
+    const resumes = resumesOncePerAnswer();
+    const answered = [asked, concierge(step, words('Here is the picker.'), requested)];
+    expect(resumes({ messages: answered })).toBe(true);
+    // The reply came back empty, so the message is as it was.
+    expect(resumes({ messages: answered })).toBe(false);
+    expect(resumes({ messages: answered })).toBe(false);
+  });
+
+  it("resubmits for a later picker's answer, and keeps the step rule: nothing for a picker still waiting", () => {
+    const resumes = resumesOncePerAnswer();
+    expect(resumes({ messages: [asked, concierge(step, requested)] })).toBe(true);
+    const later = (state: string, extra: Partial<PickerPart> = {}) => picker(state, { toolCallId: 'call-2', ...extra });
+    const next = [asked, concierge(step, requested), user('And one for my mother?'), concierge(step, later('input-available'))];
+    expect(resumes({ messages: next })).toBe(false);
+    const answered = [asked, concierge(step, requested), user('And one for my mother?'), concierge(step, later('output-available', { output: { status: 'closed' } }))];
+    expect(resumes({ messages: answered })).toBe(true);
+    expect(resumes({ messages: answered })).toBe(false);
+  });
+
+  it("doesn't use an answer up while the step rule says no: a call beside the picker still running", () => {
+    const resumes = resumesOncePerAnswer();
+    const running = { type: 'dynamic-tool', toolName: 'find_boutiques', toolCallId: 'call-5', state: 'input-available' };
+    expect(resumes({ messages: [asked, concierge(step, requested, running)] })).toBe(false);
+    expect(resumes({ messages: [asked, concierge(step, requested, { ...running, state: 'output-available', output: { content: [] } })] })).toBe(true);
+  });
+
+  it('keeps its own answers: each chat makes one, and two never share', () => {
+    const answered = [asked, concierge(step, requested)];
+    const first = resumesOncePerAnswer();
+    expect(first({ messages: answered })).toBe(true);
+    expect(resumesOncePerAnswer()({ messages: answered })).toBe(true);
+    expect(first({ messages: answered })).toBe(false);
+  });
+
+  /**
+   * The page's chat as useChat builds it: the SDK's own Chat class, with `sendAutomaticallyWhen`, and a transport in
+   * place of /api/concierge. The customer's request gets the concierge's words and a choose_visit call. A resume gets
+   * what the server sends: the same message continued (its `start` carries that message's id), with `reply` in a new
+   * step, or nothing in it at all. Returns the chat once it has settled, and every request it sent.
+   */
+  const chatThroughPicker = async (answer: VisitPickerOutput, reply: string | null) => {
+    const requests: UIMessage[][] = [];
+    const streamOf = (chunks: UIMessageChunk[]) =>
+      new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+    const transport: ChatTransport<UIMessage> = {
+      sendMessages: async ({ messages }) => {
+        requests.push(structuredClone(messages));
+        // A cap, so a chat that resubmits again and again stops: this one fails, and the chat ends in an error.
+        if (requests.length > 6) throw new Error('Stopped after six requests.');
+        const last = messages.at(-1);
+        if (last?.role === 'user') {
+          return streamOf([
+            { type: 'start' },
+            { type: 'start-step' },
+            { type: 'text-start', id: 't1' },
+            { type: 'text-delta', id: 't1', delta: 'Here is the picker.' },
+            { type: 'text-end', id: 't1' },
+            { type: 'tool-input-start', toolCallId: 'call-1', toolName: CHOOSE_VISIT },
+            { type: 'tool-input-available', toolCallId: 'call-1', toolName: CHOOSE_VISIT, input: { productSlugs: ['weekender-50'], boutique: 'ginza' } },
+            { type: 'finish-step' },
+            { type: 'finish', finishReason: 'tool-calls' },
+          ]);
+        }
+        const words: UIMessageChunk[] =
+          reply === null
+            ? []
+            : [
+                { type: 'text-start', id: 't2' },
+                { type: 'text-delta', id: 't2', delta: reply },
+                { type: 'text-end', id: 't2' },
+              ];
+        return streamOf([{ type: 'start', messageId: last?.id }, { type: 'start-step' }, ...words, { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' }]);
+      },
+      reconnectToStream: async () => null,
+    };
+    const chat = new Chat<UIMessage>({ transport, sendAutomaticallyWhen: resumesOncePerAnswer() });
+    await chat.sendMessage({ text: 'Can we schedule one?' });
+    expect(livePickerOf(chat.messages)).toBe('call-1');
+    // The page hands the answer over as the picker does, and the chat resubmits on its own, unawaited.
+    await chat.addToolOutput({ tool: CHOOSE_VISIT, toolCallId: 'call-1', output: answer });
+    await vi.waitFor(() => expect(requests.length).toBeGreaterThan(1));
+    await vi.waitFor(() => expect(chat.status).not.toMatch(/submitted|streaming/));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // time for any resubmit after it
+    return { chat, requests };
+  };
+
+  for (const [name, answer] of [
+    ['requested', { status: 'requested', appointment }],
+    ['closed', { status: 'closed' }],
+  ] as const) {
+    it(`resubmits once when the reply after the answer (${name}) is empty, and leaves the customer the answered picker and the composer`, async () => {
+      const { chat, requests } = await chatThroughPicker(answer, null);
+      expect(requests).toHaveLength(2);
+      expect(requests[1].at(-1)?.parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`)).toMatchObject({ state: 'output-available', output: answer });
+      expect(chat.status).toBe('ready');
+      // The empty reply left the message as it was: the step rule alone would resubmit it again.
+      expect(resumesAfterPicker({ messages: chat.messages })).toBe(true);
+      const busy = chat.status === 'submitted' || chat.status === 'streaming';
+      expect(composerLocked(busy, false)).toBe(false);
+      const part = chat.messages.at(-1)?.parts.find((entry) => entry.type === `tool-${CHOOSE_VISIT}`) as PickerPart;
+      expect(pickerViewOf(part, { live: livePickerOf(chat.messages) === 'call-1', busy })).toEqual(
+        answer.status === 'requested' ? { kind: 'requested', appointment } : { kind: 'closed' }
+      );
+    });
+  }
+
+  it('resubmits once when the reply after the answer has words, which end the message', async () => {
+    const { chat, requests } = await chatThroughPicker({ status: 'requested', appointment }, 'Your visit is requested.');
+    expect(requests).toHaveLength(2);
+    expect(chat.status).toBe('ready');
+    expect(chat.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'text', text: 'Your visit is requested.' });
   });
 });
 

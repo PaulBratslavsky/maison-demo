@@ -149,20 +149,46 @@ export const pickerViewOf = (part: { state?: string; output?: unknown }, { live,
 /** Whether a part is a tool call: a Maison tool (`dynamic-tool`), or one of the concierge's own (`tool-<name>`). */
 const isCall = (part: PickerPart): boolean => part.type === 'dynamic-tool' || part.type.startsWith('tool-');
 
+/** The parts of a message's last step: those after its last step-start. */
+const lastStepOf = (message: PickerMessage) => message.parts.slice(message.parts.findLastIndex((part) => part.type === 'step-start') + 1);
+
+/** Whether a part is a picker the customer answered. */
+const isAnsweredPicker = (part: PickerPart): boolean => isPicker(part) && part.state === 'output-available';
+
 /**
- * useChat's sendAutomaticallyWhen: resubmit only when the last step of the last message holds an answered picker, and
- * every other call in that step has finished, wherever the picker sits in it (the model may call choose_visit beside
- * another tool). A picker the customer moved past stays unanswered and doesn't count: the server drops it
- * (ignoreIncompleteToolCalls). Not the SDK's lastAssistantMessageIsCompleteWithToolCalls, which would also resubmit a
- * turn that ended on Strapi's tools and could loop. The concierge's reply continues that same message in a new step (its
- * step-start), which turns this false.
+ * The step rule for the resume: the last step of the last message holds an answered picker, and every other call in that
+ * step has finished, wherever the picker sits in it (the model may call choose_visit beside another tool). A picker the
+ * customer moved past stays unanswered and doesn't count: the server drops it (ignoreIncompleteToolCalls). Not the SDK's
+ * lastAssistantMessageIsCompleteWithToolCalls, which would also resubmit a turn that ended on Strapi's tools and could
+ * loop. A reply with content continues that same message in a new step (its step-start), which turns this false. An
+ * empty reply doesn't, so the page resumes with resumesOncePerAnswer, not with this alone.
  */
 export const resumesAfterPicker = ({ messages }: { messages: readonly PickerMessage[] }): boolean => {
   const last = messages.at(-1);
   if (last?.role !== 'assistant') return false;
-  const step = last.parts.slice(last.parts.findLastIndex((part) => part.type === 'step-start') + 1);
-  const calls = step.filter(isCall);
-  return calls.some((part) => isPicker(part) && part.state === 'output-available') && calls.every((part) => isPicker(part) || !waits(part.state));
+  const calls = lastStepOf(last).filter(isCall);
+  return calls.some(isAnsweredPicker) && calls.every((part) => isPicker(part) || !waits(part.state));
+};
+
+/**
+ * useChat's sendAutomaticallyWhen, made once per chat: resumesAfterPicker, at most once for each answer, by its picker's
+ * call id. The SDK checks it again after every reply, and a reply with no content (no words and no call) never gets its
+ * new step-start into the chat's messages: the SDK adds the step-start to the message it builds, but writes that message
+ * to the chat only when a part with content follows. The step rule alone would then resubmit the same answer until the
+ * model wrote words, behind a spinner, with the composer locked.
+ */
+export const resumesOncePerAnswer = () => {
+  const resumed = new Set<string>();
+  return ({ messages }: { messages: readonly PickerMessage[] }): boolean => {
+    const last = messages.at(-1);
+    if (!last || !resumesAfterPicker({ messages })) return false;
+    const answers = lastStepOf(last)
+      .filter(isAnsweredPicker)
+      .map((part) => part.toolCallId ?? '');
+    if (answers.every((id) => resumed.has(id))) return false;
+    for (const id of answers) resumed.add(id);
+    return true;
+  };
 };
 
 /**

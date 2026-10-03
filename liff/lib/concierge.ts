@@ -499,8 +499,8 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     const question = lastQuestionOf(messages);
     /**
      * A request whose last message is the concierge's own carries the customer's answer to a visit picker, and the reply
-     * goes on in that message (resumesAfterPicker in lib/visit-picker.ts). Its turn was logged when the customer's message
-     * arrived: one inquiry per customer message.
+     * goes on in that message (resumesOncePerAnswer in lib/visit-picker.ts). Its turn was logged when the customer's
+     * message arrived: one inquiry per customer message.
      */
     const resumed = messages.at(-1)?.role === 'assistant';
     // The Maison tools, with the chat's locale, and with the hand-off an empty knowledge search makes on its own.
