@@ -75,7 +75,7 @@ export const COPY = {
     // Maison on LINE", so a customer can always reach a person.
     handOff: {
       fallback: 'このようなご質問には、MaisonのLINEトークで担当者がお答えします。',
-      note: (reference: string) => `ご質問（${reference}）をMaisonのクライアントアドバイザーにお伝えしました。11:00〜20:00（日本時間）に、MaisonのLINEトークでご返信いたします。`,
+      note: (reference: string) => `ご質問ありがとうございます。少々お待ちください。クライアントアドバイザーがお調べのうえ、このLINEトークでご返信いたします（${reference}）。`,
       send: 'LINEトークで送る',
       typed: (reference: string, question: string) => `アドバイザーへの質問（${reference}）：${question}`,
     },
@@ -188,7 +188,7 @@ export const COPY = {
     visitRequested: 'Request sent. The boutique will confirm on LINE.',
     handOff: {
       fallback: "Our team answers questions like this in Maison's LINE chat.",
-      note: (reference: string) => `Your question is with Maison's client advisors (${reference}). They reply in your LINE chat with Maison, 11:00–20:00 Japan time.`,
+      note: (reference: string) => `Thanks for asking! Give us a few minutes: one of our client advisors will message you here with the answer. (${reference})`,
       send: 'Send it in the LINE chat',
       typed: (reference: string, question: string) => `Question for a Maison advisor (${reference}): ${question}`,
     },
