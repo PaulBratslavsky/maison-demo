@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { BOOKING_DAYS, bookingDays, bookingState, hasStock, isBookableDate, shouldCloseOnKey } from './booking';
+import { BOOKING_DAYS, bookingDays, bookingState, defaultVisit, hasStock, isBookableDate, requestVisit, shouldCloseOnKey, visitArguments } from './booking';
 import { nextSaturday } from './format';
+import { SessionError } from './session';
 import type { BoutiqueInfo } from './types';
 
 // 11:30 on Thursday 1 October 2026 in Tokyo. Tomorrow there is Friday 2 October.
 const NOW = new Date('2026-10-01T02:30:00Z');
 const TUESDAY = '2026-10-06';
+const WEDNESDAY = '2026-10-07';
 
 const week = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 /**
@@ -27,9 +29,10 @@ const boutique = (slug: string, name: string, openOnDate: boolean, hoursOnDate =
   ],
 });
 const onTuesday = [boutique('ginza', 'Ginza Flagship', true), boutique('omotesando', 'Omotesando', true), boutique('osaka', 'Osaka Shinsaibashi', false)];
+const onWednesday = [boutique('ginza', 'Ginza Flagship', true), boutique('omotesando', 'Omotesando', true), boutique('osaka', 'Osaka Shinsaibashi', true)];
 
 const sheet = (overrides: Partial<Parameters<typeof bookingState>[0]> = {}) =>
-  bookingState({ date: TUESDAY, boutique: 'ginza', time: '14:00', product: 'weekender-50', boutiques: onTuesday, loading: false, now: NOW, ...overrides });
+  bookingState({ date: TUESDAY, boutique: 'ginza', time: '14:00', products: ['weekender-50'], boutiques: onTuesday, loading: false, now: NOW, ...overrides });
 
 describe('bookingDays', () => {
   it("offers two weeks of days from tomorrow on Tokyo's calendar, each with its weekday", () => {
@@ -57,13 +60,31 @@ describe('bookingDays', () => {
   });
 });
 
+describe('defaultVisit', () => {
+  it("is the sheet's own start: Ginza, the next Saturday at least two days away, at 14:00", () => {
+    expect(defaultVisit(NOW)).toEqual({ boutique: 'ginza', date: '2026-10-03', time: '14:00' });
+    expect(defaultVisit(NOW).date).toBe(nextSaturday(NOW));
+    // On Friday 2 October, Saturday the 3rd is one day away: the default is the 10th.
+    expect(defaultVisit(new Date('2026-10-02T02:30:00Z')).date).toBe('2026-10-10');
+  });
+});
+
 describe('hasStock', () => {
   it('is true only where the boutique has at least one of the piece', () => {
     const [ginza, , osaka] = onTuesday;
-    expect(hasStock(ginza, 'weekender-50')).toBe(true);
-    expect(hasStock(osaka, 'weekender-50')).toBe(false);
-    expect(hasStock(osaka, 'cabin-case-55')).toBe(true);
-    expect(hasStock(ginza, 'passport-cover'), 'no stock line for the piece').toBe(false);
+    expect(hasStock(ginza, ['weekender-50'])).toBe(true);
+    expect(hasStock(osaka, ['weekender-50'])).toBe(false);
+    expect(hasStock(osaka, ['cabin-case-55'])).toBe(true);
+    expect(hasStock(ginza, ['passport-cover']), 'no stock line for the piece').toBe(false);
+  });
+
+  it('is true where the boutique has at least one of several pieces, and false where it has none of them', () => {
+    const [ginza, , osaka] = onTuesday;
+    expect(hasStock(osaka, ['weekender-50', 'cabin-case-55']), 'Osaka has the Cabin Case, not the Weekender').toBe(true);
+    expect(hasStock(osaka, ['cabin-case-55', 'weekender-50'])).toBe(true);
+    expect(hasStock(ginza, ['weekender-50', 'cabin-case-55'])).toBe(true);
+    expect(hasStock(osaka, ['weekender-50', 'passport-cover']), 'none of them').toBe(false);
+    expect(hasStock(ginza, []), 'no pieces at all').toBe(false);
   });
 });
 
@@ -101,7 +122,7 @@ describe('bookingState', () => {
   });
 
   it('is closed for Osaka on a Tuesday, with no time to send', () => {
-    const state = sheet({ boutique: 'osaka', product: 'cabin-case-55' });
+    const state = sheet({ boutique: 'osaka', products: ['cabin-case-55'] });
     expect(state.chosen?.slug).toBe('osaka');
     expect(state).toMatchObject({ validDate: true, dateProblem: null, open: false, slots: [], startTime: undefined });
   });
@@ -129,15 +150,101 @@ describe('bookingState', () => {
     const osakaFirst = [onTuesday[2], ...onTuesday.slice(0, 2)];
     expect(sheet({ boutique: 'osaka', boutiques: osakaFirst }).chosen?.slug).toBe('ginza');
     // Where it is, a pick of Osaka stands.
-    expect(sheet({ boutique: 'osaka', product: 'cabin-case-55' }).chosen?.slug).toBe('osaka');
+    expect(sheet({ boutique: 'osaka', products: ['cabin-case-55'] }).chosen?.slug).toBe('osaka');
   });
 
   it('has no boutique, and nothing to send, when no boutique has the piece', () => {
-    expect(sheet({ product: 'passport-cover' })).toMatchObject({ chosen: undefined, open: false, slots: [], startTime: undefined });
+    expect(sheet({ products: ['passport-cover'] })).toMatchObject({ chosen: undefined, open: false, slots: [], startTime: undefined });
   });
 
   it('falls back to the first slot when the picked time is not offered', () => {
     expect(sheet({ time: '09:00' }).startTime).toBe('11:00');
+  });
+});
+
+// The visit picker books several pieces at once: a boutique is offered when it has at least one of them.
+describe('bookingState for several pieces', () => {
+  const visit = (overrides: Partial<Parameters<typeof bookingState>[0]>) => sheet({ date: WEDNESDAY, boutiques: onWednesday, ...overrides });
+
+  it('offers a boutique that has one of them: Osaka, for the Weekender and the Cabin Case', () => {
+    const state = visit({ boutique: 'osaka', products: ['weekender-50', 'cabin-case-55'] });
+    expect(state.chosen?.slug).toBe('osaka');
+    expect(state).toMatchObject({ open: true, startTime: '14:00' });
+  });
+
+  it('falls back to the first boutique with one of them when the picked one has none', () => {
+    expect(visit({ boutique: 'osaka', products: ['weekender-50', 'passport-cover'] }).chosen?.slug).toBe('ginza');
+  });
+
+  it('has nothing to send when no boutique has any of them', () => {
+    expect(visit({ products: ['passport-cover', 'tote-soleil'] })).toMatchObject({ chosen: undefined, open: false, slots: [], startTime: undefined });
+  });
+
+  it('is the one-piece rule for one piece: Osaka, without the Weekender, falls back to Ginza on any day', () => {
+    expect(visit({ boutique: 'osaka', products: ['weekender-50'] }).chosen?.slug).toBe('ginza');
+  });
+});
+
+describe('requestVisit', () => {
+  const appointment = {
+    reference: 'APT-0042',
+    status: 'requested',
+    boutique: { slug: 'ginza', name: 'Ginza Flagship' },
+    requestedFor: '2026-10-03T14:00:00+09:00',
+    products: [{ slug: 'weekender-50', name: 'Weekender 50' }],
+    note: '',
+    confirmationSent: false,
+  };
+  /** What Maison answers to a request it stored, as the MCP client passes it on. */
+  const stored = { content: [{ type: 'text', text: JSON.stringify({ appointment }) }], structuredContent: { appointment } };
+  /** What Maison answers to a request it refuses (isError). */
+  const refusal = (code: string) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message: 'Refused.', hint: 'Ask for another time.' } }) }] });
+  const request = { boutique: 'ginza', products: ['weekender-50'], date: '2026-10-03', startTime: '14:00', note: '', locale: 'en' as const };
+
+  it("sends request_appointment as the sheet always has: the pieces, the start in Tokyo time and the customer's language", async () => {
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => stored as any);
+    expect(await requestVisit(callTool, request)).toEqual({ ok: true, appointment });
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool).toHaveBeenCalledWith('request_appointment', { boutique: 'ginza', productSlugs: ['weekender-50'], requestedFor: '2026-10-03T14:00:00+09:00', locale: 'en' });
+  });
+
+  it("sends the note trimmed, and only when there's something in it", () => {
+    expect(visitArguments({ ...request, note: '  For my father.\n' })).toMatchObject({ note: 'For my father.' });
+    expect(visitArguments({ ...request, note: ' \n ' })).not.toHaveProperty('note');
+  });
+
+  it('sends every piece of a visit for several, and the language of a Japanese chat', () => {
+    expect(visitArguments({ ...request, products: ['weekender-50', 'cabin-case-55'], locale: 'ja' })).toEqual({
+      boutique: 'ginza',
+      productSlugs: ['weekender-50', 'cabin-case-55'],
+      requestedFor: '2026-10-03T14:00:00+09:00',
+      locale: 'ja',
+    });
+  });
+
+  it("gives Maison's refusal as the problem, and no visit", async () => {
+    for (const code of ['too_many_open_requests', 'boutique_closed', 'in_the_past']) {
+      const outcome = await requestVisit(async () => refusal(code) as any, request);
+      expect(outcome, code).toEqual({ ok: false, problem: { code, message: 'Refused.', hint: 'Ask for another time.' } });
+    }
+  });
+
+  it("gives a failure on the way as the screens show it, and keeps a sign-in problem's code", async () => {
+    const offline = await requestVisit(async () => {
+      throw new TypeError('Failed to fetch');
+    }, request);
+    expect(offline).toEqual({ ok: false, problem: { code: 'network', message: 'Failed to fetch', hint: '' } });
+    const signIn = await requestVisit(async () => {
+      throw new SessionError('invalid_grant', 'LINE refused the ID token.');
+    }, request);
+    expect(signIn).toMatchObject({ ok: false, problem: { code: 'invalid_grant' } });
+  });
+
+  it('never takes a success without an appointment for a visit', async () => {
+    for (const answer of [{ content: [] }, { content: [], structuredContent: {} }, { content: [], structuredContent: { appointment: { reference: '' } } }]) {
+      const outcome = await requestVisit(async () => answer as any, request);
+      expect(outcome, JSON.stringify(answer)).toMatchObject({ ok: false, problem: { code: 'error' } });
+    }
   });
 });
 

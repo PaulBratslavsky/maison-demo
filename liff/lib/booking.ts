@@ -1,14 +1,28 @@
-import { isRealDate, timeSlots, tokyoDays, tomorrow } from './format';
-import type { BoutiqueInfo } from './types';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-/** Why a date can't be booked: the COPY key the sheet shows under the days. */
+import { isRealDate, nextSaturday, timeSlots, tokyoDays, tomorrow } from './format';
+import { toolErrorOf } from './mcp';
+import { errorOf, type ScreenError } from './status';
+import type { Appointment, BoutiqueInfo, Locale } from './types';
+
+/** Why a date can't be booked: the COPY key the form shows under the days. */
 export type DateProblem = 'chooseDate' | 'dateTooSoon';
 
-/** How many days the sheet offers, from tomorrow: two weeks. The concierge's calendar covers 14 days from today, so the sheet reaches one day further. */
+/** How many days the form offers, from tomorrow: two weeks. The concierge's calendar covers 14 days from today, so the form reaches one day further. */
 export const BOOKING_DAYS = 14;
 
+/** The boutique, day and time a booking form shows: a slug, YYYY-MM-DD and HH:MM. */
+export interface VisitChoice {
+  boutique: string;
+  date: string;
+  time: string;
+}
+
+/** What the form starts with when nothing else is asked for: Ginza, the next Saturday at least two days away, at 14:00. */
+export const defaultVisit = (now: Date = new Date()): VisitChoice => ({ boutique: 'ginza', date: nextSaturday(now), time: '14:00' });
+
 /**
- * The days the sheet offers, as chips: the next two weeks on Tokyo's calendar, from tomorrow. Each weekday comes up
+ * The days the form offers, as chips: the next two weeks on Tokyo's calendar, from tomorrow. Each weekday comes up
  * twice, and the default day, the next Saturday at least two days away, is always among them.
  */
 export const bookingDays = (now: Date = new Date()): Array<{ date: string; weekday: number }> => tokyoDays(BOOKING_DAYS + 1, now).slice(1);
@@ -18,21 +32,24 @@ export const isBookableDate = (date: string, now: Date = new Date()): boolean =>
 
 /**
  * No date, or an impossible one, asks for one; a real date today or in the past asks for a later one. The chips offer only
- * days from tomorrow, so a chosen day becomes too soon when Tokyo's midnight passes with the sheet open.
+ * days from tomorrow, so a chosen day becomes too soon when Tokyo's midnight passes with the form open.
  */
 export const dateProblem = (date: string, now: Date = new Date()): DateProblem | null =>
   isBookableDate(date, now) ? null : isRealDate(date) ? 'dateTooSoon' : 'chooseDate';
 
-/** Whether a boutique has the piece to see: at least one in its stock, in find_boutiques' answer for the product. */
-export const hasStock = (boutique: BoutiqueInfo, product: string): boolean =>
-  boutique.stock.some((line) => line.product === product && line.quantity > 0);
+/**
+ * Whether a boutique has something to see: at least one of the pieces in its stock, in find_boutiques' answer for them.
+ * For one piece, whether it has that piece.
+ */
+export const hasStock = (boutique: BoutiqueInfo, products: readonly string[]): boolean =>
+  boutique.stock.some((line) => products.includes(line.product) && line.quantity > 0);
 
 /**
- * The boutique the sheet uses: the one picked, or else the first listed, as the radios show. Only a boutique that has the
- * piece: one without it is a disabled radio, and is never chosen, even when picked before.
+ * The boutique the form uses: the one picked, or else the first listed, as the radios show. Only a boutique that has one
+ * of the pieces: one without any is a disabled radio, and is never chosen, even when picked before.
  */
-export const chooseBoutique = (boutiques: BoutiqueInfo[], slug: string, product: string): BoutiqueInfo | undefined => {
-  const withPiece = boutiques.filter((candidate) => hasStock(candidate, product));
+export const chooseBoutique = (boutiques: BoutiqueInfo[], slug: string, products: readonly string[]): BoutiqueInfo | undefined => {
+  const withPiece = boutiques.filter((candidate) => hasStock(candidate, products));
   return withPiece.find((candidate) => candidate.slug === slug) ?? withPiece[0];
 };
 
@@ -55,14 +72,14 @@ export const shouldCloseOnKey = (event: Pick<KeyboardEvent, 'key' | 'isComposing
   event.key === 'Escape' && !event.isComposing && event.keyCode !== 229;
 
 /**
- * The booking sheet's rules in one place: what it may send, and what it says when it may not. `boutiques` and
- * `loading` are find_boutiques' answer for the date and the `product`. The sheet may send only when `startTime` is set.
+ * The booking form's rules in one place: what it may send, and what it says when it may not. `boutiques` and `loading`
+ * are find_boutiques' answer for the date and the `products`. The form may send only when `startTime` is set.
  */
 export const bookingState = ({
   date,
   boutique,
   time,
-  product,
+  products,
   boutiques,
   loading,
   now = new Date(),
@@ -70,14 +87,63 @@ export const bookingState = ({
   date: string;
   boutique: string;
   time: string;
-  product: string;
+  products: readonly string[];
   boutiques: BoutiqueInfo[];
   loading: boolean;
   now?: Date;
 }) => {
   const validDate = isBookableDate(date, now);
-  const chosen = chooseBoutique(boutiques, boutique, product);
+  const chosen = chooseBoutique(boutiques, boutique, products);
   const open = isOpen(validDate, loading, chosen);
   const slots = slotsFor(open, chosen);
   return { validDate, dateProblem: dateProblem(date, now), chosen, open, slots, startTime: startTimeFrom(slots, time) };
+};
+
+/** What a booking form sends: the boutique, day and start it shows, the pieces, the customer's note, and the screen's language. */
+export interface VisitRequest {
+  boutique: string;
+  products: readonly string[];
+  date: string;
+  startTime: string;
+  note: string;
+  locale: Locale;
+}
+
+/** How a request went: the visit Strapi stored, or the problem the form shows (Maison's refusal, or a failure on the way). */
+export type VisitOutcome = { ok: true; appointment: Appointment } | { ok: false; problem: ScreenError };
+
+/**
+ * request_appointment's arguments, as the sheet has always sent them: the pieces, the start in Tokyo time, the note only
+ * when there's something in it (trimmed), and the customer's language, so the answer names the boutique and the pieces in it.
+ */
+export const visitArguments = (request: VisitRequest): Record<string, unknown> => ({
+  boutique: request.boutique,
+  productSlugs: [...request.products],
+  requestedFor: `${request.date}T${request.startTime}:00+09:00`,
+  ...(request.note.trim() ? { note: request.note.trim() } : {}),
+  locale: request.locale,
+});
+
+/**
+ * Sends a visit request with `callTool` (Maison's, for the form's screen) and says how it went. It never throws: a refusal
+ * is Maison's own error, and a failure on the way is the screens' (errorOf), which keeps a sign-in problem's OAuth code
+ * so the copy can say what to do. A success without an appointment is a problem too: there's no visit to show.
+ */
+export const requestVisit = async (
+  callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult>,
+  request: VisitRequest
+): Promise<VisitOutcome> => {
+  let result: CallToolResult;
+  try {
+    result = await callTool('request_appointment', visitArguments(request));
+  } catch (error) {
+    return { ok: false, problem: errorOf(error) };
+  }
+  const refusal = toolErrorOf(result);
+  if (refusal) return { ok: false, problem: refusal };
+  const appointment = (result.structuredContent as { appointment?: Appointment } | undefined)?.appointment;
+  if (typeof appointment?.reference !== 'string' || appointment.reference === '') {
+    return { ok: false, problem: { code: 'error', message: 'request_appointment answered without an appointment.', hint: '' } };
+  }
+  return { ok: true, appointment };
 };
