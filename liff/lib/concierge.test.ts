@@ -1292,6 +1292,52 @@ describe("the visit picker's safety net", () => {
     });
   });
 
+  /** The concierge's earlier message with a picker the customer answered (`output`), and the reply after it. */
+  const answeredPicker = (output: unknown, reply: string) => ({
+    id: 'a1',
+    role: 'assistant',
+    parts: [
+      { type: 'step-start' },
+      { type: `tool-${CHOOSE_VISIT}`, toolCallId: 'call-0', state: 'output-available', input: { productSlugs: ['cabin-case-55'] }, output },
+      { type: 'step-start' },
+      { type: 'text', text: reply },
+    ],
+  });
+  const REQUESTED = {
+    status: 'requested',
+    appointment: { reference: 'APT-0042', status: 'requested', boutique: { slug: 'ginza', name: 'Ginza Flagship' }, requestedFor: '2026-10-10T14:00:00+09:00', products: [CABIN_CASE], note: '', confirmationSent: false },
+  };
+
+  // A question about a visit already requested must not get a fresh picker, whose Send request would book it twice.
+  it('makes no extra call once a visit was requested in this chat: after that, the model alone decides', async () => {
+    await quietly(async (warn) => {
+      const requested = answeredPicker(REQUESTED, 'Your visit is requested. The boutique will confirm it on LINE.');
+      for (const asked of ['Is my booking confirmed?', 'Can I book a visit?']) {
+        const model = modelOf(step(words('It is requested, and the boutique will confirm it on LINE.')));
+        await converse({ messages: [say('Can I book a visit?'), requested, say(asked, 'u2')], locale: 'en', product: 'cabin-case-55' }, model);
+        expect(model.doStreamCalls, asked).toHaveLength(1);
+      }
+      // A picker closed without a request requested nothing: the customer may still want a visit.
+      const closed = modelOf(step(words(SLIPPED)), picks());
+      const { message } = await converse({ messages: [say('Can I book a visit?'), answeredPicker({ status: 'closed' }, 'Of course.'), say(ASKED, 'u2')], locale: 'en', product: 'cabin-case-55' }, closed);
+      expect(closed.doStreamCalls, 'closed').toHaveLength(2);
+      expect(pickerIn(message), 'closed').toMatchObject({ toolCallId: 'call-2', state: 'input-available' });
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it('makes no extra call when the turn called my_appointments: the customer asked about the visits they have', async () => {
+    await quietly(async (warn) => {
+      const tools = { my_appointments: maisonTool(() => ({ content: [{ type: 'text', text: '{"appointments":[]}' }], structuredContent: { appointments: [] } })) };
+      for (const asked of ['Do I have any appointments?', 'Can I book a visit?']) {
+        const model = modelOf(step([call('my_appointments', {}, 'call-1')], 'tool-calls'), step(words('You have no visits yet.')));
+        await converse({ messages: [say(asked)], locale: 'en', product: 'cabin-case-55' }, model, tools);
+        expect(model.doStreamCalls, `${asked}: the reply's own two calls, and no extra one`).toHaveLength(2);
+      }
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   it("makes no extra call on a resume: the picker's answer continues a turn that was the customer's", async () => {
     const answered = {
       id: 'a1',

@@ -493,6 +493,22 @@ const piecesFoundBy = ({ toolName, output }: { toolName: string; output: unknown
   return viewed ? [viewed] : [];
 };
 
+/**
+ * Whether the conversation holds a visit picker the customer answered with a request: a visit was requested in this chat.
+ * The answer's status is enough, whatever the visit it carries: a second picker after it could book the visit twice.
+ */
+const visitRequestedIn = (messages: UIMessage[]): boolean =>
+  messages.some((message) =>
+    message.parts.some((part) => {
+      const call = toolPartOf(part);
+      return call?.toolName === CHOOSE_VISIT && call.state === 'output-available' && isObject(call.output) && call.output.status === 'requested';
+    })
+  );
+
+/** Whether a turn's content holds a my_appointments call: the customer asked about the visits they have. */
+const callsMyAppointments = (content: ReadonlyArray<{ type: string; toolName?: string }>): boolean =>
+  content.some((part) => part.type === 'tool-call' && part.toolName === 'my_appointments');
+
 /** The tool calls in the conversation's earlier replies that came back whole, as the page sends them back (toolPartOf): each tool's name and result. */
 const earlierResultsOf = (messages: UIMessage[]): Array<{ toolName: string; output: unknown }> =>
   messages.flatMap((message) =>
@@ -715,15 +731,20 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
      * production it asked for the boutique, day and time in words instead. So a turn that ended whole (the caller checks
      * `failed`) gets one extra pass when all of these hold:
      * - it isn't a resume (the customer's answer to a picker);
-     * - the customer's message asks to book or visit (asksToVisit);
-     * - the turn made no choose_visit call, in any state, a refused one included (callsPicker);
+     * - the customer's message asks for a new visit, in the words of a request (asksToVisit);
+     * - no visit was requested in this chat yet (visitRequestedIn): after one, a question about it must not get a fresh
+     *   picker that books it twice, so the model alone decides;
+     * - the turn made no choose_visit call, in any state, a refused one included (callsPicker), and no my_appointments
+     *   call (callsMyAppointments): that customer asked about the visits they have;
      * - a piece is known: the page's, or one that search_products or view_product returned in this conversation, in an
      *   earlier reply or in this turn. Without one, asking which piece is the right reply.
      */
     const needsPickerPass = (turn: TurnRecord): boolean =>
       !resumed &&
       asksToVisit(question) &&
+      !visitRequestedIn(messages) &&
       !callsPicker(turn.content) &&
+      !callsMyAppointments(turn.content) &&
       (piece !== null || [...earlierResultsOf(messages), ...turn.toolResults].some((result) => piecesFoundBy(result).length > 0));
 
     /**
