@@ -3,6 +3,7 @@ import appointments from './appointments';
 import assistant from './assistant';
 import catalog from './catalog';
 import confirmations from './confirmations';
+import conversations from './conversations';
 import errors from './errors';
 import identity from './identity';
 import inquiries from './inquiries';
@@ -17,6 +18,7 @@ export default {
   assistant,
   catalog,
   confirmations,
+  conversations,
   errors,
   identity,
   inquiries,

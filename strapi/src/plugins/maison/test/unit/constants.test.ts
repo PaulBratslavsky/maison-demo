@@ -15,6 +15,7 @@ import {
   PLUGIN_ID,
   QUESTION_REASONS,
   QUESTION_STATUSES,
+  SAVED_CHATS,
   SENTIMENT_LABELS,
   TOOL_NAMES,
   UID,
@@ -86,5 +87,10 @@ describe('constants', () => {
       listTextChars: 300,
       draftChars: 2000,
     });
+  });
+
+  it('declares the saved chats: the content type, and how many the sidebar lists and how long a title is', () => {
+    expect(UID.conversation).toBe('plugin::maison.conversation');
+    expect(SAVED_CHATS).toEqual({ listRows: 100, titleChars: 80 });
   });
 });

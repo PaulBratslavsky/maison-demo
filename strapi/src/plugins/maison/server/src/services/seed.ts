@@ -321,19 +321,19 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   /**
-   * Deletes every inquiry, reading up to RESET_READ at a time until none are left, and answers how many it deleted. One
-   * read isn't enough: a busy concierge makes more inquiries than that. A delete that leaves its document there would
-   * make the next read answer it again for ever, so the reset stops, and says which one.
+   * Deletes every document of a content type, reading up to RESET_READ at a time until none are left, and answers how many it
+   * deleted. One read isn't enough: a busy concierge makes more inquiries than that. A delete that leaves its document there
+   * would make the next read answer it again for ever, so the reset stops, and says which one.
    */
-  const deleteEveryInquiry = async (): Promise<number> => {
+  const deleteEvery = async (uid: typeof UID.inquiry | typeof UID.conversation, noun: string): Promise<number> => {
     let deleted = 0;
     let previous = new Set<string>();
     for (;;) {
-      const batch = (await strapi.documents(UID.inquiry).findMany({ fields: ['documentId'], limit: RESET_READ })) as Array<{ documentId: string }>;
+      const batch = (await strapi.documents(uid).findMany({ fields: ['documentId'], limit: RESET_READ })) as Array<{ documentId: string }>;
       if (batch.length === 0) return deleted;
       const stuck = batch.find(({ documentId }) => previous.has(documentId));
-      if (stuck) throw new Error(`Inquiry ${stuck.documentId} is still there after it was deleted, so the reset stops.`);
-      for (const { documentId } of batch) await strapi.documents(UID.inquiry).delete({ documentId });
+      if (stuck) throw new Error(`${noun} ${stuck.documentId} is still there after it was deleted, so the reset stops.`);
+      for (const { documentId } of batch) await strapi.documents(uid).delete({ documentId });
       deleted += batch.length;
       previous = new Set(batch.map(({ documentId }) => documentId));
     }
@@ -373,7 +373,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * added, in every language, then every question and every inquiry (whether it is open, replied to or closed, and
      * however many there are), then every notification and appointment. The entries go first because a question is
      * where their ids are kept, so a reset that stops partway can run again and find them. Only entries a question
-     * names are deleted: the seeded product knowledge and the catalog stay.
+     * names are deleted: the seeded product knowledge and the catalog stay. The Ask tab's saved chats go last, every
+     * admin's: they quote the demo customers. The answer doesn't count them.
      */
     async resetDemoAppointments() {
       const questions = (await strapi.documents(UID.question).findMany({
@@ -384,12 +385,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       for (const documentId of knowledgeIds) await strapi.documents(UID.knowledge).delete({ documentId, locale: '*' });
       for (const q of questions) await strapi.documents(UID.question).delete({ documentId: q.documentId });
 
-      const inquiries = await deleteEveryInquiry();
+      const inquiries = await deleteEvery(UID.inquiry, 'Inquiry');
 
       const notifications = await strapi.documents(UID.notification).findMany({ fields: ['documentId'], limit: RESET_READ });
       for (const n of notifications) await strapi.documents(UID.notification).delete({ documentId: n.documentId });
       const appointments = await strapi.documents(UID.appointment).findMany({ fields: ['documentId'], limit: RESET_READ });
       for (const a of appointments) await strapi.documents(UID.appointment).delete({ documentId: a.documentId });
+      // The Ask tab's saved chats quote the demo customers, so they go with them: every admin's, however many there are.
+      await deleteEvery(UID.conversation, 'Saved chat');
       return {
         appointments: appointments.length,
         notifications: notifications.length,

@@ -527,6 +527,47 @@ describe('resetDemoAppointments', () => {
     expect(deletions(calls).map(([uid]) => uid)).toEqual([KNOWLEDGE, KNOWLEDGE]);
   });
 
+  describe('the saved chats of the Ask tab', () => {
+    const CONVERSATION = 'plugin::maison.conversation';
+    const chats = (count: number) => Array.from({ length: count }, (_, index) => ({ documentId: `c${index + 1}` }));
+    const chatDeletions = (calls: Call[]) => deletions(calls).flatMap(([uid, params]) => (uid === CONVERSATION ? [(params as { documentId: string }).documentId] : []));
+    const chatReads = (calls: Call[]) => calls.filter(({ uid, method }) => uid === CONVERSATION && method === 'findMany');
+
+    it('deletes every one of them, every admin\'s, after the appointments, and does not count them in its answer', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [CONVERSATION]: chats(3) });
+      expect(await seedService({ strapi }).resetDemoAppointments()).toEqual({ appointments: 3, notifications: 2, questions: 3, inquiries: 3, knowledge: 2 });
+      expect(chatDeletions(calls)).toEqual(['c1', 'c2', 'c3']);
+      const order = deletions(calls).map(([uid]) => uid);
+      expect(order.indexOf(CONVERSATION)).toBeGreaterThan(order.lastIndexOf(APPOINTMENT));
+    });
+
+    it('reads them with no filter, as many at a time as the other content types, until none are left', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [CONVERSATION]: chats(5001) });
+      await seedService({ strapi }).resetDemoAppointments();
+      expect(chatDeletions(calls)).toHaveLength(5001);
+      expect(chatReads(calls).map(({ returned }) => returned)).toEqual([5000, 1, 0]);
+      for (const { params } of chatReads(calls)) expect(params).toEqual({ fields: ['documentId'], limit: 5000 });
+    });
+
+    it('has nothing to delete when no admin has a chat', async () => {
+      const { strapi, calls } = strapiHolding(REHEARSAL);
+      await seedService({ strapi }).resetDemoAppointments();
+      expect(chatDeletions(calls)).toEqual([]);
+      expect(chatReads(calls).map(({ returned }) => returned)).toEqual([0]);
+    });
+
+    it('stops with the chat that is still there after it was deleted, instead of reading it again for ever', async () => {
+      const { strapi } = strapiHolding({ ...REHEARSAL, [CONVERSATION]: chats(3) }, { stuck: ['c2'] });
+      await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('Saved chat c2 is still there after it was deleted, so the reset stops.');
+    });
+
+    it('stops at a chat that will not delete', async () => {
+      const { strapi, calls } = strapiHolding({ ...REHEARSAL, [CONVERSATION]: chats(3) }, { failing: ['c2'] });
+      await expect(seedService({ strapi }).resetDemoAppointments()).rejects.toThrow('could not delete c2');
+      expect(chatDeletions(calls)).toEqual(['c1', 'c2']);
+    });
+  });
+
   describe('with more inquiries than one read holds', () => {
     /** `count` inquiries: i1, i2 and so on. */
     const inquiries = (count: number) => Array.from({ length: count }, (_, index) => ({ documentId: `i${index + 1}` }));
