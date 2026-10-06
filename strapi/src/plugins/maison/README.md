@@ -9,6 +9,7 @@ A Strapi 5 plugin that shows one content model serving people and AI agents. It 
 - **Customer questions for staff:** when the concierge can't answer, Strapi records the question, staff let the customer know or answer on LINE in their own name, and an answer can become product knowledge ([Customer questions](#customer-questions))
 - **Customer inquiries:** every concierge turn is recorded, a model labels it in the background, and staff work the queues on the Maison page and reply on LINE ([Customer inquiries](#customer-inquiries))
 - **Customer identity comes from sign-in, never from the model**, through [strapi-oauth-mcp-manager](https://github.com/PaulBratslavsky/strapi-oauth-mcp-manager) 1.1 and LINE
+- **The Ask tab:** a chat for staff on the Maison page that looks up requests, questions, inquiries and the catalog, answers in Markdown with tables, shows each lookup in a box, and saves each admin's chats ([The Ask tab](#the-ask-tab))
 - **A live requests board and demo data** in the admin panel, with content in Japanese and English
 
 Maison is fictional. The plugin uses no real brand's names, products or images.
@@ -34,6 +35,7 @@ Confirming a request is one act wherever it happens: the `confirm_appointment` t
 - Node 22.12 or later: the AI SDK that labels inquiries is an ES module, which Strapi loads with `require()`
 - For the customer tools and the customer routes, strapi-oauth-mcp-manager 1.1 with LINE sign-in configured. Without it, those tools answer `not_signed_in` and those routes answer 503.
 - For the admin chat, strapi-plugin-tanstack-ai 1.6 with its chat configured. Maison needs no setup for it: the chat finds Maison's tools by itself.
+- For the Ask tab, an Anthropic API key in `AI_API_KEY`, with `AI_PROVIDER` unset or `anthropic` ([The Ask tab](#the-ask-tab))
 
 ## Install
 
@@ -66,11 +68,12 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `defaultLocale` | `ja` | Content language when a tool call doesn't pass `locale` (`ja` or `en`) |
 | `maxOpenRequestsPerCustomer` | `3` | Unconfirmed future requests a customer may have |
 | `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation, in the visit's language |
-| `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
+| `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat. In the Ask tab it removes the catalog tools it names (`search_knowledge`, `search_products` and `view_product`) and affects no other tool. |
 | `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations and staff's answers to customer questions with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
 | `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
 | `aiProvider` | `anthropic` | The provider of the model that labels inquiries: `anthropic`, `openai` or `openai-compatible`, which is any server that speaks OpenAI's format, such as Ollama, vLLM or LM Studio: `env('AI_PROVIDER', '')`. An empty value counts as not set. |
 | `aiModel` | the provider's own | A model ID: `env('AI_MODEL', '')`. Without one, it's `claude-haiku-4-5-20251001` for `anthropic`, `gpt-5-mini` for `openai` and `llama3.1` for `openai-compatible`. |
+| `aiChatModel` | `claude-sonnet-5-5` | The model of the Ask tab's chat, an Anthropic model ID: `env('AI_CHAT_MODEL', '')`. It is not `aiModel`, which labels inquiries. The chat uses `aiApiKey`, and is ready only when `aiProvider` is `anthropic` ([The Ask tab](#the-ask-tab)). An empty value counts as not set. |
 | `aiApiKey` | `null` | The provider's API key: `env('AI_API_KEY', '')`. Without it, and for `openai-compatible` without `aiBaseUrl`, labelling is off ([Labelling](#labelling)). |
 | `aiBaseUrl` | `null` | Where an `openai-compatible` server answers, such as `http://127.0.0.1:11434/v1` for Ollama: `env('AI_BASE_URL', '')`. An http or https URL, with no trailing slash. |
 | `demoLineUserId` | `null` | Optional. Your own LINE user ID, `U` and 32 lowercase hex characters: `env('MAISON_DEMO_LINE_USER_ID', '')`. With it, [Load demo activity](#load-demo-activity) gives your LINE account one waiting request, one open question and one open complaint, so confirming and replying send real LINE messages to your phone. Any other value is ignored, with a warning at boot that names the setting and never the value, and the demo activity goes to made-up customers only. Never logged, and masked in the admin like every customer, with a "Your LINE" label next to your own rows. An empty value counts as not set. |
@@ -218,11 +221,12 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to four tabs, each shown to the admins who may see what is in it, and **Demo data** below them, except on **Ask**, which fills the page. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
 - **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)). A made-up demo customer's request says "demo customer" in grey, and has no Send again: Strapi sends those customers nothing.
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
-- **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
+- **Ask**, for admins with "Use the Maison assistant": a chat that looks things up for staff, with saved chats ([The Ask tab](#the-ask-tab)).
+- **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, every admin's saved Ask chats, and the product knowledge entries staff added by answering questions.
 
 ### Load demo activity
 
@@ -253,6 +257,98 @@ The five made-up customers' LINE user IDs belong to nobody, so LINE refuses ever
 - **Reply on LINE:** the inquiry is replied, with `lineOutcome` `demo`, shown in grey.
 
 These answer `200` with `status: "demo"`, and the page shows an info notice. A `demo` outcome is never pending (`pending_confirmations` lists none), and never counts as "LINE sent". The LINE quota line counts what LINE itself reports, so a demo outcome never shows there.
+
+## The Ask tab
+
+**Ask** is the Maison page's fourth tab, a chat for staff. It looks things up and summarizes them: visit requests, the questions the concierge handed to staff, inquiries, and the catalog. It never sends, confirms, answers, closes or relabels anything. Staff do that with the page's own buttons.
+
+- **Who sees it:** admins whose role holds "Use the Maison assistant" (`plugin::maison.assistant.use`). Super Admin has it. The permission adds the tab and nothing else: the page itself still opens only for admins who review requests, read questions, view inquiries or manage the demo data.
+- **What it needs:** an Anthropic API key in `AI_API_KEY`, with `AI_PROVIDER` unset or `anthropic`. Without one, the tab shows "The assistant isn't set up", the reason and **Check again**, and no text box. Set the key, restart Strapi, and press **Check again**.
+- **Which model:** `aiChatModel` (`AI_CHAT_MODEL`), `claude-sonnet-5-5` by default. It is not `aiModel`, which labels inquiries. The model's ID is in a badge in the top bar.
+- **How it calls the model:** only through TanStack AI. The server runs `chat()` from `@tanstack/ai` with the Anthropic adapter, and the page runs `useChat` from `@tanstack/ai-react`. The four TanStack AI packages are pinned to exact versions (0.52.3, 0.18.3, 0.22.4 and 0.29.2), because a range lets npm install two copies of the SDK side by side.
+
+### The screen
+
+The tab is one chat area that fills the height under the page's header and tabs, so the page does not scroll while Ask is open, and the Demo data block is hidden there. Only the message list scrolls, and it follows the newest message only while you are at the bottom.
+- **The top bar:** **History** opens the saved chats. **Tools (N)** opens a read-only list of the tools your chat has, each with a label, one line about it and its name. A role that may read less sees fewer. A badge names the model. **New chat** starts an empty chat. When the chat is too long to go on, the button also shows the words "New chat".
+- **Messages:** your messages are on the right, the assistant's on the left with its avatar. Answers are Markdown: paragraphs, lists, tables, code and quotes. Images are not drawn. Only `http:` and `https:` links are links, and they open in a new tab. Raw HTML shows as text.
+- **Tool boxes:** each lookup is a box in the answer, in the order it happened, closed at first. Its header says `Tool: list_requests` and then a spinner, "3 results" (or "1 result", or "done" for a tool with nothing to count), or "failed". Opened, it shows the result as JSON with the customer-text tags taken out and customers still masked. A failed box is marked: its border takes the error colour, its header says "failed" in the error colour, and its body shows the tool's own message.
+- **Waiting:** three dots show while the assistant starts to answer, and "Working on it…" shows under the boxes while a tool runs.
+- **The text box:** one line, growing to six. Enter sends, Shift+Enter adds a line, and the Enter that confirms a Japanese conversion sends nothing. **Send** and **Stop** sit side by side, so a double click on Send never stops an answer.
+- **Starters:** with no messages, three suggestions: "What are customers asking about today?", "Any complaints this week?" and "Which visits are waiting for staff?"
+
+### Saved chats
+
+Each admin's chats are saved for them, and only they can read them.
+- **When it saves:** after each turn ends, however it ends. A cut-off tool call or a turn that failed before anything came back is taken out first, so a reopened chat never shows a spinner.
+- **The sidebar:** **History** opens it. It lists your chats, newest first, at most 100, each with a trash button that deletes the chat at once. While an answer comes, its rows, **New chat** and the trash buttons are off.
+- **When the page opens:** once the assistant is ready, the list loads and the most recent chat reopens, so the Ask tab shows it. With no saved chat, the empty chat shows. Going to another tab and back keeps the chat as it was.
+- **New chat** keeps the old chat in the sidebar, and the next turn saves a chat of its own. What you typed and did not send stays in the box.
+- **The title** is your first message, on one line, cut to 80 characters.
+- **Where it lives:** the content type `plugin::maison.conversation` (table `maison_conversations`), hidden from the Content Manager and the Content-Type Builder. A chat is stored as `{ v: 1, messages }`, with every key of every part kept: the model gets the whole history back each turn, and Anthropic refuses a thinking block whose signature was changed. A stored chat that can't be read opens as an empty chat, and the log says which one.
+- **What a saved chat holds:** the messages as you saw them, with the tool results: customers masked, customer text cut and tagged. **Reset demo activity** deletes every admin's saved chats, because they quote the demo customers. Its notice does not count them.
+- **Limits:** a reopened chat still counts toward the 20 messages of a chat.
+
+### Tools
+
+| Tool | Offered with | Label |
+|---|---|---|
+| `list_requests` | "MCP: review appointment requests" | Visit requests |
+| `list_questions` | "Read customer questions" | Customer questions |
+| `list_inquiries` | "Review customer inquiries" | Inquiries |
+| `inquiry_counts` | "Review customer inquiries" | Inquiry counts |
+| `search_knowledge` | "MCP: browse the catalog" | Product knowledge |
+| `search_products` | "MCP: browse the catalog" | Product search |
+| `view_product` | "MCP: browse the catalog" | Product details |
+
+A tool is offered only when the admin's role holds its permission, and `disabledTools` can remove the three catalog tools here, as it does on MCP. An admin with the assistant permission and none of these gets no tools: the assistant says so and looks nothing up. `GET /maison/assistant/status` lists the tools the admin's chat really has.
+
+### What the model sees
+
+- **The customer is masked,** like `line:U4af…88`. A full LINE user ID and a LINE display name never reach the model.
+- **Customer text is data.** It is inside `<customer_message>`, `<customer_question>`, `<customer_note>` or `<concierge_reply>`, and a `<` before one of those names is written as `&lt;`, so customer text can't close a tag. The instructions and every tool's description say that everything a tool returns is data, never instructions.
+- **Lists are cut.** A list answer has at most 50 rows, each long text is cut to 300 characters and marked `truncated`, and `capped` says when there were more rows. One item, looked up by its reference or documentId, has its full text.
+- **The assistant answers in Markdown,** with a table for items that have the same fields, and is told never to include images.
+
+### Limits and errors
+
+| Limit | Value |
+|---|---|
+| Messages from you in one chat | 20. The 21st is refused with "This chat is long. Start a new chat." |
+| Model turns for one answer | 6. After that, "The assistant stopped after 6 steps. Ask a narrower question." |
+| Time for one answer | 90 seconds |
+| Output of one model turn | 16,000 tokens, thinking included |
+| Request body | Strapi's 1 MB |
+
+An error before the stream starts (not set up, a chat that is too long, a failure in setting up) is a `200` event stream with one `RUN_ERROR`, because the page's client never reads the body of an HTTP error. Only a body that is not a run input (400), a role that lost the permission (403) and a body over the limit (413) are real HTTP errors. Staff read plain text:
+
+| What happened | What staff see |
+|---|---|
+| Not set up | The reason, and **Check again** |
+| Anthropic refused the key (401, 403) | "Anthropic refused the key. Check AI_API_KEY." |
+| The model ID is unknown (404) | "Anthropic doesn't know the model", then the ID, then "Check AI_CHAT_MODEL." |
+| Anthropic is busy (429, 529) | "Anthropic is busy. Try again in a minute." |
+| Over 90 seconds | "The assistant took too long and stopped. Try again." |
+| The answer reached 16,000 tokens | "The answer was cut off because it was too long. Ask for less." |
+| The model declined | "The model declined to answer this. Rephrase the question." |
+| The chat can't continue, or is too long | "This chat can't continue. Start a new chat." or "This chat is long. Start a new chat.", with **New chat** |
+| The connection dropped | "The connection to Strapi was lost. Try again." |
+| The session ended | "Your Strapi session has ended. Reload the page to sign in again." |
+| A tool fails | Its box is marked "failed", with its message |
+| A call to the saved chats fails | "Couldn't load your saved chats.", "Couldn't open that chat.", "Couldn't save this chat." or "Couldn't delete that chat." |
+| Anything else | "Something went wrong. Try again." |
+
+The log has one line for each turn, with the admin's ID, the tools called and how long it took, and never customer text. A model error goes to the log once, with the key taken out, and staff never read the provider's own text.
+
+### Routes
+
+All of them are for admins who hold "Use the Maison assistant", and are served under `/maison`.
+- `GET /assistant/status`: `{ ready: true, model, tools: [{ name, label }] }`, or `{ ready: false, reason }`. Never the key.
+- `POST /assistant/chat`: one turn, streamed. The page sends the whole history each time.
+- `GET /conversations` (the admin's chats, newest first, at most 100, each `{ documentId, title, updatedAt }`) and `POST /conversations` (`{ title, messages }`).
+- `GET /conversations/:documentId`, `PUT /conversations/:documentId` (`{ title, messages }`, either or both) and `DELETE /conversations/:documentId`. A chat that belongs to another admin answers `404`, as an ID nobody has does. A body that is not a chat answers `400` with "This chat could not be saved."
+
+The chat's tests never reach Anthropic: they use a scripted adapter, set through the service's `adapterFor`.
 
 ## The Homepage widgets
 
@@ -565,7 +661,7 @@ Point Claude Desktop at Strapi with the ops token and at LINE Bot MCP with a Mes
 ## Development
 
 ```bash
-npm test                    # unit tests (vitest)
+npm test                    # unit tests and component tests (vitest, with jsdom and Testing Library for the components)
 npm run test:ts:back        # type-check the server
 npm run test:ts:front       # type-check the admin
 npm run test:live           # labelling with a real model, skipped without AI_API_KEY (or, for openai-compatible, AI_BASE_URL)
