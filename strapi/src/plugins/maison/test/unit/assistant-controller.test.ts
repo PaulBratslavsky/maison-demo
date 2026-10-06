@@ -21,11 +21,15 @@ const finishedRun = () => new Response('data: {"type":"RUN_FINISHED","threadId":
  * The controller over the real assistant service, with `turn` standing in for the model: it records what it was given.
  * Everything before the model, the status, the readiness check, the body and the limit, is the service's own.
  */
-const world = ({ config = {}, turn = vi.fn(async (..._args: any[]) => finishedRun()) }: { config?: Doc; turn?: (...args: any[]) => Promise<Response> } = {}) => {
+const world = ({
+  config = {},
+  turn = vi.fn(async (..._args: any[]) => finishedRun()),
+  service = {},
+}: { config?: Doc; turn?: (...args: any[]) => Promise<Response>; service?: Doc } = {}) => {
   const settings = { aiApiKey: KEY, ...config };
   const real = assistantService({ strapi: fakeStrapi({ config: settings }) });
-  const strapi = fakeStrapi({ services: { assistant: { ...real, turn } }, config: settings });
-  return { controller: assistantController({ strapi }), turn: turn as ReturnType<typeof vi.fn> };
+  const strapi = fakeStrapi({ services: { assistant: { ...real, ...service, turn } }, config: settings });
+  return { controller: assistantController({ strapi }), turn: turn as ReturnType<typeof vi.fn>, strapi };
 };
 
 /** Enough of a Koa context for the chat: Strapi's error helpers, ctx.set, and the Node response with its events. */
@@ -145,6 +149,59 @@ describe('assistant.chat, before the model', () => {
     expect(turn).not.toHaveBeenCalled();
   });
 
+  it('checks readiness before the limit: a chat that is too long while not ready is still not_ready', async () => {
+    const { controller, turn } = world({ config: { aiApiKey: null } });
+    const ctx = fakeCtx({ request: { body: chatOf(ASSISTANT_LIMITS.staffMessages + 1) } });
+    await controller.chat(ctx);
+    expect(ctx.status).toBe(200);
+    expect(await eventsOf(ctx.body)).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code: 'not_ready', message: NO_KEY })]);
+    expect(turn).not.toHaveBeenCalled();
+  });
+
+  it('checks the body before the limit: a body that is no run input but has too many staff messages is a 400, not chat_too_long', async () => {
+    const { controller, turn } = world();
+    const ctx = fakeCtx({ request: { body: { ...chatOf(ASSISTANT_LIMITS.staffMessages + 1), threadId: undefined } } });
+    await controller.chat(ctx);
+    expect(ctx.badRequest).toHaveBeenCalledOnce();
+    expect(ctx.status).toBe(400);
+    expect(ctx.badRequest.mock.calls[0][0]).toMatch(/not a valid AG-UI RunAgentInput/);
+    expect(turn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'an Error',
+      () => new Error(`[maison] The assistant needs @tanstack/ai, and it could not be loaded. Original error: Cannot find module '/secret/path' (key ${KEY})`),
+    ],
+    ['a thrown string', () => `Cannot find module '/secret/path' (key ${KEY})`],
+  ])('answers a failure that is not a bad body, such as an SDK that did not load, with 200 and one internal RUN_ERROR, no raw text, and one log line: %s', async (_kind, thrown) => {
+    const { controller, turn, strapi } = world({
+      service: {
+        parseBody: vi.fn(async () => {
+          throw thrown();
+        }),
+      },
+    });
+    const ctx = fakeCtx({ request: { body: chatOf(1) } });
+    await controller.chat(ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(ctx.headers['Content-Type']).toBe('text/event-stream; charset=utf-8');
+    const text = await textOf(ctx.body);
+    const events = text
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => JSON.parse(block.slice('data: '.length)));
+    expect(events).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code: 'internal', message: 'Something went wrong. Try again.' })]);
+    for (const raw of ['/secret/path', 'Cannot find module', KEY, '[maison]']) expect(text).not.toContain(raw);
+    expect(turn).not.toHaveBeenCalled();
+    // The original goes to Strapi's log once, with the key taken out.
+    expect(strapi.log.error).toHaveBeenCalledOnce();
+    const logged = strapi.log.error.mock.calls[0][0] as string;
+    expect(logged).toContain('/secret/path');
+    expect(logged).not.toContain(KEY);
+  });
+
   it('does not refuse the 20th: it runs the turn', async () => {
     const { controller, turn } = world();
     const ctx = fakeCtx({ request: { body: chatOf(ASSISTANT_LIMITS.staffMessages) } });
@@ -222,6 +279,15 @@ describe('assistant.chat, the turn', () => {
     const { responseController } = turn.mock.calls[0][1] as { responseController: AbortController };
     expect(responseController.signal.aborted).toBe(false);
     ctx.res.emit('close');
+    expect(responseController.signal.aborted).toBe(true);
+  });
+
+  it('stops the model call at once when the response was already closed before the turn started: the close event fired earlier', async () => {
+    const { controller, turn } = world();
+    const res: any = Object.assign(new EventEmitter(), { writableEnded: false, destroyed: true });
+    const ctx = fakeCtx({ request: { body: chatOf(1) }, res });
+    await controller.chat(ctx);
+    const { responseController } = turn.mock.calls[0][1] as { responseController: AbortController };
     expect(responseController.signal.aborted).toBe(true);
   });
 

@@ -2,8 +2,18 @@ import { Readable } from 'node:stream';
 
 import type { Core } from '@strapi/strapi';
 
+import { withoutKey } from '../assistant/errors';
+import { getConfig } from '../config';
 import { ASSISTANT_LIMITS } from '../constants';
 import { countStaffMessages } from '../services/assistant';
+
+/**
+ * What chatParamsFromRequestBody says when the body is no run input. Its error is an AGUIError, which has no name of its
+ * own to tell it by, and @ag-ui/core is not a dependency of this plugin, so the check is on the SDK's own sentence. The
+ * bad-body tests run the real parser, so an SDK that rewords it fails them. Any other error is not the browser's fault.
+ */
+const BAD_BODY = /is not a valid AG-UI RunAgentInput/;
+const isBadBody = (error: unknown): boolean => error instanceof Error && BAD_BODY.test(error.message);
 
 /**
  * The Ask tab: whether the assistant is ready, and one chat turn, streamed. Both routes are for admins who hold
@@ -44,16 +54,25 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       try {
         params = await assistant().parseBody(ctx.request.body);
       } catch (error) {
-        return ctx.badRequest((error as Error).message);
+        if (isBadBody(error)) return ctx.badRequest((error as Error).message);
+        // Not the browser's fault, such as an SDK that could not be loaded: the text can hold file paths. Staff get the plain
+        // error as an event stream, and the original goes to Strapi's log once.
+        strapi.log.error(
+          withoutKey(`[maison] The assistant could not read a chat request: ${error instanceof Error ? error.message : String(error)}`, getConfig(strapi).aiApiKey)
+        );
+        return send(ctx, await assistant().errorResponse('internal'));
       }
 
       if (countStaffMessages(params.messages) > ASSISTANT_LIMITS.staffMessages) return send(ctx, await assistant().errorResponse('chat_too_long'));
 
       // Aborted only when the response closes before it ends: a closed tab, or Stop. The service stops the model call then.
       const responseController = new AbortController();
-      ctx.res.once('close', () => {
+      const stopIfClosed = () => {
         if (!ctx.res.writableEnded) responseController.abort();
-      });
+      };
+      ctx.res.once('close', stopIfClosed);
+      // The close event fires once. A browser that left while the body was being read has already fired it.
+      if (ctx.res.destroyed) stopIfClosed();
 
       return send(
         ctx,
