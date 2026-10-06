@@ -1,23 +1,11 @@
 import * as React from 'react';
 
 import { Box, Button, Flex, Textarea, Typography } from '@strapi/design-system';
-import styled from 'styled-components';
 
-import { askTabState, canSend, composerButtons, followsNewest, shouldSendOnKey, showsWorking, type MessageSource } from '../../assistant';
+import { askTabState, canSend, composerButtons, shouldSendOnKey, type MessageSource } from '../../assistant';
 import { ChatArea } from './ChatArea';
-import { ChatMessages } from './ChatMessages';
-import { EmptyState } from './EmptyState';
+import { MessageList } from './MessageList';
 import { useAssistant } from './AssistantProvider';
-
-/** The messages scroll in their own box, which takes the height between the top bar and the text box. */
-const MessageBox = styled.div`
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 24px;
-`;
 
 /**
  * The Ask tab: a chat for staff about requests, questions and inquiries. The chat itself, and the text staff have typed and not
@@ -27,16 +15,6 @@ const MessageBox = styled.div`
 export const AskTab = () => {
   const assistant = useAssistant();
   const box = React.useRef<HTMLTextAreaElement>(null);
-  const list = React.useRef<HTMLDivElement>(null);
-  // Whether the message box follows the newest message. It does until the reader scrolls up, and again after a send.
-  const following = React.useRef(true);
-  const messages = assistant?.messages;
-
-  // The newest message comes into view as the answer streams in. Only the message box scrolls, never the page.
-  React.useEffect(() => {
-    const element = list.current;
-    if (element && following.current) element.scrollTop = element.scrollHeight;
-  }, [messages]);
 
   if (!assistant) return <Typography textColor="neutral600">The assistant is not available for your role.</Typography>;
 
@@ -62,7 +40,6 @@ export const AskTab = () => {
 
   const submit = (message: string, source: MessageSource) => {
     if (!canSend({ text: message, busy, ready })) return;
-    following.current = true;
     void assistant.send(message, source);
     // A starter's button goes when the chat starts, and a clicked Send is switched off while the answer comes: the text box keeps the focus.
     box.current?.focus();
@@ -76,25 +53,9 @@ export const AskTab = () => {
       newChatOffered={notice?.newChat === true}
       onNewChat={assistant.newChat}
     >
-      <MessageBox
-        ref={list}
-        role="region"
-        aria-label="Chat messages"
-        // Keyboard users scroll the box with the arrow keys once it has the focus.
-        tabIndex={0}
-        onScroll={(event: React.UIEvent<HTMLDivElement>) => {
-          following.current = followsNewest(event.currentTarget);
-        }}
-      >
-        {assistant.messages.length === 0 ? <EmptyState onStarter={(starter) => submit(starter, 'starter')} canStart={(starter) => canSend({ text: starter, busy, ready })} /> : <ChatMessages messages={assistant.messages} />}
-      </MessageBox>
+      <MessageList messages={assistant.messages} busy={busy} onStarter={(starter) => submit(starter, 'starter')} canStart={(starter) => canSend({ text: starter, busy, ready })} />
 
       <Flex direction="column" alignItems="stretch" gap={3} padding={4}>
-        {showsWorking(busy, assistant.messages) && (
-          <Typography role="status" textColor="neutral600">
-            The assistant is working…
-          </Typography>
-        )}
         {notice && (
           <Typography role="alert" textColor="danger600">
             {notice.text}
