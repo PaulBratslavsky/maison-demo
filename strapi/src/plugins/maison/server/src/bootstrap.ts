@@ -1,6 +1,6 @@
 import type { Core } from '@strapi/strapi';
 
-import { getConfig } from './config';
+import { demoLineUserIdProblem, getConfig } from './config';
 import { PLUGIN_ID } from './constants';
 import { answerCustomerSessionErrors } from './policies/customer-session';
 
@@ -29,6 +29,8 @@ const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   // inside its error middleware and around the customer routes' policy.
   strapi.server.use(answerCustomerSessionErrors);
 
+  const demoUserProblem = demoLineUserIdProblem((strapi.config.get(`plugin::${PLUGIN_ID}`) as { demoLineUserId?: unknown } | undefined)?.demoLineUserId);
+  if (demoUserProblem) strapi.log.warn(demoUserProblem);
   if (!getConfig(strapi).liffUrl) {
     strapi.log.warn('[maison] config.liffUrl is not set, so pending_confirmations will return not_configured.');
   }

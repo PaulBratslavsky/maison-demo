@@ -130,12 +130,19 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
   if (isSet(aiBase) && (typeof aiBase !== 'string' || !AI_BASE_URL.test(aiBase) || aiBase.endsWith('/'))) {
     fail('config.aiBaseUrl must be an http or https URL without a trailing slash, e.g. http://127.0.0.1:11434/v1');
   }
-  // `MAISON_DEMO_LINE_USER_ID=` in an env file gives '', which means not set. The message never repeats the value.
-  const demoUser: unknown = merged.demoLineUserId;
-  if (isSet(demoUser) && (typeof demoUser !== 'string' || !LINE_USER_ID.test(demoUser))) {
-    fail('config.demoLineUserId must be a LINE user ID, U followed by 32 lowercase hex characters, or null to give the demo activity to made-up customers only');
-  }
+  // demoLineUserId is checked by demoLineUserIdProblem instead: a bad value only warns, so it never stops Strapi starting.
 }
+
+/**
+ * What's wrong with a demoLineUserId, for a warning at boot, or null when it's a LINE user ID or not set
+ * (`MAISON_DEMO_LINE_USER_ID=` in an env file gives '', which means not set). A bad value is ignored, and the demo
+ * activity goes to made-up customers only: an optional demo setting never stops Strapi starting. The message never
+ * repeats the value.
+ */
+export const demoLineUserIdProblem = (value: unknown): string | null =>
+  !isSet(value) || (typeof value === 'string' && LINE_USER_ID.test(value))
+    ? null
+    : '[maison] config.demoLineUserId (MAISON_DEMO_LINE_USER_ID) is not a LINE user ID, U followed by 32 lowercase hex characters, so it is ignored, and Load demo activity gives every item to made-up customers.';
 
 export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
   const config = { ...defaultConfig, ...(strapi.config.get(`plugin::${PLUGIN_ID}`) as Partial<MaisonConfig>) };
@@ -150,7 +157,7 @@ export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
     aiModel: config.aiModel || null,
     aiApiKey: config.aiApiKey || null,
     aiBaseUrl: config.aiBaseUrl || null,
-    demoLineUserId: config.demoLineUserId || null,
+    demoLineUserId: config.demoLineUserId && demoLineUserIdProblem(config.demoLineUserId) === null ? config.demoLineUserId : null,
   };
 };
 

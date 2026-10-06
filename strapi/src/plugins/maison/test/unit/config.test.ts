@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfig, getConfig, validateConfig } from '../../server/src/config';
+import { defaultConfig, demoLineUserIdProblem, getConfig, validateConfig } from '../../server/src/config';
 import { fakeStrapi } from './fake-strapi';
 
 describe('validateConfig', () => {
@@ -181,20 +181,19 @@ describe('the demo LINE account (demoLineUserId)', () => {
     ['a user ID with a line break after it', `${USER_ID}\n`],
     ['a group ID (C…)', `C${'0123456789abcdef'.repeat(2)}`],
     ['a number', 42],
-  ])('rejects %s, which stops the boot', (_label, demoLineUserId) => {
-    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).toThrow(
-      /config\.demoLineUserId must be a LINE user ID/
-    );
+  ])('ignores %s with a warning, so Strapi still starts and the demo activity goes to made-up customers', (_label, demoLineUserId) => {
+    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).not.toThrow();
+    expect(getConfig(fakeStrapi({ config: { demoLineUserId } })).demoLineUserId).toBeNull();
+    expect(demoLineUserIdProblem(demoLineUserId)).toMatch(/demoLineUserId .*LINE user ID/);
   });
 
-  it('never repeats the value in an error', () => {
+  it('has no problem with a LINE user ID, or with no value', () => {
+    for (const value of [USER_ID, '', null, undefined]) expect(demoLineUserIdProblem(value)).toBeNull();
+  });
+
+  it('never repeats the value in its warning', () => {
     const secret = `U${'5ec7e7'.repeat(5)}zz`;
-    let message = '';
-    try {
-      validateConfig({ ...defaultConfig, demoLineUserId: secret });
-    } catch (error) {
-      message = (error as Error).message;
-    }
+    const message = demoLineUserIdProblem(secret) ?? '';
     expect(message).toMatch(/demoLineUserId/);
     expect(message).not.toContain('5ec7e7');
   });

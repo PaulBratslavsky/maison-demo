@@ -48,7 +48,7 @@ Set these under the project's **Settings** → **Variables**, for its environmen
 | `AI_API_KEY` | Labels customer inquiries. Unset, labelling is off, and inquiries wait under **Not labelled**. | No, but recommended | A secret: an Anthropic API key. |
 | `AI_PROVIDER`, `AI_MODEL` | The labelling provider and model. | No | Leave unset: Anthropic, with `claude-haiku-4-5-20251001`. |
 | `MCP_ENABLED` | Strapi's MCP server at `/mcp`, where Maison's tools live. | No | `true`, the default. Leave it unset. |
-| `MAISON_DEMO_LINE_USER_ID` | Gives your own LINE account one waiting request, one open question and one open complaint when you press **Load demo activity**, so confirming and replying on stage reach your phone. Unset, the demo activity goes to five made-up customers only, who get no LINE message. | No | Your LINE user ID: `U` and 32 lowercase hex characters. Any other value stops Strapi from starting. Never logged. |
+| `MAISON_DEMO_LINE_USER_ID` | Gives your own LINE account one waiting request, one open question and one open complaint when you press **Load demo activity**, so confirming and replying on stage reach your phone. Unset, the demo activity goes to five made-up customers only, who get no LINE message. | No | Your LINE user ID: `U` and 32 lowercase hex characters. Any other value is ignored with a warning in Strapi's log, and every demo item then goes to the made-up customers. Never logged. |
 
 Never set these on Strapi Cloud:
 - **`DATABASE_*`.** Strapi Cloud injects its own PostgreSQL connection, and stops injecting it when you add one of these (Strapi's [Database](https://docs.strapi.io/cloud/advanced/database) page).
