@@ -77,10 +77,24 @@ describe('what the assistant does and never does', () => {
     expect(prompt).toContain("Staff do that with the buttons on this page.");
   });
 
-  it('answers in short plain text with no Markdown, in the language staff write in', () => {
+  // The Ask tab draws the answers as Markdown, tables included, and never draws an image.
+  it('answers in Markdown, with a table for items that have the same fields and short text otherwise, and never an image', () => {
     const prompt = text();
-    expect(prompt).toContain('Reply in short plain text, with no Markdown.');
-    expect(prompt).toContain('Reply in the language staff write in.');
+    expect(prompt).toContain('Write in Markdown.');
+    expect(prompt).toContain('When you list several items with the same fields, such as reference, customer, status and date, use a table.');
+    expect(prompt).toContain('Otherwise use short paragraphs or a short list.');
+    expect(prompt).toContain('Keep answers short.');
+    expect(prompt).toContain('Never include images.');
+  });
+
+  it('no longer asks for plain text with no Markdown', () => {
+    const prompt = text();
+    expect(prompt).not.toContain('plain text');
+    expect(prompt).not.toContain('no Markdown');
+  });
+
+  it('answers in the language staff write in', () => {
+    expect(text()).toContain('Reply in the language staff write in.');
   });
 
   it('uses only what the tools return and what staff say, and says so when it does not know', () => {

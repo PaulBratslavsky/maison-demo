@@ -3,7 +3,7 @@ import type { Core } from '@strapi/strapi';
 import { notReadyReason, staffErrorOf, withoutKey, type RawRunError, type StaffError } from '../assistant/errors';
 import { instructions } from '../assistant/instructions';
 import { createAnthropicAdapter, loadSdk, toTools, type ChatAdapter, type ChatParams } from '../assistant/sdk';
-import { assistantTools, type Ability, type AssistantToolSpec } from '../assistant/tools';
+import { assistantTools, toolLabel, type Ability, type AssistantToolSpec } from '../assistant/tools';
 import { getConfig } from '../config';
 import { ASSISTANT_LIMITS } from '../constants';
 
@@ -204,6 +204,15 @@ export interface TurnRequest {
 
 export type AssistantStatus = { ready: true; model: string } | { ready: false; reason: string };
 
+/** A tool as the Ask tab lists it: its name, and what staff call it. */
+export interface ToolInfo {
+  name: string;
+  label: string;
+}
+
+/** What GET /assistant/status answers: the status, and for a ready assistant the tools this admin's chat gets. */
+export type AssistantStatusAnswer = { ready: true; model: string; tools: ToolInfo[] } | { ready: false; reason: string };
+
 /** How many messages staff have sent in a chat: the ones with the role `user`. The model's answers and the tool results are not counted. */
 export const countStaffMessages = (messages: ReadonlyArray<{ role?: string }>): number => messages.filter((message) => message.role === 'user').length;
 
@@ -273,8 +282,19 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     });
   };
 
+  /**
+   * The status for one admin. A ready assistant also lists the tools this admin's chat really gets, which are the ones their
+   * role allows after `disabledTools`, never every tool the plugin has. An assistant that is not ready has none.
+   */
+  const statusFor = (ability: Ability): AssistantStatusAnswer => {
+    const current = status();
+    if (current.ready === false) return current;
+    return { ...current, tools: assistantTools(strapi, ability).map(({ name }) => ({ name, label: toolLabel(name) })) };
+  };
+
   return {
     status,
+    statusFor,
     errorResponse,
 
     /** The tools this admin may use. */

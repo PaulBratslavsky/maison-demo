@@ -37,9 +37,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   return {
-    /** GET /assistant/status: `{ ready: true, model }`, or `{ ready: false, reason }`. Never the key. */
+    /**
+     * GET /assistant/status: `{ ready: true, model, tools }`, or `{ ready: false, reason }`. `tools` is `{ name, label }` for each tool
+     * this admin's chat gets. Never the key.
+     */
     async status(ctx) {
-      ctx.body = assistant().status();
+      ctx.body = assistant().statusFor(ctx.state.userAbility ?? { can: () => false });
     },
 
     /**

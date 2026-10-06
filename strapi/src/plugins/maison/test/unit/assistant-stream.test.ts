@@ -138,6 +138,34 @@ describe('status', () => {
   });
 });
 
+describe('statusFor', () => {
+  const toolsOf = (answer: Doc) => (answer.tools as Doc[]).map((tool) => tool.name);
+
+  it('is the status with the tools the admin gets, each with its name and the label staff read', () => {
+    const answer = setup().service.statusFor(everything);
+    expect(answer).toMatchObject({ ready: true, model: 'claude-sonnet-5-5' });
+    expect(toolsOf(answer)).toEqual([...READ_TOOL_NAMES]);
+    expect((answer as Doc).tools[0]).toEqual({ name: 'list_requests', label: 'Visit requests' });
+  });
+
+  it('lists the same tools a turn offers the model: the admin\'s permissions and disabledTools both count', () => {
+    const only = { can: (action: string) => action === ACTION.catalogRead || action === ACTION.questionsRead };
+    const world = setup({ config: { disabledTools: ['view_product'] } });
+    expect(toolsOf(world.service.statusFor(only))).toEqual(['list_questions', 'search_knowledge', 'search_products']);
+    expect(toolsOf(world.service.statusFor(only))).toEqual(world.service.tools(only).map((tool) => tool.name));
+    expect(toolsOf(world.service.statusFor(nothing))).toEqual([]);
+  });
+
+  it('is the not-ready status, with no tools, when the assistant is not ready', () => {
+    expect(setup({ config: { aiApiKey: null } }).service.statusFor(everything)).toEqual({ ready: false, reason: NO_KEY });
+    expect(setup({ config: { aiProvider: 'openai' } }).service.statusFor(everything)).not.toHaveProperty('tools');
+  });
+
+  it('never carries the key', () => {
+    for (const config of [{}, { aiApiKey: null }, { aiProvider: 'openai' }]) expect(JSON.stringify(setup({ config }).service.statusFor(everything))).not.toContain(KEY);
+  });
+});
+
 describe('countStaffMessages', () => {
   it('counts the messages staff sent, and not the answers or the tool results', () => {
     const roles = ['user', 'assistant', 'tool', 'user', 'system', 'assistant', 'user', undefined].map((role) => ({ role }));

@@ -10,13 +10,29 @@ export const ASSISTANT_PATHS = { status: '/maison/assistant/status', chat: '/mai
 /** The three questions the tab suggests while the chat is empty. */
 export const STARTERS: readonly string[] = ['What are customers asking about today?', 'Any complaints this week?', 'Which visits are waiting for staff?'];
 
-/** What GET /maison/assistant/status answers: ready with the model, or not ready with the reason. Never the key. */
-export type AssistantStatus = { ready: true; model: string } | { ready: false; reason: string };
+/** A tool as the status lists it: its name, and what staff call it. */
+export interface ToolInfo {
+  name: string;
+  label: string;
+}
+
+/**
+ * What GET /maison/assistant/status answers: ready, with the model and the tools this admin's chat gets, or not ready with
+ * the reason. Never the key.
+ */
+export type AssistantStatus = { ready: true; model: string; tools: ToolInfo[] } | { ready: false; reason: string };
+
+const isToolInfo = (value: unknown): value is ToolInfo => {
+  if (typeof value !== 'object' || value === null) return false;
+  const { name, label } = value as Record<string, unknown>;
+  return typeof name === 'string' && typeof label === 'string';
+};
 
 export const isStatus = (value: unknown): value is AssistantStatus => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const { ready, model, reason } = value as Record<string, unknown>;
-  return (ready === true && typeof model === 'string') || (ready === false && typeof reason === 'string');
+  const { ready, model, reason, tools } = value as Record<string, unknown>;
+  if (ready === true) return typeof model === 'string' && Array.isArray(tools) && tools.every(isToolInfo);
+  return ready === false && typeof reason === 'string';
 };
 
 /** What the tab shows: the check is running, the check failed, the assistant is not set up (a notice and no text box), or the chat. */
@@ -24,11 +40,11 @@ export type AskTabState =
   | { kind: 'loading' }
   | { kind: 'failed'; text: string }
   | { kind: 'not-ready'; text: string }
-  | { kind: 'chat'; model: string };
+  | { kind: 'chat'; model: string; tools: ToolInfo[] };
 
 /** A status the tab already has is kept when a later check fails: the chat stays as it was. */
 export const askTabState = (status: AssistantStatus | null, statusError: string | null): AskTabState => {
-  if (status) return status.ready ? { kind: 'chat', model: status.model } : { kind: 'not-ready', text: status.reason };
+  if (status) return status.ready ? { kind: 'chat', model: status.model, tools: status.tools } : { kind: 'not-ready', text: status.reason };
   if (statusError) return { kind: 'failed', text: `Couldn't check the assistant: ${statusError}` };
   return { kind: 'loading' };
 };

@@ -27,6 +27,19 @@ export interface AssistantToolSpec {
 
 export const READ_TOOL_NAMES = ['list_requests', 'list_questions', 'list_inquiries', 'inquiry_counts', 'search_knowledge', 'search_products', 'view_product'] as const;
 
+/** What staff call each tool, in the Ask tab's list of tools. A tool with no entry here is shown under its own name. */
+export const TOOL_LABELS: Record<string, string> = {
+  list_requests: 'Visit requests',
+  list_questions: 'Customer questions',
+  list_inquiries: 'Inquiries',
+  inquiry_counts: 'Inquiry counts',
+  search_knowledge: 'Product knowledge',
+  search_products: 'Product search',
+  view_product: 'Product details',
+};
+
+export const toolLabel = (name: string): string => (Object.prototype.hasOwnProperty.call(TOOL_LABELS, name) ? TOOL_LABELS[name] : name);
+
 /** How many rows a list gives when the model names no limit, and the most it may ask for. */
 const MAX_ROWS = ASSISTANT_LIMITS.listRows;
 

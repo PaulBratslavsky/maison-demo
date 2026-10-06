@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ACTION, ASSISTANT_LIMITS, INQUIRY_FILTERS, INQUIRY_KINDS } from '../../server/src/constants';
-import { READ_TOOL_NAMES, assistantTools, type AssistantToolSpec } from '../../server/src/assistant/tools';
+import { READ_TOOL_NAMES, TOOL_LABELS, assistantTools, toolLabel, type AssistantToolSpec } from '../../server/src/assistant/tools';
 import { DATA_RULE } from '../../server/src/assistant/views';
 import { fakeStrapi } from './fake-strapi';
 
@@ -476,5 +476,37 @@ describe('the catalog tools', () => {
     const answer = await run(toolNamed(catalog({ searchKnowledge }), 'search_knowledge'), { query: '' });
     expect(answer.error.code).toBe('invalid_input');
     expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+});
+
+describe('the tool labels', () => {
+  it('are the labels the spec gives each read tool, as staff read them in the list of tools', () => {
+    expect(TOOL_LABELS).toEqual({
+      list_requests: 'Visit requests',
+      list_questions: 'Customer questions',
+      list_inquiries: 'Inquiries',
+      inquiry_counts: 'Inquiry counts',
+      search_knowledge: 'Product knowledge',
+      search_products: 'Product search',
+      view_product: 'Product details',
+    });
+  });
+
+  // A tool added later must come with a label. This reads the tools an admin who can do everything is offered, not the list above.
+  it('cover every tool an admin who may do everything is offered, so a new tool cannot arrive without one', () => {
+    const everything = { can: () => true };
+    for (const { name } of assistantTools(fakeStrapi(), everything)) expect(Object.keys(TOOL_LABELS), name).toContain(name);
+  });
+
+  it('give each tool a label of its own, in plain words: no tool name, no dash', () => {
+    const labels = Object.values(TOOL_LABELS);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const label of labels) expect(label).not.toMatch(/_|\u2014|\u2013/);
+  });
+
+  it('fall back to the tool name for a tool with no label, and never to something every object has', () => {
+    expect(toolLabel('list_requests')).toBe('Visit requests');
+    expect(toolLabel('something_new')).toBe('something_new');
+    for (const name of ['toString', '__proto__', 'constructor']) expect(toolLabel(name), name).toBe(name);
   });
 });

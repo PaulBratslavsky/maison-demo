@@ -48,15 +48,29 @@ describe('STARTERS', () => {
 });
 
 describe('isStatus', () => {
+  const TOOLS = [
+    { name: 'list_requests', label: 'Visit requests' },
+    { name: 'inquiry_counts', label: 'Inquiry counts' },
+  ];
+
   it.each([
-    [{ ready: true, model: 'claude-sonnet-5-5' }, true],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: TOOLS }, true],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: [] }, true],
     [{ ready: false, reason: 'The assistant works with Anthropic only. AI_PROVIDER is set to openai.' }, true],
+    // A ready status lists the tools: the tab's list of tools is built from it.
+    [{ ready: true, model: 'claude-sonnet-5-5' }, false],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: 'list_requests' }, false],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: ['list_requests'] }, false],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: [{ name: 'list_requests' }] }, false],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: [{ name: 5, label: 'x' }] }, false],
+    [{ ready: true, model: 'claude-sonnet-5-5', tools: [null] }, false],
+    [{ ready: true, tools: TOOLS }, false],
     [{ ready: true }, false],
-    [{ ready: true, model: 5 }, false],
+    [{ ready: true, model: 5, tools: TOOLS }, false],
     [{ ready: false }, false],
     [{ ready: false, reason: 5 }, false],
-    [{ ready: 'yes', model: 'm' }, false],
-    [{ model: 'm' }, false],
+    [{ ready: 'yes', model: 'm', tools: [] }, false],
+    [{ model: 'm', tools: [] }, false],
     [{}, false],
     [null, false],
     [undefined, false],
@@ -85,12 +99,13 @@ describe('askTabState', () => {
     });
   });
 
-  it('is the chat, with the model, when the assistant is ready', () => {
-    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5' }, null)).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5' });
+  it('is the chat, with the model and the tools, when the assistant is ready', () => {
+    const tools = [{ name: 'list_requests', label: 'Visit requests' }];
+    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools }, null)).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools });
   });
 
   it('keeps showing a status it has when a later check failed', () => {
-    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5' }, 'Failed to fetch')).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5' });
+    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools: [] }, 'Failed to fetch')).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools: [] });
   });
 });
 
