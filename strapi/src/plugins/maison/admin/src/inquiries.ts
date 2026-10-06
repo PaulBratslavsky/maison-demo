@@ -53,6 +53,8 @@ export interface StaffInquiry {
   repliedBy: string | null;
   /** How the last LINE message to the customer went, or null before there was one. `demo`: a made-up demo customer, who gets none. */
   line: { outcome: 'sent' | 'failed' | 'demo'; detail: string | null } | null;
+  /** The presenter's own LINE account (the plugin's demoLineUserId): shown with a "Your LINE" label. */
+  yourLine: boolean;
 }
 
 /** What GET /maison/inquiries/summary answers: the open inquiries each filter shows. */

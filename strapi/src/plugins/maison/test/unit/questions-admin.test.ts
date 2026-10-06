@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ANSWER_LIMIT,
   CATEGORY_OPTIONS,
@@ -15,9 +15,12 @@ import {
   replyNotice,
   statusLabel,
 } from '../../admin/src/questions';
+import { YOUR_LINE_LABEL, yourLineBadge } from '../../admin/src/your-line';
 import { KNOWLEDGE_CATEGORIES, QUESTION_REASONS } from '../../server/src/constants';
 import { knowledgeTitleOf } from '../../server/src/domain/question-messages';
 import { answerInput, questionsListInput } from '../../server/src/mcp/schemas';
+import questionsService from '../../server/src/services/questions';
+import { fakeStrapi } from './fake-strapi';
 
 describe('statusLabel', () => {
   it('says Open for a question nobody has taken', () => {
@@ -312,5 +315,32 @@ describe('the number of questions on the Questions tab', () => {
   it('asks the route for the Open filter, which it takes', () => {
     expect(OPEN_QUESTIONS).toEqual({ status: 'open' });
     expect(questionsListInput.safeParse(OPEN_QUESTIONS).success).toBe(true);
+  });
+});
+
+describe('the question row\'s "Your LINE" label', () => {
+  const YOU_ID = `U${'5ca1ab1e'.repeat(4)}`;
+  const stored = (customer: string): Record<string, unknown> => ({
+    reference: 'Q-4821', customer, customerName: null, question: 'Can the coffret hold a watch?', reason: 'no_answer', language: 'en',
+    productSlug: null, status: 'open', staffName: null, takenAt: null, answeredAt: null, answer: null, knowledgeDocumentId: null,
+    lineOutcome: null, lineDetail: null, createdAt: '2026-10-03T01:12:00.000Z',
+  });
+  const viewOf = async (customer: string, config: Record<string, unknown>) => {
+    const documents = () => ({ findMany: vi.fn(async () => [stored(customer)]) });
+    const result = await questionsService({ strapi: fakeStrapi({ documents, config }) }).list({ status: 'all' });
+    if (result.ok === false) throw new Error(result.message);
+    return result.value[0];
+  };
+
+  // The page reads `yourLine` from the server's own view, so the label shows on exactly the rows the server marks.
+  it("is on the presenter's own question, as the server's view says, and on no other", async () => {
+    const mine = await viewOf(`line:${YOU_ID}`, { demoLineUserId: YOU_ID });
+    const theirs = await viewOf(`line:U${'a'.repeat(32)}`, { demoLineUserId: YOU_ID });
+    expect(yourLineBadge(mine)?.label).toBe(YOUR_LINE_LABEL);
+    expect(yourLineBadge(theirs)).toBeNull();
+  });
+
+  it('is on no row when demoLineUserId is not set', async () => {
+    expect(yourLineBadge(await viewOf(`line:${YOU_ID}`, {}))).toBeNull();
   });
 });

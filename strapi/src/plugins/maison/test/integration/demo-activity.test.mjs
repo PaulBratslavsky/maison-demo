@@ -134,6 +134,7 @@ describe('Load demo activity', () => {
       assert.match(row.reference, /^APT-\d{4}$/);
       assert.equal(row.confirmationSent, false, `${row.reference}: not sent`);
       assert.equal(row.demoCustomer, true, `${row.reference}: a demo customer's`);
+      assert.equal(row.yourLine, false, `${row.reference}: nobody's own LINE account without demoLineUserId`);
     }
 
     const confirmed = demo.filter((row) => row.status === 'confirmed').map((row) => row.reference);
@@ -362,6 +363,8 @@ describe('Load demo activity', () => {
         const demo = body[key].filter((row) => isDemo(row.customer));
         assert.ok(demo.length >= 5, `${path} lists the demo rows`);
         assert.doesNotMatch(text, LINE_USER_ID, `${path} masks every customer`);
+        // Without demoLineUserId, no row is yours: the label is shown only for the account the setting names.
+        assert.deepEqual(body[key].filter((row) => row.yourLine !== false), [], `${path}: yourLine is false on every row`);
         const times = demo.map((row) => Date.parse(row.createdAt));
         assert.ok(Math.max(...times) - Math.min(...times) >= 24 * HOUR_MS, `${path}: received over more than a day`);
         assert.ok(times.every((time) => time > loadedAt.getTime() - 3 * DAY_MS), `${path}: within the last three days`);
@@ -458,6 +461,55 @@ describe('Load demo activity', () => {
         assert.equal((await demoRows(APPOINTMENT, { status: 'draft' })).length, 4);
       });
 
+      it('marks yourLine on exactly your rows: one request, one question and two inquiries, the hand-off and the complaint', async () => {
+        const read = async (path, key) => {
+          const { status, body } = await call('GET', path, staff);
+          assert.equal(status, 200, path);
+          return body[key];
+        };
+        const requests = await read('/maison/appointments?status=all&limit=50', 'appointments');
+        const questions = await read('/maison/questions?status=all&limit=100', 'questions');
+        const inquiries = await read('/maison/inquiries?filter=all&limit=100', 'inquiries');
+        const summary = (await call('GET', '/maison/appointments/summary', staff)).body.recent;
+        const YOURS = 'line:U5ca…1e';
+
+        for (const [what, rows] of [['request', requests], ['question', questions], ['inquiry', inquiries], ['summary row', summary]]) {
+          assert.ok(rows.length > 0, `there are ${what}s`);
+          for (const row of rows) assert.equal(typeof row.yourLine, 'boolean', `every ${what} says whether it is yours`);
+          // yourLine is true for the rows that show your masked ID, and for no other. It never depends on the made-up customers.
+          assert.deepEqual(
+            rows.filter((row) => row.yourLine).map((row) => row.customer),
+            rows.filter((row) => row.customer === YOURS).map((row) => row.customer),
+            `${what}s: yourLine is on the rows of your account only`
+          );
+          for (const row of rows.filter((candidate) => isDemo(candidate.customer))) assert.equal(row.yourLine, false, `a made-up customer's ${what}`);
+        }
+
+        const yourRequests = requests.filter((row) => row.yourLine);
+        assert.deepEqual(yourRequests.map((row) => [row.customer, row.status, row.demoCustomer]), [[YOURS, 'requested', false]]);
+        const yourQuestions = questions.filter((row) => row.yourLine);
+        assert.deepEqual(yourQuestions.map((row) => [row.customer, row.status, row.reason]), [[YOURS, 'open', 'no_answer']]);
+        const yourInquiries = inquiries.filter((row) => row.yourLine);
+        assert.equal(yourInquiries.length, 2, 'the hand-off and the complaint');
+        const handOff = yourInquiries.find((row) => row.handedOff);
+        const complaint = yourInquiries.find((row) => !row.handedOff);
+        assert.equal(handOff?.question?.reference, yourQuestions[0].reference, 'the hand-off of your question');
+        assert.equal(complaint?.kind, 'complaint', 'the complaint');
+
+        // Everything else is false, Paul's rehearsal and the made-up customers' rows included.
+        assert.equal(requests.filter((row) => !row.yourLine).length, requests.length - 1);
+        assert.equal(questions.filter((row) => !row.yourLine).length, questions.length - 1);
+        assert.equal(inquiries.filter((row) => !row.yourLine).length, inquiries.length - 2);
+        assert.ok(requests.some((row) => row.demoCustomer && row.yourLine === false), 'made-up customers stay false');
+        // The summary's newest rows carry it as the board does.
+        assert.deepEqual(
+          summary.map((row) => [row.reference, row.yourLine]),
+          summary.map((row) => [row.reference, requests.find((candidate) => candidate.reference === row.reference).yourLine])
+        );
+        // And the label is all there is: no row names your ID.
+        assert.ok(!JSON.stringify([requests, questions, inquiries, summary]).includes(PAUL_ID), 'your ID is in no row');
+      });
+
       it('sends real LINE messages to your account on Confirm, Let them know, Answer and Reply', async () => {
         line.requests.length = 0;
         const [visit] = await strapi.documents(APPOINTMENT).findMany({ status: 'draft', filters: { customer: { $eq: PAUL } } });
@@ -465,6 +517,7 @@ describe('Load demo activity', () => {
         assert.equal(confirmed.status, 200, confirmed.text);
         assert.equal(confirmed.body.appointment.confirmationSent, true);
         assert.equal(confirmed.body.appointment.demoCustomer, false);
+        assert.equal(confirmed.body.appointment.yourLine, true, "Confirm's answer says it is yours");
 
         const [question] = await strapi.documents(QUESTION).findMany({ filters: { customer: { $eq: PAUL } } });
         const notified = await call('POST', `/maison/questions/${question.reference}/notify`, staff);

@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { MAX_OPEN_QUESTIONS, UID, type KnowledgeCategory, type Locale, type QuestionReason, type QuestionStatus } from '../constants';
-import { isDemoCustomer } from '../domain/demo-activity';
+import { isDemoCustomer, isYourLine } from '../domain/demo-activity';
 import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
 import { getDisplayName, pushMessages } from '../domain/line-push';
 import { acknowledgementText, answerText, knowledgeTitleOf } from '../domain/question-messages';
@@ -47,6 +47,11 @@ export interface StaffQuestionView {
   addedToKnowledge: boolean;
   /** How the last LINE message went: `demo` for a made-up demo customer, who gets none. */
   line: { outcome: 'sent' | 'failed' | 'demo'; detail: string } | null;
+  /**
+   * The presenter's own LINE account (the plugin's demoLineUserId): Let them know and Answer send real LINE messages to
+   * the presenter. The list shows a "Your LINE" label. Never the ID itself.
+   */
+  yourLine: boolean;
   createdAt: string;
 }
 
@@ -111,7 +116,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   /** A published piece by slug, named in `language`, or in the default language when it has no version in that one. */
   const findProduct = productNamed(strapi);
 
-  const toStaffView = (row: Doc, product: StaffQuestionView['product']): StaffQuestionView => ({
+  const toStaffView = (row: Doc, product: StaffQuestionView['product'], demoLineUserId: string | null): StaffQuestionView => ({
     reference: row.reference,
     customer: maskSubject(row.customer),
     customerName: row.customerName ?? null,
@@ -126,6 +131,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     answer: row.answer ?? null,
     addedToKnowledge: Boolean(row.knowledgeDocumentId),
     line: row.lineOutcome ? { outcome: row.lineOutcome, detail: row.lineDetail ?? '' } : null,
+    yourLine: isYourLine(row.customer, demoLineUserId),
     createdAt: new Date(row.createdAt).toISOString(),
   });
 
@@ -283,7 +289,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       })) as Doc[];
       // One lookup per piece and language, shared by every question about it.
       const nameOf = rememberProductNames(findProduct);
-      const views = await Promise.all(rows.map(async (row) => toStaffView(row, await nameOf(row))));
+      const { demoLineUserId } = getConfig(strapi);
+      const views = await Promise.all(rows.map(async (row) => toStaffView(row, await nameOf(row), demoLineUserId)));
       return { ok: true, value: views };
     },
 

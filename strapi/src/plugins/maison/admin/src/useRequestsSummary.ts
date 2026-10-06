@@ -20,6 +20,8 @@ export interface RequestsSummary {
     confirmationSent: boolean;
     /** One of Load demo activity's made-up customers, who gets no LINE message. */
     demoCustomer: boolean;
+    /** The presenter's own LINE account (the plugin's demoLineUserId): shown with a "Your LINE" label. */
+    yourLine: boolean;
     /** When the request came in, written like `requestedFor`. */
     createdAt: string;
   }>;

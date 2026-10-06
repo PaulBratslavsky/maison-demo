@@ -28,6 +28,7 @@ import {
   type SendAgainStatus,
 } from '../board';
 import { startPolling } from '../poll';
+import { YourLineBadge } from './YourLineBadge';
 
 type Status = 'requested' | 'confirmed' | 'all';
 
@@ -45,6 +46,8 @@ interface StaffAppointment {
   confirmationSent: boolean;
   /** One of Load demo activity's made-up customers, who gets no LINE message. */
   demoCustomer: boolean;
+  /** The presenter's own LINE account (the plugin's demoLineUserId): shown with a "Your LINE" label. */
+  yourLine: boolean;
   createdAt: string;
 }
 
@@ -195,7 +198,10 @@ export const RequestsBoard = ({
                   <Typography fontWeight="bold">{appointment.reference}</Typography>
                 </Td>
                 <Td>
-                  <Typography>{appointment.customer}</Typography>
+                  <Flex gap={2} alignItems="center">
+                    <Typography>{appointment.customer}</Typography>
+                    <YourLineBadge yourLine={appointment.yourLine} />
+                  </Flex>
                 </Td>
                 <Td>
                   <Typography>{appointment.boutique?.name ?? '—'}</Typography>

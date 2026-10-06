@@ -5,6 +5,7 @@ import { lineColumn } from '../board';
 import { fullTime, timeAgo, visitTime } from '../time';
 import { useRequestsSummary } from '../useRequestsSummary';
 import { RequestCounts } from './RequestCounts';
+import { YourLineBadge } from './YourLineBadge';
 
 /** The board's words and colours for a request's status, so staff who read one read the other. */
 const STATUS_VARIANT = { requested: 'warning', confirmed: 'success' } as const;
@@ -72,7 +73,10 @@ const RequestsWidget = () => {
                   <Typography fontWeight="bold">{request.reference}</Typography>
                 </Td>
                 <Td>
-                  <Typography>{request.customer}</Typography>
+                  <Flex gap={2} alignItems="center">
+                    <Typography>{request.customer}</Typography>
+                    <YourLineBadge yourLine={request.yourLine} />
+                  </Flex>
                 </Td>
                 <Td>
                   <Typography>{request.boutique?.name ?? '—'}</Typography>

@@ -20,6 +20,7 @@ import { LINE_NOTE_COLORS, lineNote } from '../line-note';
 import { askedAt } from '../questions';
 import type { Acting, Action } from '../useInquiryActions';
 import { CLAMPED_TEXT_STYLE } from './clampedText';
+import { YourLineBadge } from './YourLineBadge';
 
 const STATUS_BADGES = { open: 'warning', replied: 'success', closed: 'neutral' } as const;
 const KIND_BADGES = { question: 'primary', complaint: 'danger', praise: 'success', other: 'secondary' } as const;
@@ -59,6 +60,7 @@ export const InquiryRow = ({ inquiry, canReply, acting, onReply, onCloseInquiry,
           <Typography variant="pi" textColor="neutral600">
             {inquiry.customer}
           </Typography>
+          <YourLineBadge yourLine={inquiry.yourLine} />
         </Flex>
       </Td>
       <Td>

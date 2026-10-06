@@ -162,6 +162,9 @@ export const staffAppointmentOutput = z.object({
   demoCustomer: z
     .boolean()
     .describe("True for one of Load demo activity's made-up customers. Strapi sends them no LINE message, so their confirmation is never sent."),
+  yourLine: z
+    .boolean()
+    .describe("True for the presenter's own LINE account, which the demo uses for a few items. Confirming it sends a real LINE message to the presenter."),
   createdAt: z.string().describe('When the request was made, ISO 8601 with offset.'),
 });
 

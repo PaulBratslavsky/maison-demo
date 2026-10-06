@@ -512,6 +512,7 @@ const OPEN_VIEW = {
   answer: null,
   addedToKnowledge: false,
   line: null,
+  yourLine: false,
   createdAt: '2026-10-01T05:30:00.000Z',
 };
 
@@ -590,6 +591,7 @@ describe('questions.list', () => {
           answer: 'Yes, a watch up to 42 mm fits.',
           addedToKnowledge: true,
           line: { outcome: 'sent', detail: '' },
+          yourLine: false,
           createdAt: '2026-10-01T05:30:00.000Z',
         },
       ],
