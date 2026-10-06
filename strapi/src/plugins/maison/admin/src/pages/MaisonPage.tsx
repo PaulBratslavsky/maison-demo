@@ -37,7 +37,12 @@ const MaisonPage = () => {
   const refresh = () => setRefreshKey((key) => key + 1);
 
   // Each tab is for the admins who may see what is in it.
-  const tabs = visibleTabs({ canReview: allowedActions.canReview, canRead: allowedActions.canRead, canView: allowedActions.canView });
+  const tabs = visibleTabs({
+    canReview: allowedActions.canReview,
+    canRead: allowedActions.canRead,
+    canView: allowedActions.canView,
+    canUse: allowedActions.canUse,
+  });
   const activeTab = selectTab(tabs, searchParams.get('tab'));
   const waiting = tabCounts({ requests: requests.summary, questions: questions.count, inquiries: inquiries.summary });
 

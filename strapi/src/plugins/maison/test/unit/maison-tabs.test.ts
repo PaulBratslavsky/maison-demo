@@ -1,44 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import { PAGE_SUBTITLE, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
+import { LIST_TABS, PAGE_SUBTITLE, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
 import { COUNTS } from '../../admin/src/inquiries';
 import { isSummary } from '../../admin/src/inquiries';
 import { world } from './fake-inquiries';
 
 describe('the tabs of the Maison page', () => {
-  it('are Requests, Questions and Inquiries', () => {
-    expect(TAB_LABELS).toEqual({ requests: 'Requests', questions: 'Questions', inquiries: 'Inquiries' });
+  it('are Requests, Questions, Inquiries and Ask', () => {
+    expect(TAB_LABELS).toEqual({ requests: 'Requests', questions: 'Questions', inquiries: 'Inquiries', ask: 'Ask' });
   });
 
-  it('are all three, in that order, for an admin who may see all of them', () => {
-    expect(visibleTabs({ canReview: true, canRead: true, canView: true })).toEqual(['requests', 'questions', 'inquiries']);
+  it('keep the three lists apart from Ask: LIST_TABS are the lists, in the order of the page', () => {
+    expect(LIST_TABS).toEqual(['requests', 'questions', 'inquiries']);
+  });
+
+  it('are the three lists, in that order, for an admin who may see all of them and not use the assistant', () => {
+    expect(visibleTabs({ canReview: true, canRead: true, canView: true, canUse: false })).toEqual(['requests', 'questions', 'inquiries']);
+  });
+
+  it('are all four, with Ask last, for an admin who may see all of them and use the assistant', () => {
+    expect(visibleTabs({ canReview: true, canRead: true, canView: true, canUse: true })).toEqual(['requests', 'questions', 'inquiries', 'ask']);
+  });
+
+  it('are Ask alone for an admin who can use the assistant and read nothing: the permission adds the tab, and it is not a list', () => {
+    expect(visibleTabs({ canReview: false, canRead: false, canView: false, canUse: true })).toEqual(['ask']);
+  });
+
+  it('put Ask after whichever lists an admin may see', () => {
+    expect(visibleTabs({ canReview: false, canRead: true, canView: false, canUse: true })).toEqual(['questions', 'ask']);
+    expect(visibleTabs({ canReview: true, canRead: false, canView: true, canUse: true })).toEqual(['requests', 'inquiries', 'ask']);
   });
 
   it.each([
-    ['review requests', { canReview: true, canRead: false, canView: false }, ['requests']],
-    ['read questions', { canReview: false, canRead: true, canView: false }, ['questions']],
-    ['view inquiries', { canReview: false, canRead: false, canView: true }, ['inquiries']],
-    ['review requests and view inquiries', { canReview: true, canRead: false, canView: true }, ['requests', 'inquiries']],
-    ['read questions and view inquiries', { canReview: false, canRead: true, canView: true }, ['questions', 'inquiries']],
-    ['review requests and read questions', { canReview: true, canRead: true, canView: false }, ['requests', 'questions']],
+    ['review requests', { canReview: true, canRead: false, canView: false, canUse: false }, ['requests']],
+    ['read questions', { canReview: false, canRead: true, canView: false, canUse: false }, ['questions']],
+    ['view inquiries', { canReview: false, canRead: false, canView: true, canUse: false }, ['inquiries']],
+    ['review requests and view inquiries', { canReview: true, canRead: false, canView: true, canUse: false }, ['requests', 'inquiries']],
+    ['read questions and view inquiries', { canReview: false, canRead: true, canView: true, canUse: false }, ['questions', 'inquiries']],
+    ['review requests and read questions', { canReview: true, canRead: true, canView: false, canUse: false }, ['requests', 'questions']],
   ])('are only what an admin who can %s may see', (_label, flags, tabs) => {
     expect(visibleTabs(flags)).toEqual(tabs);
   });
 
   it('are none for an admin who can only manage the demo data: the page shows just that', () => {
-    expect(visibleTabs({ canReview: false, canRead: false, canView: false })).toEqual([]);
+    expect(visibleTabs({ canReview: false, canRead: false, canView: false, canUse: false })).toEqual([]);
   });
 
   it('treat a flag useRBAC has not answered as no permission', () => {
     expect(visibleTabs({} as never)).toEqual([]);
     expect(visibleTabs({ canView: true } as never)).toEqual(['inquiries']);
+    expect(visibleTabs({ canView: true, canUse: undefined } as never)).toEqual(['inquiries']);
   });
 });
 
 describe('the page subtitle', () => {
   // The subtitle sat on the page after the Inquiries tab was added, and still named only requests and questions.
-  it('names what each tab shows: the requests, the questions and the inquiries', () => {
+  it('names what each list tab shows: the requests, the questions and the inquiries', () => {
     const subtitle = PAGE_SUBTITLE.toLowerCase();
-    for (const label of Object.values(TAB_LABELS)) expect(subtitle, label).toContain(label.toLowerCase());
+    for (const tab of LIST_TABS) expect(subtitle, TAB_LABELS[tab]).toContain(TAB_LABELS[tab].toLowerCase());
+  });
+
+  it('does not name Ask: admins without the permission read it too, and Ask is not a list', () => {
+    expect(PAGE_SUBTITLE).not.toMatch(/\bask\b/i);
   });
 });
 
@@ -66,6 +88,10 @@ describe('tabLabel', () => {
   it('writes thousands with a comma, as the quota line does', () => {
     expect(tabLabel('inquiries', 1234)).toBe('Inquiries 1,234');
   });
+
+  it('writes Ask alone, whatever number it is given: it has no count', () => {
+    for (const waiting of [0, 3, 1234, null, undefined]) expect(tabLabel('ask', waiting), String(waiting)).toBe('Ask');
+  });
 });
 
 describe('the number on each tab', () => {
@@ -76,11 +102,12 @@ describe('the number on each tab', () => {
       requests: 3,
       questions: 2,
       inquiries: 4,
+      ask: null,
     });
   });
 
   it('is none for a tab whose number has not loaded', () => {
-    expect(tabCounts({ requests: null, questions: null, inquiries: null })).toEqual({ requests: null, questions: null, inquiries: null });
+    expect(tabCounts({ requests: null, questions: null, inquiries: null })).toEqual({ requests: null, questions: null, inquiries: null, ask: null });
   });
 
   it("reads the key the server's inquiries summary has for Needs an answer", async () => {
@@ -92,7 +119,7 @@ describe('the number on each tab', () => {
 });
 
 describe('selectTab', () => {
-  const ALL = ['requests', 'questions', 'inquiries'] as const;
+  const ALL = ['requests', 'questions', 'inquiries', 'ask'] as const;
 
   it.each(ALL)('opens the %s tab when the address asks for it and the admin may see it', (tab) => {
     expect(selectTab(ALL, tab)).toBe(tab);
@@ -120,6 +147,11 @@ describe('selectTab', () => {
   it('opens nothing for an admin with no tabs', () => {
     expect(selectTab([], 'inquiries')).toBeUndefined();
     expect(selectTab([], null)).toBeUndefined();
+  });
+
+  it('opens Ask when the address asks for it and the admin may use it, and the first tab when they may not', () => {
+    expect(selectTab(['requests', 'ask'], 'ask')).toBe('ask');
+    expect(selectTab(['requests', 'questions'], 'ask')).toBe('requests');
   });
 
   it('reads a query string as the address gives it', () => {

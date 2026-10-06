@@ -73,9 +73,9 @@ describe("the admin panel's permissions for customer questions", () => {
     expect(actionsOf(PERMISSIONS.sections)).toEqual(expect.arrayContaining([ACTION.questionsRead, ACTION.questionsAnswer]));
   });
 
-  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView and canReply', () => {
+  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView, canReply and canUse', () => {
     expect(PERMISSIONS.sections.map(flagOf)).toEqual(
-      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply'])
+      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply', 'canUse'])
     );
   });
 
@@ -87,9 +87,27 @@ describe("the admin panel's permissions for customer questions", () => {
   });
 
   // The page checks every action of `sections` at once, so two that end in one word would give one flag for both.
-  it('make seven flags for the seven actions the page checks, none of them shared', () => {
-    expect(PERMISSIONS.sections).toHaveLength(7);
-    expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(7);
+  it('make eight flags for the eight actions the page checks, none of them shared', () => {
+    expect(PERMISSIONS.sections).toHaveLength(8);
+    expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(8);
+  });
+});
+
+describe("the admin panel's permission for the assistant", () => {
+  const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
+
+  it('is checked with useRBAC, for the page to read as canUse', () => {
+    expect(PERMISSIONS.sections).toContainEqual({ action: ACTION.assistantUse, subject: null });
+    expect(ACTION.assistantUse.split('.').slice(-1)[0]).toBe('use');
+  });
+
+  it("doesn't open the page on its own: it adds the Ask tab, and the page is for staff who read something", () => {
+    expect(actionsOf(PERMISSIONS.page)).not.toContain(ACTION.assistantUse);
+  });
+
+  it('is on no Homepage widget', () => {
+    expect(actionsOf(PERMISSIONS.widget)).not.toContain(ACTION.assistantUse);
+    expect(actionsOf(PERMISSIONS.inquiriesWidget)).not.toContain(ACTION.assistantUse);
   });
 });
 
