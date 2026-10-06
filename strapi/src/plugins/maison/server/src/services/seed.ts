@@ -5,6 +5,8 @@ import type { Core } from '@strapi/strapi';
 import content from '../../seed/content.json';
 import knowledge from '../../seed/knowledge.json';
 import { UID } from '../constants';
+import type { ServiceResult } from '../domain/service-result';
+import { loadDemoActivity, type ActivityResult } from './demo-activity';
 
 type Localized = { ja: string; en: string };
 const paragraph = (text: string) => [{ type: 'paragraph', children: [{ type: 'text', text }] }];
@@ -155,11 +157,24 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     }
   };
 
+  /** The Load demo activity under way, or the last one. Each waits for the one before it, so two presses never both add it. */
+  let loadingActivity: Promise<unknown> = Promise.resolve();
+
   return {
     async loadDemoCatalog(): Promise<SeedResult> {
       await ensureLocales();
       const catalog = await loadCatalog();
       return { ...catalog, knowledge: await loadKnowledge() };
+    },
+
+    /**
+     * Load demo activity (demo-activity.ts): five made-up customers' requests, questions and inquiries, once. A press while
+     * one is loading waits for it, and then finds it there. `now` is only for tests. It defaults to the current time.
+     */
+    loadDemoActivity(now?: Date): Promise<ServiceResult<ActivityResult>> {
+      const loading = loadingActivity.then(() => loadDemoActivity(strapi, now));
+      loadingActivity = loading.catch(() => undefined);
+      return loading;
     },
 
     /**

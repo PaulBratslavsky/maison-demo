@@ -4,11 +4,21 @@ import { Box, Button, Dialog, Flex, Typography } from '@strapi/design-system';
 import { WarningCircle } from '@strapi/icons';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
-import { describeReset, describeSeed, type ResetResult, type SeedResult } from '../seed-result';
+import {
+  describeActivity,
+  describeReset,
+  describeSeed,
+  type ActivityResult,
+  type ResetResult,
+  type SeedResult,
+} from '../seed-result';
 
-type Action = 'seed' | 'reset';
+type Action = 'seed' | 'activity' | 'reset';
 
-/** Load the catalog, or clear the rehearsal's appointments, questions and inquiries. `onChange` lets the board refresh at once. */
+/**
+ * Load the catalog, load the made-up customers' activity, or clear the rehearsal's appointments, questions and inquiries.
+ * `onChange` lets the board, the counts and the lists refresh at once.
+ */
 export const DemoData = ({ onChange }: { onChange: () => void }) => {
   const { post } = useFetchClient();
   const { toggleNotification } = useNotification();
@@ -35,13 +45,23 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
         </Typography>
         <Typography variant="omega" textColor="neutral600">
           Load demo catalog creates 3 collections, 12 products and 3 boutiques in Japanese and English, publishes them and sets
-          stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Reset deletes every
-          appointment, delivery record, customer question and inquiry, and the product knowledge entries that staff added by
-          answering questions. It keeps the catalog and the seeded product knowledge.
+          stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Load demo activity
+          adds 5 visit requests, 5 customer questions and 10 inquiries from 5 made-up customers, received over the last 3 days.
+          It needs the catalog, and adds nothing when those customers have activity already. Their LINE IDs are made up, so no
+          message reaches anyone. Reset deletes every appointment, delivery record, customer question and inquiry, the demo
+          activity included, and the product knowledge entries that staff added by answering questions. It keeps the catalog and
+          the seeded product knowledge.
         </Typography>
         <Flex gap={2}>
           <Button loading={running === 'seed'} disabled={running !== null} onClick={() => run<SeedResult>('seed', describeSeed)}>
             Load demo catalog
+          </Button>
+          <Button
+            loading={running === 'activity'}
+            disabled={running !== null}
+            onClick={() => run<ActivityResult>('activity', describeActivity)}
+          >
+            Load demo activity
           </Button>
           {/* Resetting can't be undone, so it asks first. */}
           <Dialog.Root>

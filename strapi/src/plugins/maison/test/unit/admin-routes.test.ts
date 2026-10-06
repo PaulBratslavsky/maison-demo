@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CLOSE_REASONS, INQUIRY_FILTERS, INQUIRY_KINDS, SENTIMENT_LABELS } from '../../server/src/constants';
 import controllers from '../../server/src/controllers';
 import appointmentsController from '../../server/src/controllers/appointments';
+import demoController from '../../server/src/controllers/demo';
 import inquiriesController from '../../server/src/controllers/inquiries';
 import questionsController from '../../server/src/controllers/questions';
 import routes from '../../server/src/routes';
@@ -45,7 +46,7 @@ describe('admin routes', () => {
 
   it('each require a signed-in admin with the matching Maison permission', () => {
     expect(routes.admin.type).toBe('admin');
-    expect(routes.admin.routes).toHaveLength(16);
+    expect(routes.admin.routes).toHaveLength(17);
     expect(policiesOf('GET', '/appointments')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('GET', '/appointments/summary')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('POST', '/appointments/:reference/confirm')).toEqual(gate('plugin::maison.appointments.confirm'));
@@ -65,6 +66,11 @@ describe('admin routes', () => {
     expect(policiesOf('POST', '/inquiries/:documentId/label-again')).toEqual(gate('plugin::maison.inquiries.reply'));
     expect(policiesOf('POST', '/demo/seed')).toEqual(gate('plugin::maison.demo.manage'));
     expect(policiesOf('POST', '/demo/reset')).toEqual(gate('plugin::maison.demo.manage'));
+    expect(policiesOf('POST', '/demo/activity')).toEqual(gate('plugin::maison.demo.manage'));
+  });
+
+  it('send Load demo activity to the demo controller', () => {
+    expect(routeOf('POST', '/demo/activity')?.handler).toBe('demo.activity');
   });
 
   it('send the inquiries to the inquiries controller', () => {
@@ -1118,3 +1124,29 @@ describe('inquiries controller', () => {
   });
 });
 
+
+describe('demo controller: Load demo activity', () => {
+  const ADDED = { created: true, customers: 5, appointments: 5, confirmed: 2, questions: 5, inquiries: 10 };
+  const controllerLoading = (loadDemoActivity: () => Promise<unknown>) => demoController({ strapi: fakeStrapi({ services: { seed: { loadDemoActivity } } }) });
+
+  it('answers what the seed service added, or that it was there already', async () => {
+    const ctx = fakeCtx();
+    await controllerLoading(async () => ({ ok: true, value: ADDED })).activity(ctx);
+    expect(ctx.body).toEqual(ADDED);
+    expectNoError(ctx);
+  });
+
+  it('loads at the real time: nothing in the request reaches the service', async () => {
+    const loadDemoActivity = vi.fn(async () => ({ ok: true, value: ADDED }));
+    await controllerLoading(loadDemoActivity).activity(fakeCtx({ query: { now: '2020-01-01T00:00:00Z' }, request: { body: { now: '2020-01-01' } } }));
+    expect(loadDemoActivity).toHaveBeenCalledWith();
+  });
+
+  it("answers 404 with the service's words and hint when the demo catalog isn't loaded", async () => {
+    const ctx = fakeCtx();
+    const failure = { ok: false, code: 'not_found', message: 'Load demo catalog first.', hint: 'Press Load demo catalog.' };
+    await controllerLoading(async () => failure).activity(ctx);
+    expect(ctx.status).toBe(404);
+    expect(ctx.body).toEqual({ error: { message: 'Load demo catalog first.', details: { code: 'not_found', hint: 'Press Load demo catalog.' } } });
+  });
+});

@@ -94,18 +94,18 @@ export interface Reply {
 /** A question as two of them are compared: trimmed, with every run of whitespace as one space, in lower case. */
 const sameWordsAs = (question: string): string => question.replace(/\s+/g, ' ').trim().toLowerCase();
 
+/** A reference no question has, like Q-4821. `random` is only for tests. */
+export const uniqueQuestionReference = async (strapi: Core.Strapi, random: () => number = Math.random): Promise<string> => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const reference = generateReference(random, 'Q');
+    if ((await strapi.documents(UID.question).count({ filters: { reference: { $eq: reference } } })) === 0) return reference;
+  }
+  throw new Error('[maison] Could not find a free question reference after 20 attempts.');
+};
+
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   /** A published piece by slug, named in `language`, or in the default language when it has no version in that one. */
   const findProduct = productNamed(strapi);
-
-  /** A reference no question has. */
-  const uniqueReference = async (): Promise<string> => {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const reference = generateReference(Math.random, 'Q');
-      if ((await strapi.documents(UID.question).count({ filters: { reference: { $eq: reference } } })) === 0) return reference;
-    }
-    throw new Error('[maison] Could not find a free question reference after 20 attempts.');
-  };
 
   const toStaffView = (row: Doc, product: StaffQuestionView['product']): StaffQuestionView => ({
     reference: row.reference,
@@ -248,7 +248,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const product = input.productSlug ? await findProduct(input.productSlug, language) : null;
       // Staff find the customer's chat in LINE by this name. Without a token, or an answer from LINE, there's none.
       const customerName = token ? await getDisplayName({ apiBaseUrl: lineApiBaseUrl, token }, lineUserIdOf(input.subject)) : null;
-      const reference = await uniqueReference();
+      const reference = await uniqueQuestionReference(strapi);
       await strapi.documents(UID.question).create({
         data: {
           reference,

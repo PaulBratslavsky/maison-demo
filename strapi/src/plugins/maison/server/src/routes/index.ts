@@ -93,6 +93,7 @@ export default {
       },
       { method: 'POST', path: '/demo/seed', handler: 'demo.seed', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/reset', handler: 'demo.reset', config: { policies: allow(ACTION.demoManage) } },
+      { method: 'POST', path: '/demo/activity', handler: 'demo.activity', config: { policies: allow(ACTION.demoManage) } },
     ],
   },
   /**

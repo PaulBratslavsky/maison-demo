@@ -31,3 +31,16 @@ export const describeReset = (result: ResetResult): string =>
     counted(result.inquiries, 'inquiry', 'inquiries'),
     counted(result.knowledge, 'product knowledge entry', 'product knowledge entries'),
   ])}.`;
+
+/** What POST /maison/demo/activity answers (the seed service's ActivityResult): all zeros, with `created` false, when it was there already. */
+export type ActivityResult = { created: boolean; customers: number; appointments: number; confirmed: number; questions: number; inquiries: number };
+
+/** The notice after Load demo activity. */
+export const describeActivity = (result: ActivityResult): string =>
+  result.created
+    ? `Loaded ${andList([
+        `${counted(result.appointments, 'request', 'requests')} (${result.confirmed} confirmed)`,
+        counted(result.questions, 'question', 'questions'),
+        counted(result.inquiries, 'inquiry', 'inquiries'),
+      ])} from ${counted(result.customers, 'made-up customer', 'made-up customers')}.`
+    : 'The demo activity is already loaded. Reset demo activity first to load it again.';
