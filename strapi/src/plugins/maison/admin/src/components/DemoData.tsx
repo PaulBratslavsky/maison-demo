@@ -45,12 +45,13 @@ export const DemoData = ({ onChange }: { onChange: () => void }) => {
         </Typography>
         <Typography variant="omega" textColor="neutral600">
           Load demo catalog creates 3 collections, 12 products and 3 boutiques in Japanese and English, publishes them and sets
-          stock, and adds 16 product knowledge entries in English. Whatever is there already stays as it is. Load demo activity
-          adds 5 visit requests, 5 customer questions and 10 inquiries from 5 made-up customers, received over the last 3 days.
-          It needs the catalog, and adds nothing when those customers have activity already. Their LINE IDs are made up, so no
+          stock, and adds 16 product knowledge entries in Japanese and English. Whatever is there already stays as it is, and
+          an English entry without its Japanese version gets one, unless staff changed its title. Load demo activity adds 5
+          visit requests, 5 customer questions and 10 inquiries from 5 made-up customers, received over the last 3 days. It
+          needs the catalog, and adds nothing when those customers have activity already. Their LINE IDs are made up, so no
           message reaches anyone. Reset deletes every appointment, delivery record, customer question and inquiry, the demo
           activity included, and the product knowledge entries that staff added by answering questions. It keeps the catalog and
-          the seeded product knowledge.
+          the seeded product knowledge, in both languages.
         </Typography>
         <Flex gap={2}>
           <Button loading={running === 'seed'} disabled={running !== null} onClick={() => run<SeedResult>('seed', describeSeed)}>

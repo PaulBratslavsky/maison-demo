@@ -153,13 +153,18 @@ export const grantPublicReads = async (api) => {
 
 /**
  * What setup says about the seed (POST /maison/demo/seed): whether it loaded the catalog or found it there, and, when
- * it added any, how many product knowledge entries. A catalog loaded before gets the knowledge on the next run, so
- * "already loaded" alone would hide that it did something.
+ * it added any, how many product knowledge entries in English (`knowledge`) and in Japanese (`knowledgeJa`). A catalog
+ * loaded before gets the knowledge on the next run, so "already loaded" alone would hide that it did something.
  */
-export const seedLines = (seeded) => [
-  seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.',
-  ...(seeded.knowledge > 0 ? [`Added ${seeded.knowledge} product knowledge entries.`] : []),
-];
+export const seedLines = (seeded) => {
+  const entries = (count) => `${count} product knowledge ${count === 1 ? 'entry' : 'entries'}`;
+  const added = seeded.knowledge > 0 ? [`${entries(seeded.knowledge)} in English`] : [];
+  if (seeded.knowledgeJa > 0) added.push(`${added.length > 0 ? seeded.knowledgeJa : entries(seeded.knowledgeJa)} in Japanese`);
+  return [
+    seeded.created ? 'Loaded the demo catalog.' : 'Demo catalog already loaded.',
+    ...(added.length > 0 ? [`Added ${added.join(' and ')}.`] : []),
+  ];
+};
 
 const main = async () => {
   if (!email || !password) {

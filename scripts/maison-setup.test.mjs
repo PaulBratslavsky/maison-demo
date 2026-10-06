@@ -236,15 +236,29 @@ test("writes the app's settings to liff/.env and the ops token to strapi/.tmp, u
   assert.equal(outputPaths({ MAISON_SETUP_LIFF_ENV: '/elsewhere/.env.cloud' }).liffEnv, '/elsewhere/.env.cloud');
 });
 
-test('says what the seed did: the catalog it loaded or found, and the product knowledge it added', () => {
+test('says what the seed did: the catalog it loaded or found, and the product knowledge it added in each language', () => {
   const catalog = { collections: 4, products: 12, boutiques: 3, stockLevels: 20 };
-  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 16 }), ['Loaded the demo catalog.', 'Added 16 product knowledge entries.']);
+  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 16, knowledgeJa: 16 }), [
+    'Loaded the demo catalog.',
+    'Added 16 product knowledge entries in English and 16 in Japanese.',
+  ]);
   // A catalog loaded before gets the knowledge on the next run, and setup says so, not only that the catalog was there.
-  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 16 }), ['Demo catalog already loaded.', 'Added 16 product knowledge entries.']);
+  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 16, knowledgeJa: 16 }), [
+    'Demo catalog already loaded.',
+    'Added 16 product knowledge entries in English and 16 in Japanese.',
+  ]);
+  // A Strapi with the English product knowledge, as Strapi Cloud had it, gets the Japanese versions.
+  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 0, knowledgeJa: 16 }), [
+    'Demo catalog already loaded.',
+    'Added 16 product knowledge entries in Japanese.',
+  ]);
+  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 0, knowledgeJa: 1 }), ['Demo catalog already loaded.', 'Added 1 product knowledge entry in Japanese.']);
   // Nothing added: nothing to say about it.
-  assert.deepEqual(seedLines({ collections: 0, products: 0, boutiques: 0, stockLevels: 0, created: false, knowledge: 0 }), ['Demo catalog already loaded.']);
-  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 0 }), ['Loaded the demo catalog.']);
-  // A Strapi whose Maison copy predates product knowledge answers no `knowledge` at all.
+  assert.deepEqual(seedLines({ collections: 0, products: 0, boutiques: 0, stockLevels: 0, created: false, knowledge: 0, knowledgeJa: 0 }), ['Demo catalog already loaded.']);
+  assert.deepEqual(seedLines({ ...catalog, created: true, knowledge: 0, knowledgeJa: 0 }), ['Loaded the demo catalog.']);
+  // A Strapi whose Maison copy predates the Japanese product knowledge answers no `knowledgeJa`.
+  assert.deepEqual(seedLines({ ...catalog, created: false, knowledge: 16 }), ['Demo catalog already loaded.', 'Added 16 product knowledge entries in English.']);
+  // And one that predates product knowledge answers no `knowledge` at all.
   assert.deepEqual(seedLines({ created: false }), ['Demo catalog already loaded.']);
   assert.deepEqual(seedLines({ created: true }), ['Loaded the demo catalog.']);
 });

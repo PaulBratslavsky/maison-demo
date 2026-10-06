@@ -1,23 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import { describeActivity, describeReset, describeSeed } from '../../admin/src/seed-result';
 
-const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0 };
+const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
+const firstLoad = { created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36 };
 
 describe('describeSeed', () => {
-  it('names everything a first load created', () => {
-    expect(describeSeed({ created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 16 })).toBe(
-      'Loaded 12 products, 3 collections, 3 boutiques, 36 stock levels and 16 product knowledge entries.'
+  it('names everything a first load created, the product knowledge in English and in Japanese', () => {
+    expect(describeSeed({ ...firstLoad, knowledge: 16, knowledgeJa: 16 })).toBe(
+      'Loaded 12 products, 3 collections, 3 boutiques, 36 stock levels, 16 product knowledge entries in English and 16 in Japanese.'
     );
   });
 
   it('keeps the "and" before the last count when the product knowledge was there already', () => {
-    expect(describeSeed({ created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 0 })).toBe(
-      'Loaded 12 products, 3 collections, 3 boutiques and 36 stock levels.'
+    expect(describeSeed({ ...firstLoad, knowledge: 0, knowledgeJa: 0 })).toBe('Loaded 12 products, 3 collections, 3 boutiques and 36 stock levels.');
+  });
+
+  it('says when only the product knowledge was added, in both languages', () => {
+    expect(describeSeed({ ...nothing, knowledge: 16, knowledgeJa: 16 })).toBe(
+      'The demo catalog is already loaded. Added 16 product knowledge entries in English and 16 in Japanese.'
     );
   });
 
-  it('says when only the product knowledge was added', () => {
-    expect(describeSeed({ ...nothing, knowledge: 16 })).toBe('The demo catalog is already loaded. Added 16 product knowledge entries.');
+  it('says when only the Japanese versions were added, as on a Strapi that had the English product knowledge', () => {
+    expect(describeSeed({ ...nothing, knowledgeJa: 16 })).toBe('The demo catalog is already loaded. Added 16 product knowledge entries in Japanese.');
+  });
+
+  it('says "1 product knowledge entry" for one, in either language', () => {
+    expect(describeSeed({ ...nothing, knowledgeJa: 1 })).toBe('The demo catalog is already loaded. Added 1 product knowledge entry in Japanese.');
+    expect(describeSeed({ ...nothing, knowledge: 1, knowledgeJa: 1 })).toBe(
+      'The demo catalog is already loaded. Added 1 product knowledge entry in English and 1 in Japanese.'
+    );
+  });
+
+  it('names only the English entries when no Japanese version was added', () => {
+    expect(describeSeed({ ...nothing, knowledge: 16 })).toBe('The demo catalog is already loaded. Added 16 product knowledge entries in English.');
   });
 
   it('says when nothing changed', () => {

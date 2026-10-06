@@ -38,6 +38,7 @@ describe('loadDemoCatalog', () => {
     const upload = vi.fn(async (_args: { files: { originalFilename: string; mimetype: string } }) => [{ id: 1 }]);
     const documents = {
       findFirst: async () => null,
+      findMany: async () => [],
       count: async () => 0,
       create: async () => ({ documentId: 'doc' }),
       update: async () => ({}),
@@ -63,28 +64,76 @@ describe('loadDemoCatalog', () => {
 
 describe('loadDemoCatalog and the product knowledge', () => {
   const KNOWLEDGE = 'plugin::maison.knowledge';
+  const QUESTION = 'plugin::maison.question';
+  const seed = knowledge.entries;
+
+  /** A seed entry's English fields, spelled out here rather than taken from the code under test. */
+  const english = ({ category, productSlugs, title, answer, keywords }: (typeof seed)[number]) => ({ category, productSlugs, title, answer, keywords });
+
+  /** A seed entry's Japanese version, as the seed file has it. Read loosely so that a seed without one fails at run time. */
+  const japanese = (entry: (typeof seed)[number]) => (entry as { ja?: unknown }).ja;
+
+  /** A knowledge document's versions, by locale. */
+  type Versions = Record<string, Record<string, unknown>>;
+  type Call = { uid: string; method: string; params: any };
+
+  /** The sixteen seed entries in English only, as Strapi Cloud has them: k1 to k16, in the seed's order. */
+  const englishOnly = (): Record<string, Versions> => Object.fromEntries(seed.map((entry, index) => [`k${index + 1}`, { en: english(entry) }]));
 
   /**
-   * A Strapi whose catalog is or isn't there, with `knowledgeCount` English knowledge entries. It records every call to
-   * count, create and publish with its arguments, and each create answers a documentId of its own.
+   * A Strapi whose catalog is there, holding these knowledge documents, and questions whose answers created the entries
+   * in `answers`. A read answers as Strapi does for the filters the loader may use, a title or a documentId in a list
+   * (and a question's knowledgeDocumentId), and throws for any other, so a read the fake can't answer fails the test.
+   * It records every knowledge and question call in order, and each create answers a documentId of its own.
    */
-  const strapiWith = ({ catalogThere, knowledgeCount }: { catalogThere: boolean; knowledgeCount: number }) => {
-    const counted: Array<{ uid: string; params: unknown }> = [];
-    const created: Array<{ uid: string; locale: string; data: unknown }> = [];
-    const published: Array<{ uid: string; documentId: string; locale: string }> = [];
+  const strapiHolding = (held: Record<string, Versions> = {}, answers: string[] = []) => {
+    const store = new Map(Object.entries(held).map(([documentId, versions]) => [documentId, { ...versions }]));
+    const calls: Call[] = [];
+    let created = 0;
+    const listed = (condition: any, field: string): unknown[] => {
+      if (!Array.isArray(condition?.$in) || Object.keys(condition).length !== 1) {
+        throw new Error(`The fake can't filter ${field} by ${JSON.stringify(condition)}.`);
+      }
+      return condition.$in;
+    };
+    const matches = (documentId: string, version: Record<string, unknown>, filters: Record<string, unknown> = {}) =>
+      Object.entries(filters).every(([field, condition]) => {
+        if (field === 'documentId') return listed(condition, field).includes(documentId);
+        if (field === 'title') return listed(condition, field).includes(version.title);
+        throw new Error(`The fake can't filter knowledge by ${field}.`);
+      });
     const documents = (uid: string) => ({
-      findFirst: async () => (catalogThere ? { documentId: 'existing' } : null),
-      count: async (params: unknown) => {
-        counted.push({ uid, params });
-        return uid === KNOWLEDGE ? knowledgeCount : 0;
+      findFirst: async () => ({ documentId: 'the-catalog' }),
+      count: async (params: any) => {
+        calls.push({ uid, method: 'count', params });
+        return [...store.values()].filter((versions) => params.locale in versions).length;
       },
-      create: async ({ locale, data }: { locale: string; data: unknown }) => {
-        created.push({ uid, locale, data });
-        return { documentId: `doc-${created.length}` };
+      findMany: async (params: any) => {
+        calls.push({ uid, method: 'findMany', params });
+        if (uid === QUESTION) {
+          const wanted = listed(params.filters?.knowledgeDocumentId, 'knowledgeDocumentId');
+          return answers.filter((documentId) => wanted.includes(documentId)).map((knowledgeDocumentId) => ({ knowledgeDocumentId }));
+        }
+        return [...store.entries()]
+          .filter(([documentId, versions]) => params.locale in versions && matches(documentId, versions[params.locale], params.filters))
+          .map(([documentId, versions]) => ({ documentId, title: versions[params.locale].title }));
       },
-      update: async () => ({}),
-      publish: async ({ documentId, locale }: { documentId: string; locale: string }) => {
-        published.push({ uid, documentId, locale });
+      create: async (params: any) => {
+        calls.push({ uid, method: 'create', params });
+        created += 1;
+        const documentId = `doc-${created}`;
+        store.set(documentId, { [params.locale]: params.data });
+        return { documentId };
+      },
+      update: async (params: any) => {
+        calls.push({ uid, method: 'update', params });
+        const versions = store.get(params.documentId);
+        if (!versions) throw new Error(`No document ${params.documentId}.`);
+        versions[params.locale] = { ...versions[params.locale], ...params.data };
+        return {};
+      },
+      publish: async (params: any) => {
+        calls.push({ uid, method: 'publish', params });
         return {};
       },
     });
@@ -94,26 +143,92 @@ describe('loadDemoCatalog and the product knowledge', () => {
       }),
       documents,
     } as any;
-    return { strapi, counted, created, published };
+    return { strapi, calls, store };
   };
 
-  it('adds the product knowledge in English to a catalog loaded before, and publishes it', async () => {
-    const { strapi, counted, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 0 });
-    expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({
-      created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: knowledge.entries.length,
-    });
-    // It looks for English entries, creates each entry in English with its own data, and publishes what it created.
-    expect(counted).toEqual([{ uid: KNOWLEDGE, params: { locale: 'en' } }]);
-    expect(created).toEqual(knowledge.entries.map((data) => ({ uid: KNOWLEDGE, locale: 'en', data })));
-    expect(published).toEqual(knowledge.entries.map((_entry, index) => ({ uid: KNOWLEDGE, documentId: `doc-${index + 1}`, locale: 'en' })));
+  /** What the loader wrote to knowledge: each create, update and publish, with its arguments. */
+  const writes = (calls: Call[]) =>
+    calls.filter(({ uid, method }) => uid === KNOWLEDGE && ['create', 'update', 'publish'].includes(method)).map(({ method, params }) => [method, params]);
+
+  const catalogThere = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
+
+  it('adds the product knowledge in English and in Japanese to a Strapi without it, and publishes both versions', async () => {
+    const { strapi, calls } = strapiHolding();
+    expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({ ...catalogThere, knowledge: 16, knowledgeJa: 16 });
+    expect(writes(calls)).toEqual([
+      // Each entry in English, with its English fields only, published.
+      ...seed.flatMap((entry, index) => [
+        ['create', { locale: 'en', data: english(entry) }],
+        ['publish', { documentId: `doc-${index + 1}`, locale: 'en' }],
+      ]),
+      // Then each English document's Japanese version, with the seed's ja fields only, published in ja.
+      ...seed.flatMap((entry, index) => [
+        ['update', { documentId: `doc-${index + 1}`, locale: 'ja', data: japanese(entry) }],
+        ['publish', { documentId: `doc-${index + 1}`, locale: 'ja' }],
+      ]),
+    ]);
   });
 
-  it('adds nothing when there are English entries already', async () => {
-    const { strapi, counted, created, published } = strapiWith({ catalogThere: true, knowledgeCount: 3 });
-    expect((await seedService({ strapi }).loadDemoCatalog()).knowledge).toBe(0);
-    expect(counted).toEqual([{ uid: KNOWLEDGE, params: { locale: 'en' } }]);
-    expect(created).toEqual([]);
-    expect(published).toEqual([]);
+  it('adds only the Japanese versions to a Strapi that has the English entries, as Strapi Cloud has them, and leaves the English ones as they are', async () => {
+    const held = englishOnly();
+    const { strapi, calls, store } = strapiHolding(held);
+    expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({ ...catalogThere, knowledge: 0, knowledgeJa: 16 });
+    expect(calls.find(({ uid }) => uid === KNOWLEDGE)).toEqual({ uid: KNOWLEDGE, method: 'count', params: { locale: 'en' } });
+    expect(writes(calls)).toEqual(
+      seed.flatMap((entry, index) => [
+        ['update', { documentId: `k${index + 1}`, locale: 'ja', data: japanese(entry) }],
+        ['publish', { documentId: `k${index + 1}`, locale: 'ja' }],
+      ])
+    );
+    for (const [documentId, versions] of Object.entries(held)) expect(store.get(documentId)?.en, documentId).toEqual(versions.en);
+  });
+
+  it('adds nothing the second time, in either language', async () => {
+    const { strapi, calls } = strapiHolding();
+    await seedService({ strapi }).loadDemoCatalog();
+    const before = writes(calls).length;
+    expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({ ...catalogThere, knowledge: 0, knowledgeJa: 0 });
+    expect(writes(calls)).toHaveLength(before);
+  });
+
+  it('skips an entry whose English title staff changed, without an error, and adds the others', async () => {
+    const held = englishOnly();
+    held.k1.en = { ...held.k1.en, title: 'Leather care' };
+    const { strapi, calls, store } = strapiHolding(held);
+    expect((await seedService({ strapi }).loadDemoCatalog()).knowledgeJa).toBe(15);
+    expect(writes(calls).filter(([, params]) => params.documentId === 'k1')).toEqual([]);
+    expect(store.get('k1')).not.toHaveProperty('ja');
+  });
+
+  it('never touches an entry that a staff answer created, even one with a seed title', async () => {
+    const answer = { title: 'Do you gift wrap?', answer: 'Yes, in a Maison box.', category: 'gifting', productSlugs: [], keywords: '' };
+    const gift = `k${seed.findIndex((entry) => entry.title === 'Do you gift wrap?') + 1}`;
+
+    // Read first, before the seeded entry with the same title.
+    const both = strapiHolding({ 'answer-1': { en: answer }, ...englishOnly() }, ['answer-1']);
+    expect((await seedService({ strapi: both.strapi }).loadDemoCatalog()).knowledgeJa).toBe(16);
+    expect(writes(both.calls).filter(([, params]) => params.documentId === 'answer-1')).toEqual([]);
+    expect(writes(both.calls)).toContainEqual(['update', expect.objectContaining({ documentId: gift, locale: 'ja' })]);
+
+    // And when the seeded one is gone, the answer's entry still isn't taken for it.
+    const { [gift]: _gone, ...withoutSeeded } = englishOnly();
+    const alone = strapiHolding({ 'answer-1': { en: answer }, ...withoutSeeded }, ['answer-1']);
+    expect((await seedService({ strapi: alone.strapi }).loadDemoCatalog()).knowledgeJa).toBe(15);
+    expect(writes(alone.calls).filter(([, params]) => params.documentId === 'answer-1')).toEqual([]);
+  });
+
+  it('reads only the English documents with a seed title, the Japanese versions of those, and the questions that name them', async () => {
+    const { strapi, calls } = strapiHolding(englishOnly());
+    await seedService({ strapi }).loadDemoCatalog();
+    const reads = calls.filter(({ method }) => method === 'findMany');
+    const ids = seed.map((_entry, index) => `k${index + 1}`);
+    expect(reads).toHaveLength(3);
+    expect(reads[0]).toMatchObject({ uid: KNOWLEDGE, params: { locale: 'en', filters: { title: { $in: seed.map((entry) => entry.title) } } } });
+    expect(reads[1].uid).toBe(KNOWLEDGE);
+    expect(reads[1].params.locale).toBe('ja');
+    expect([...reads[1].params.filters.documentId.$in].sort()).toEqual([...ids].sort());
+    expect(reads[2].uid).toBe(QUESTION);
+    expect([...reads[2].params.filters.knowledgeDocumentId.$in].sort()).toEqual([...ids].sort());
   });
 });
 

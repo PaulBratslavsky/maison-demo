@@ -5,6 +5,7 @@ import type { Core } from '@strapi/strapi';
 import content from '../../seed/content.json';
 import knowledge from '../../seed/knowledge.json';
 import { UID } from '../constants';
+import { englishData, japaneseToAdd, type SeedKnowledgeEntry } from '../domain/knowledge-seed';
 import type { ServiceResult } from '../domain/service-result';
 import { loadDemoActivity, type ActivityResult } from './demo-activity';
 
@@ -13,6 +14,9 @@ const paragraph = (text: string) => [{ type: 'paragraph', children: [{ type: 'te
 
 /** How many documents the reset reads at a time. */
 const RESET_READ = 5000;
+
+/** The most documents a read for the seeded product knowledge answers: many more than its 16 entries could match. */
+const KNOWLEDGE_READ = 1000;
 
 /** At runtime this file is bundled into dist/server/index.js, so the package root is two levels up. */
 const seedDir = () => path.resolve(__dirname, '..', '..', 'server', 'seed');
@@ -33,7 +37,10 @@ export const imageMimeType = (fileName: string): string => {
   return mimeType;
 };
 
-/** What Load demo catalog did: the catalog it created (all zeros when it was there already), and the product knowledge it added. */
+/**
+ * What Load demo catalog did: the catalog it created (all zeros when it was there already), and the product knowledge it
+ * added: `knowledge` English entries, and `knowledgeJa` Japanese versions of English entries.
+ */
 export interface SeedResult {
   created: boolean;
   collections: number;
@@ -41,7 +48,11 @@ export interface SeedResult {
   boutiques: number;
   stockLevels: number;
   knowledge: number;
+  knowledgeJa: number;
 }
+
+/** The seeded product knowledge, in English with each entry's Japanese version. */
+const seedKnowledge: SeedKnowledgeEntry[] = knowledge.entries;
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const uploadImage = async (fileName: string, alternativeText: string): Promise<number> => {
@@ -71,7 +82,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
   const pick = (value: Localized, locale: 'ja' | 'en') => value[locale];
 
-  const loadCatalog = async (): Promise<Omit<SeedResult, 'knowledge'>> => {
+  const loadCatalog = async (): Promise<Omit<SeedResult, 'knowledge' | 'knowledgeJa'>> => {
     const existing = await strapi.documents(UID.collection).findFirst({
       locale: 'ja',
       filters: { slug: { $eq: content.collections[0].slug } },
@@ -125,17 +136,61 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   /**
-   * Maison's product knowledge, in English only for now, as the stage demo is in English: one published en document per
-   * entry. It loads when there's no en entry yet, whether or not the catalog was there before, so a Strapi that loaded
-   * the catalog earlier gets it too.
+   * Maison's product knowledge in English: one published en document per entry. It loads when there's no en entry yet,
+   * whether or not the catalog was there before, so a Strapi that loaded the catalog earlier gets it too. Returns how
+   * many it added.
    */
-  const loadKnowledge = async (): Promise<number> => {
+  const loadEnglishKnowledge = async (): Promise<number> => {
     if ((await strapi.documents(UID.knowledge).count({ locale: 'en' })) > 0) return 0;
-    for (const entry of knowledge.entries) {
-      const { documentId } = await strapi.documents(UID.knowledge).create({ locale: 'en', data: entry });
+    for (const entry of seedKnowledge) {
+      const { documentId } = await strapi.documents(UID.knowledge).create({ locale: 'en', data: englishData(entry) });
       await strapi.documents(UID.knowledge).publish({ documentId, locale: 'en' });
     }
-    return knowledge.entries.length;
+    return seedKnowledge.length;
+  };
+
+  /**
+   * The Japanese version of each seeded entry, on the English document with the entry's title, published in ja: only
+   * where that document has none yet (japaneseToAdd has the rules). Returns how many it added.
+   *
+   * In Strapi 5's Document Service, update() with a locale the document doesn't have yet creates that locale's version,
+   * with the fields every locale shares copied from an existing one (@strapi/core's document-service repository, and
+   * docs.strapi.io's REST API locale page: "Create a new, or update an existing, locale version"). publish() with that
+   * locale publishes only that version.
+   */
+  const loadJapaneseKnowledge = async (): Promise<number> => {
+    const english = (await strapi.documents(UID.knowledge).findMany({
+      locale: 'en',
+      filters: { title: { $in: seedKnowledge.map((entry) => entry.title) } },
+      fields: ['documentId', 'title'],
+      limit: KNOWLEDGE_READ,
+    })) as Array<{ documentId: string; title?: string | null }>;
+    if (english.length === 0) return 0;
+    const documentIds = english.map(({ documentId }) => documentId);
+    const japanese = (await strapi.documents(UID.knowledge).findMany({
+      locale: 'ja',
+      filters: { documentId: { $in: documentIds } },
+      fields: ['documentId'],
+      limit: KNOWLEDGE_READ,
+    })) as Array<{ documentId: string }>;
+    const answers = (await strapi.documents(UID.question).findMany({
+      filters: { knowledgeDocumentId: { $in: documentIds } },
+      fields: ['knowledgeDocumentId'],
+      limit: KNOWLEDGE_READ,
+    })) as Array<{ knowledgeDocumentId?: string | null }>;
+
+    const toAdd = japaneseToAdd(seedKnowledge, {
+      english: english.map(({ documentId, title }) => ({ documentId, title: title ?? '' })),
+      withJapanese: japanese.map(({ documentId }) => documentId),
+      answers: answers.map(({ knowledgeDocumentId }) => knowledgeDocumentId).filter((id): id is string => Boolean(id)),
+    });
+    for (const { documentId, data } of toAdd) {
+      // The plugin has no generated types for its content types, so update()'s types don't know these fields: a plain record.
+      const version: Record<string, string> = { ...data };
+      await strapi.documents(UID.knowledge).update({ documentId, locale: 'ja', data: version });
+      await strapi.documents(UID.knowledge).publish({ documentId, locale: 'ja' });
+    }
+    return toAdd.length;
   };
 
   /**
@@ -164,7 +219,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     async loadDemoCatalog(): Promise<SeedResult> {
       await ensureLocales();
       const catalog = await loadCatalog();
-      return { ...catalog, knowledge: await loadKnowledge() };
+      const englishKnowledge = await loadEnglishKnowledge();
+      return { ...catalog, knowledge: englishKnowledge, knowledgeJa: await loadJapaneseKnowledge() };
     },
 
     /**

@@ -60,3 +60,60 @@ describe('the product knowledge seed and the demo catalog', () => {
     expect(entry?.answer).not.toMatch(/\d+ days?/);
   });
 });
+
+/** Every measurement in a text, like "55 × 40 × 23 cm", in order. */
+const measurements = (text: string) => [...text.matchAll(/\d+ × \d+(?: × \d+)? cm/g)].map(([found]) => found);
+
+describe('the Japanese version of each product knowledge entry', () => {
+  /** An entry's ja object, read loosely so that a seed without one fails these tests instead of the typecheck. */
+  const japanese = (entry: (typeof knowledge.entries)[number]) =>
+    (entry as { ja?: { title?: unknown; answer?: unknown; keywords?: unknown } }).ja;
+
+  it('has a title, an answer and keywords, and nothing else', () => {
+    for (const entry of knowledge.entries) {
+      const ja = japanese(entry);
+      expect(Object.keys(ja ?? {}).sort(), entry.title).toEqual(['answer', 'keywords', 'title']);
+      for (const value of Object.values(ja ?? {})) expect(typeof value === 'string' && value.trim().length > 0, entry.title).toBe(true);
+    }
+  });
+
+  it('is written in Japanese, each with its own title', () => {
+    expect(new Set(knowledge.entries.map((entry) => String(japanese(entry)?.title))).size).toBe(16);
+    for (const entry of knowledge.entries) {
+      for (const field of ['title', 'answer', 'keywords'] as const) {
+        expect(String(japanese(entry)?.[field]), `${entry.title}: ${field}`).toMatch(/[぀-ヿ一-鿿]/u);
+      }
+    }
+  });
+
+  it('fits the content type limits', () => {
+    for (const entry of knowledge.entries) {
+      const ja = japanese(entry);
+      expect(String(ja?.title).length, entry.title).toBeLessThanOrEqual(schema.attributes.title.maxLength);
+      expect(String(ja?.answer).length, entry.title).toBeLessThanOrEqual(schema.attributes.answer.maxLength);
+      expect(String(ja?.keywords).length, entry.title).toBeLessThanOrEqual(schema.attributes.keywords.maxLength);
+    }
+  });
+
+  it("names each of the entry's pieces in its keywords as the catalog names it in Japanese", () => {
+    for (const entry of knowledge.entries) {
+      const keywords = String(japanese(entry)?.keywords).split(',').map((keyword) => keyword.trim());
+      for (const slug of entry.productSlugs) {
+        const name = content.products.find((product) => product.slug === slug)?.name.ja;
+        expect(keywords, `${entry.title}: ${slug}`).toContain(name);
+      }
+    }
+  });
+
+  it('gives the same measurements as the English answer, in the same order', () => {
+    for (const entry of knowledge.entries) {
+      expect(measurements(String(japanese(entry)?.answer)), entry.title).toEqual(measurements(entry.answer));
+    }
+  });
+
+  it('gives no personalization time of its own either', () => {
+    const entry = knowledge.entries.find((candidate) => candidate.category === 'personalization');
+    expect(entry && japanese(entry)?.answer).toEqual(expect.any(String));
+    expect(String(entry && japanese(entry)?.answer)).not.toMatch(/\d+\s*日/);
+  });
+});

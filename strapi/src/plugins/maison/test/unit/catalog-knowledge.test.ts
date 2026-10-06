@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { rankKnowledge } from '../../server/src/domain/knowledge';
 import catalogService from '../../server/src/services/catalog';
 import { fakeStrapi } from './fake-strapi';
 
@@ -39,6 +40,20 @@ describe('catalog.searchKnowledge', () => {
     const japaneseOnly = { ...leather, documentId: 'k3', title: '革のお手入れ', keywords: 'leather' };
     const result = await catalogWith({ knowledge: { en: [cabin], ja: [japaneseOnly] } }).searchKnowledge('en', { query: 'leather' });
     expect(result.ok && result.value.entries.map((found) => found.title)).toEqual(['革のお手入れ']);
+  });
+
+  it('answers a Japanese question only from Japanese entries: an English-only entry is never searched, even one its words match', async () => {
+    const question = 'キャビンケース55は機内に持ち込めますか？';
+    // "55" is in the English title, so the ranking alone would match it.
+    expect(rankKnowledge([cabin], question, 'ja')).toHaveLength(1);
+    const result = await catalogWith({ knowledge: { en: [leather, cabin] } }).searchKnowledge('ja', { query: question });
+    expect(result).toEqual({ ok: true, value: { entries: [] } });
+  });
+
+  it("answers a Japanese question from an entry's Japanese version", async () => {
+    const japanese = { ...cabin, title: 'キャビン・ケース 55 は、機内の収納棚に入るサイズですか？', answer: '55 × 40 × 23 cm です。', keywords: '機内, 持ち込み' };
+    const result = await catalogWith({ knowledge: { en: [cabin], ja: [japanese] } }).searchKnowledge('ja', { query: 'キャビンケース55は機内に持ち込めますか？' });
+    expect(result.ok && result.value.entries.map((found) => found.title)).toEqual([japanese.title]);
   });
 
   it('reads a productSlugs value that is not a list as an entry for every piece', async () => {
