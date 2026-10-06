@@ -59,7 +59,7 @@ describe('createdVia', () => {
     for (const createdVia of CREATED_VIA) {
       const row = {
         reference: 'APT-4821', status: 'requested', customer: 'line:U4af…88', boutique: null, requestedFor: '2030-01-12T14:00:00+09:00',
-        products: [], note: '', createdVia, confirmationSent: false, demoCustomer: false, createdAt: '2026-10-01T09:00:00+09:00',
+        products: [], note: '', createdVia, confirmationSent: false, demoCustomer: false, yourLine: false, createdAt: '2026-10-01T09:00:00+09:00',
       };
       expect(staffAppointmentOutput.parse(row).createdVia).toBe(createdVia);
     }

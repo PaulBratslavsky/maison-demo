@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import activity from '../../server/seed/activity.json';
 import { mapConcurrently } from '../../server/src/domain/concurrency';
-import { assignActivity, isDemoCustomer, type ActivitySeed } from '../../server/src/domain/demo-activity';
+import { assignActivity, isDemoCustomer, isYourLine, type ActivitySeed } from '../../server/src/domain/demo-activity';
 import { DEMO_DETAIL } from '../../server/src/domain/line-outcome';
 
 const seed = activity as ActivitySeed;
@@ -9,6 +9,8 @@ const SUBJECTS = activity.customers.map((customer) => customer.subject);
 const subjectOf = (key: string) => activity.customers.find((customer) => customer.key === key)?.subject;
 /** Paul's own LINE account, as the plugin's demoLineUserId names it, as a subject. */
 const YOU = `line:U${'0123456789abcdef'.repeat(2)}`;
+/** The same account as demoLineUserId has it: the LINE user ID, without the `line:` prefix. */
+const YOU_ID = YOU.slice('line:'.length);
 
 describe('isDemoCustomer', () => {
   it("is true for each of the five made-up customers in activity.json, and only for them", () => {
@@ -28,6 +30,57 @@ describe('isDemoCustomer', () => {
     ['a number', 42],
   ])('is false for %s', (_label, subject) => {
     expect(isDemoCustomer(subject)).toBe(false);
+  });
+});
+
+describe('isYourLine', () => {
+  it("is true for the subject of the presenter's own LINE account, and only for it", () => {
+    expect(isYourLine(YOU, YOU_ID)).toBe(true);
+  });
+
+  it('is false for every subject when demoLineUserId is not set, the presenter\'s own included', () => {
+    expect(isYourLine(YOU, null)).toBe(false);
+    expect(isYourLine(YOU, undefined as never)).toBe(false);
+    expect(isYourLine(YOU, '')).toBe(false);
+    expect(isYourLine('line:', '')).toBe(false);
+    expect(isYourLine('line:', null)).toBe(false);
+  });
+
+  it('is false for each of the five made-up customers, who are demo customers and not you', () => {
+    for (const subject of SUBJECTS) {
+      expect(isYourLine(subject, YOU_ID), subject).toBe(false);
+      expect(isDemoCustomer(subject), subject).toBe(true);
+    }
+  });
+
+  it("is never true for a made-up customer's subject: no subject is both yours and a demo customer's", () => {
+    expect([YOU, ...SUBJECTS].filter((subject) => isYourLine(subject, YOU_ID) && isDemoCustomer(subject))).toEqual([]);
+  });
+
+  it.each([
+    ['another real customer', `line:U${'a'.repeat(32)}`],
+    ['an ID that only starts like yours', `${YOU}0`],
+    ['an ID that only ends like yours', `line:Ux${YOU_ID}`],
+    ['your ID without its line: prefix', YOU_ID],
+    ['your subject in capitals', YOU.toUpperCase()],
+    ['your subject with a space after it', `${YOU} `],
+    ['your subject with a space before it', ` ${YOU}`],
+    ['a made-up subject that is not in the seed', 'line:Udec0de00000000000000000000000009'],
+    ['an empty string', ''],
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 42],
+    ['an object', { customer: YOU }],
+    ['an array holding your subject', [YOU]],
+    ['a String object, which is not a string', new String(YOU)],
+  ])('is false for %s', (_label, subject) => {
+    expect(isYourLine(subject, YOU_ID)).toBe(false);
+  });
+
+  it('reads the ID it is given, so a different ID names a different account', () => {
+    const other = `U${'f'.repeat(32)}`;
+    expect(isYourLine(`line:${other}`, other)).toBe(true);
+    expect(isYourLine(YOU, other)).toBe(false);
   });
 });
 

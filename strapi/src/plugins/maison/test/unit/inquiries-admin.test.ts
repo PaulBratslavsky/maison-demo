@@ -33,6 +33,7 @@ import {
   type StaffInquiry,
 } from '../../admin/src/inquiries';
 import { lineNote } from '../../admin/src/line-note';
+import { YOUR_LINE_LABEL, yourLineBadge } from '../../admin/src/your-line';
 import { CLOSE_REASONS, INQUIRY_FILTERS, INQUIRY_KINDS, INQUIRY_QUEUES, LOCALES, SENTIMENT_LABELS } from '../../server/src/constants';
 import { suggestedReply as serverSuggestedReply } from '../../server/src/domain/inquiry-replies';
 import { NO_TOKEN } from '../../server/src/domain/line-outcome';
@@ -733,5 +734,25 @@ describe('introText', () => {
   it("leaves out changing the label for an admin who can't: they have no button for it", () => {
     expect(introText(false)).toBe('What customers ask the concierge, in queues. A model labels each inquiry.');
     expect(introText(false)).not.toMatch(/change/i);
+  });
+});
+
+describe("the row's \"Your LINE\" label", () => {
+  const YOU_ID = `U${'5ca1ab1e'.repeat(4)}`;
+  const withYou = { ...WITH_TOKEN, demoLineUserId: YOU_ID };
+
+  // The page reads `yourLine` from the server's own view, so the label shows on exactly the rows the server marks.
+  it("is on the presenter's own rows, as the server's view says, and on no other", async () => {
+    const mine = await world({ rows: [row('inq-x', { customer: `line:${YOU_ID}` })], config: withYou }).service.list({ filter: 'all' });
+    const theirs = await world({ rows: [row('inq-x')], config: withYou }).service.list({ filter: 'all' });
+    if (mine.ok === false || theirs.ok === false) throw new Error('The list failed.');
+    expect(yourLineBadge(mine.value[0] as unknown as StaffInquiry)?.label).toBe(YOUR_LINE_LABEL);
+    expect(yourLineBadge(theirs.value[0] as unknown as StaffInquiry)).toBeNull();
+  });
+
+  it('is on no row when demoLineUserId is not set, so a Strapi without the setting shows no label', async () => {
+    const view = await viewOf({ customer: `line:${YOU_ID}` });
+    expect(view.yourLine).toBe(false);
+    expect(yourLineBadge(view)).toBeNull();
   });
 });

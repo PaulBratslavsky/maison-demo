@@ -14,7 +14,7 @@ import {
   type QuestionStatus,
   type SentimentLabel,
 } from '../constants';
-import { isDemoCustomer } from '../domain/demo-activity';
+import { isDemoCustomer, isYourLine } from '../domain/demo-activity';
 import { queueFor } from '../domain/inquiry-queue';
 import { inquiryReplyText } from '../domain/inquiry-replies';
 import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
@@ -71,6 +71,11 @@ export interface StaffInquiryView {
   repliedBy: string | null;
   /** How the last LINE message went: `demo` for a made-up demo customer, who gets none. */
   line: { outcome: 'sent' | 'failed' | 'demo'; detail: string | null } | null;
+  /**
+   * The presenter's own LINE account (the plugin's demoLineUserId): Reply on LINE sends a real LINE message to the
+   * presenter. The list shows a "Your LINE" label. Never the ID itself.
+   */
+  yourLine: boolean;
 }
 
 export interface InquiryFilters {
@@ -170,7 +175,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     return new Map(questions.map((question) => [question.reference, question.status]));
   };
 
-  const toStaffView = (row: Doc, product: StaffInquiryView['product'], question: StaffInquiryView['question']): StaffInquiryView => ({
+  const toStaffView = (
+    row: Doc,
+    product: StaffInquiryView['product'],
+    question: StaffInquiryView['question'],
+    demoLineUserId: string | null
+  ): StaffInquiryView => ({
     documentId: row.documentId,
     createdAt: new Date(row.createdAt).toISOString(),
     customer: maskSubject(row.customer),
@@ -197,6 +207,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     repliedAt: isoOrNull(row.repliedAt),
     repliedBy: row.repliedBy ?? null,
     line: row.lineOutcome ? { outcome: row.lineOutcome, detail: row.lineDetail || null } : null,
+    yourLine: isYourLine(row.customer, demoLineUserId),
   });
 
   /** Rows as staff see them. Each piece is looked up once per language, and the questions of all the hand-offs in one query. */
@@ -205,7 +216,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     const nameOf = rememberProductNames(findProduct);
     const questionOf = (row: Doc): StaffInquiryView['question'] =>
       row.questionReference ? { reference: row.questionReference, status: statuses.get(row.questionReference) ?? null } : null;
-    return Promise.all(rows.map(async (row) => toStaffView(row, await nameOf(row), questionOf(row))));
+    const { demoLineUserId } = getConfig(strapi);
+    return Promise.all(rows.map(async (row) => toStaffView(row, await nameOf(row), questionOf(row), demoLineUserId)));
   };
 
   const findRow = async (documentId: string): Promise<Doc | null> => (await strapi.documents(UID.inquiry).findOne({ documentId })) as Doc | null;

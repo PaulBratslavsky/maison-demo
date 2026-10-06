@@ -86,6 +86,7 @@ export const PENDING_VIEW = {
   repliedAt: null,
   repliedBy: null,
   line: null,
+  yourLine: false,
 };
 
 /** The model labelled it a question the concierge did not answer, so it needs an answer. */

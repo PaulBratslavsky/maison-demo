@@ -6,6 +6,8 @@ export interface BoardRow {
   confirmationSent: boolean;
   /** One of Load demo activity's made-up customers, who gets no LINE message. A row that doesn't say is a real customer's. */
   demoCustomer?: boolean;
+  /** The presenter's own LINE account: the board shows "Your LINE" beside it. A row that doesn't say is a customer's. */
+  yourLine?: boolean;
 }
 
 /**
