@@ -11,22 +11,51 @@ const TOOLS = [
 ];
 
 const area = (props: Partial<Parameters<typeof ChatArea>[0]> = {}) => (
-  <ChatArea model="claude-sonnet-5-5" tools={TOOLS} canStartOver newChatOffered={false} onNewChat={() => {}} {...props}>
+  <ChatArea
+    model="claude-sonnet-5-5"
+    tools={TOOLS}
+    canStartOver
+    newChatOffered={false}
+    onNewChat={() => {}}
+    sidebar={<nav aria-label="The sidebar">The saved chats</nav>}
+    historyOpen={false}
+    onToggleHistory={() => {}}
+    {...props}
+  >
     <p>The messages and the composer</p>
   </ChatArea>
 );
 
 describe('ChatArea', () => {
-  it('has the tools, the model and New chat in the top bar, in that order, and what it is given under it', () => {
+  it('has the sidebar, then History, the tools, the model and New chat in the top bar, in that order, and what it is given under it', () => {
     renderInTheme(area());
+    const sidebar = screen.getByRole('navigation', { name: 'The sidebar' });
+    const history = screen.getByRole('button', { name: 'History' });
     const tools = screen.getByRole('button', { name: 'Tools (2)' });
     const model = screen.getByText('claude-sonnet-5-5');
     const newChat = screen.getByRole('button', { name: 'New chat' });
     const body = screen.getByText('The messages and the composer');
     const before = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(sidebar, history)).toBe(true);
+    expect(before(history, tools)).toBe(true);
     expect(before(tools, model)).toBe(true);
     expect(before(model, newChat)).toBe(true);
     expect(before(newChat, body)).toBe(true);
+  });
+
+  it('opens and closes the sidebar with History, which says what it will do and whether the sidebar is open', async () => {
+    const onToggleHistory = vi.fn();
+    const view = renderInTheme(area({ onToggleHistory }));
+    const closed = screen.getByRole('button', { name: 'History' });
+    expect(closed.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(closed);
+    expect(onToggleHistory).toHaveBeenCalledOnce();
+
+    view.unmount();
+    renderInTheme(area({ historyOpen: true }));
+    const opened = screen.getByRole('button', { name: 'Hide history' });
+    expect(opened.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByRole('button', { name: 'History' })).toBeNull();
   });
 
   it('names the model as the status gave it: the ID as it is, which the badge draws in capitals', () => {

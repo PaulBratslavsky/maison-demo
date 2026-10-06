@@ -6,6 +6,7 @@ import { askTabState, canSend, type MessageSource } from '../../assistant';
 import { useAssistant } from './AssistantProvider';
 import { ChatArea } from './ChatArea';
 import { Composer } from './Composer';
+import { ConversationSidebar } from './ConversationSidebar';
 import { ErrorBox, NoteBox } from './ErrorBox';
 import { MessageList } from './MessageList';
 import { SetupNotice } from './SetupNotice';
@@ -41,7 +42,7 @@ export const AskTab = () => {
     );
   }
 
-  const { busy, ready, notice, note, draft } = assistant;
+  const { busy, ready, notice, note, draft, history } = assistant;
 
   const send = (message: string, source: MessageSource) => {
     if (!canSend({ text: message, busy, ready })) return;
@@ -57,9 +58,13 @@ export const AskTab = () => {
       canStartOver={assistant.messages.length > 0 || notice !== null || note !== null}
       newChatOffered={notice?.newChat === true}
       onNewChat={assistant.newChat}
+      sidebar={<ConversationSidebar chats={history.chats} openId={history.openId} open={history.sidebarOpen} busy={busy} onSelect={(id) => void history.openChat(id)} onNew={assistant.newChat} onDelete={(id) => void history.deleteChat(id)} />}
+      historyOpen={history.sidebarOpen}
+      onToggleHistory={() => history.setSidebarOpen(!history.sidebarOpen)}
     >
       <MessageList messages={assistant.messages} busy={busy} onStarter={(starter) => send(starter, 'starter')} canStart={(starter) => canSend({ text: starter, busy, ready })} />
-      {notice && <ErrorBox>{notice.text}</ErrorBox>}
+      {/* A turn's error wins over a problem with the saved chats: it is about what staff are watching. */}
+      {(notice?.text ?? history.error) && <ErrorBox>{notice?.text ?? history.error}</ErrorBox>}
       {note && <NoteBox>{note}</NoteBox>}
       <Composer draft={draft} onDraft={assistant.setDraft} busy={busy} ready={ready} onSend={(text) => send(text, 'box')} onStop={assistant.stop} textareaRef={box} />
     </ChatArea>
