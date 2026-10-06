@@ -91,6 +91,9 @@ export default {
         handler: 'inquiries.labelAgain',
         config: { policies: allow(ACTION.inquiriesReply) },
       },
+      // The Ask tab: whether the assistant is ready, and one chat turn. Both need the permission "Use the Maison assistant".
+      { method: 'GET', path: '/assistant/status', handler: 'assistant.status', config: { policies: allow(ACTION.assistantUse) } },
+      { method: 'POST', path: '/assistant/chat', handler: 'assistant.chat', config: { policies: allow(ACTION.assistantUse) } },
       { method: 'POST', path: '/demo/seed', handler: 'demo.seed', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/reset', handler: 'demo.reset', config: { policies: allow(ACTION.demoManage) } },
       { method: 'POST', path: '/demo/activity', handler: 'demo.activity', config: { policies: allow(ACTION.demoManage) } },
