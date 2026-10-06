@@ -73,6 +73,7 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `aiModel` | the provider's own | A model ID: `env('AI_MODEL', '')`. Without one, it's `claude-haiku-4-5-20251001` for `anthropic`, `gpt-5-mini` for `openai` and `llama3.1` for `openai-compatible`. |
 | `aiApiKey` | `null` | The provider's API key: `env('AI_API_KEY', '')`. Without it, and for `openai-compatible` without `aiBaseUrl`, labelling is off ([Labelling](#labelling)). |
 | `aiBaseUrl` | `null` | Where an `openai-compatible` server answers, such as `http://127.0.0.1:11434/v1` for Ollama: `env('AI_BASE_URL', '')`. An http or https URL, with no trailing slash. |
+| `demoLineUserId` | `null` | Optional. Your own LINE user ID, `U` and 32 lowercase hex characters: `env('MAISON_DEMO_LINE_USER_ID', '')`. With it, [Load demo activity](#load-demo-activity) gives your LINE account one waiting request, one open question and one open complaint, so confirming and replying send real LINE messages to your phone. Any other value stops Strapi from starting, with a message that names the setting and never the value. Never logged, and masked in the admin like every customer. An empty value counts as not set. |
 
 ## Tools
 
@@ -94,11 +95,11 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 
 **Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. A search in `ja`, the default locale, reads only the Japanese versions. A search in `en` reads the English versions, and an entry's Japanese version where it has no English one.
 
-**Load demo catalog** adds 16 entries in English and Japanese, also to a catalog loaded before. Each entry is one document with an `en` and a `ja` version: the title, answer and keywords are in each language, and the category and products are shared. The content is in `server/seed/knowledge.json`, each entry's Japanese version under `ja`.
+**Load demo catalog** adds 16 entries in English and Japanese, also to a catalog loaded before. It first reads what is missing, and answers at once: `200` with all zeros when everything is there, or `202` with `started: true` and what it will add, which it then writes in the background ([Load demo activity](#load-demo-activity) works the same way). Each entry is one document with an `en` and a `ja` version: the title, answer and keywords are in each language, and the category and products are shared. The content is in `server/seed/knowledge.json`, each entry's Japanese version under `ja`.
 - **English:** it adds the 16 English entries only when no English entry exists, so if it stops partway through them, delete the English product knowledge entries and press **Load demo catalog** again.
-- **Japanese:** then it finds each entry's English document by its English title, and when that document has no Japanese version, adds one and publishes it. A Strapi that has only the English entries gets the 16 Japanese versions, and pressing again adds nothing.
+- **Japanese:** then it finds each entry's English document by its English title, and when that document has no Japanese version, adds one and publishes it, four entries at a time. A Strapi that has only the English entries gets the 16 Japanese versions, and pressing again adds nothing.
 - **Staff changes stay:** an entry whose English title staff changed is skipped, and the entries staff added by answering questions are never changed.
-- **The result:** Strapi answers `knowledge`, the English entries it added, and `knowledgeJa`, the Japanese versions, and the page's notice names both.
+- **The result:** Strapi answers `knowledge`, the English entries it adds, and `knowledgeJa`, the Japanese versions, and the page's notice names both. The log says what was added once it has finished, and a failure partway is logged as an error: press **Load demo catalog** again, since it adds only what is missing. A press while a load is still running answers `409` with `already_loading` and starts nothing. `npm run setup` presses again every second until everything is there.
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
@@ -218,7 +219,7 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 ## The admin page
 
 **Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
-- **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
+- **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)). A made-up demo customer's request says "demo customer" in grey, and has no Send again: Strapi sends those customers nothing.
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
 - **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
@@ -228,11 +229,30 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 **Load demo activity**, under Demo data, adds five made-up customers, each with one visit request, one question and two inquiries, received over the last three days. It needs the demo catalog: without it, nothing is added, and the page says to press **Load demo catalog** first.
 
 - **The customers** are Aiko T., Kenji M., Sophie L., Daniel R. and Mei W., with fixed LINE user IDs that belong to nobody: `line:Udec0de`, zeros, then a digit. Staff see them masked, as `line:Udec…01`.
-- **Requests:** five visits at Ginza, Omotesando and Osaka, 2 to 13 days ahead, on a half-hour inside the boutique's opening hours (never Osaka on a Tuesday), for pieces the boutique has in stock when the button is pressed. They are requested through the same service as a customer's, so each gets an `APT-` reference and passes the board's rules. They mix English and Japanese, the app and the concierge, and two carry a note. Three wait for staff. Two are confirmed, which sends their LINE confirmations as any confirmation does: no phone receives them, and the board shows what LINE answered.
+- **Requests:** five visits at Ginza, Omotesando and Osaka, 2 to 13 days ahead, on a half-hour inside the boutique's opening hours (never Osaka on a Tuesday), for pieces the boutique has in stock when the button is pressed. They are requested through the same service as a customer's, so each gets an `APT-` reference and passes the board's rules. They mix English and Japanese, the app and the concierge, and two carry a note. Three wait for staff. Two are confirmed as any confirmation is, and record `demo`, with no LINE call ([Demo customers](#demo-customers)).
 - **Questions:** five that product knowledge doesn't answer, with `Q-` references: three open (one of them asking for a person), one taken and one answered. Nothing was sent to the customers, so none of them has a LINE outcome, and the answer isn't product knowledge.
 - **Inquiries:** each question's hand-off turn, in Needs an answer (the answered question's is replied, with the answer), and five more: two complaints, one praise, one question the concierge answered from product knowledge, and one left unlabelled, which the labelling sweep labels within a minute when AI is on. Their labels are recorded with `modelVersion` `demo-seed` and no `promptVersion`, and each queue comes from the same rule as a model's labels.
 
-It adds them only when none of the five customers has an appointment, a question or an inquiry, so pressing it again changes nothing, and nobody else's activity counts or is touched. A press while one is loading waits for it. **Reset demo activity** deletes the demo activity with everything else. `POST /maison/demo/activity` answers `{ created, customers, appointments, confirmed, questions, inquiries }`, all zeros with `created: false` when it was there already, or a 404 when the catalog isn't loaded. What it adds is in `server/seed/activity.json`.
+It adds them only when none of the five customers has an appointment, a question or an inquiry, so pressing it again changes nothing, and nobody else's activity counts or is touched. **Reset demo activity** deletes the demo activity with everything else. What it adds is in `server/seed/activity.json`.
+
+**It answers at once and writes in the background.** On Strapi Cloud each write goes to a remote database, and a press that waited for all of them took about 28 seconds, long enough for Cloud's proxy to answer an HTML error page. So `POST /maison/demo/activity`:
+- first checks whether the demo activity is there and plans the visits, which only reads, so "load the catalog first" (a 404) still comes back on the press
+- answers `200` with `{ created: false, customers: 0, … }` when it was there already
+- otherwise answers `202` with `{ started: true, appointments, questions, inquiries }`, the counts it will add, and the page says "Loading demo activity: the lists fill in over the next few seconds."
+- then writes three groups side by side: the visits (each request, its confirmation, then when it came in), the questions (each with its hand-off, one after another so each reference stays unique), and the standalone inquiries. The log says what was added once it has finished. A failure partway is logged as an error that says to press Reset demo activity, then Load demo activity again. It never stops Strapi.
+
+A press while a load is still running answers `409` with `already_loading`, and starts nothing. On any demo button, an answer that isn't JSON, such as a proxy's HTML page, shows "Strapi took too long to answer. Wait a few seconds: the lists refresh by themselves." instead of a parse error.
+
+**Your own LINE account.** With `demoLineUserId` set (`MAISON_DEMO_LINE_USER_ID`), three items marked `"owner": "you"` in `activity.json` go to your LINE account instead of a made-up customer: one waiting request, one open question (no answer in product knowledge) and one open complaint. You aren't a demo customer, so confirming the request, **Let them know**, **Answer** and **Reply on LINE** send real LINE messages to your phone. Your question is named with your LINE display name when Strapi has a channel access token, and has no name otherwise. If your account has as many open requests as a customer may have (`maxOpenRequestsPerCustomer`), your request stays with its made-up customer, and the log says so. Your items are added only in the same load as the made-up customers', and your own activity never stops a load or is touched. Without the setting, every item goes to the made-up customers.
+
+### Demo customers
+
+The five made-up customers' LINE user IDs belong to nobody, so LINE refuses every message to them. Strapi never tries: for a made-up customer (`isDemoCustomer` in `server/src/domain/demo-activity.ts`, the subjects in `activity.json`), every action that would push to LINE skips the push and records the outcome `demo`, with the detail "Demo customer: no LINE message". Everything else the action does still happens.
+- **Confirming a visit**, by any route: a `demo` notification, and no Send again. The board's LINE column says "demo customer" in grey, and Confirm's notice says "Confirmed APT-1234. Demo customer: no LINE message."
+- **Let them know** and **Answer:** the question is taken or answered, an answer can become product knowledge, and its hand-off inquiries are replied. The question's `lineOutcome` is `demo`, shown in grey under its status.
+- **Reply on LINE:** the inquiry is replied, with `lineOutcome` `demo`, shown in grey.
+
+These answer `200` with `status: "demo"`, and the page shows an info notice. A `demo` outcome is never pending (`pending_confirmations` lists none), and never counts as "LINE sent". The LINE quota line counts what LINE itself reports, so a demo outcome never shows there.
 
 ## The Homepage widgets
 
@@ -243,7 +263,7 @@ It adds them only when none of the five customers has an appointment, a question
   - **Reference**, **Customer** (masked, like `line:U4af…88`) and **Boutique**.
   - **Visit:** the visit time in Tokyo.
   - **Note:** what the customer wrote, cut to one line. Hover for all of it. A dash when there is none.
-  - **Status** and **LINE** ("LINE sent" or "not sent"), in the words and colours of the board.
+  - **Status** and **LINE** ("LINE sent", "not sent", or "demo customer" for a made-up customer), in the words and colours of the board.
 - It refreshes every 5 seconds. If a refresh fails, it keeps the last result on screen with a note.
 - **Open the board** goes to the Maison page. It shows the same three cards above the board, and the board has a **Note** column too, where the whole note wraps instead of being cut.
 
@@ -309,6 +329,7 @@ On the board, a confirmed request whose LINE column says "not sent" has a **Send
 | 200, with `status: "sent"` | LINE took the message |
 | 200, with `status: "already_sent"` | It had gone out already, so nothing was sent |
 | 200, with `status: "sent_unrecorded"` | LINE took the message, but recording it failed, so its row still says "not sent". Don't send it again |
+| 200, with `status: "demo"` | A made-up demo customer's visit: nothing was sent, and a `demo` notification records it ([Demo customers](#demo-customers)) |
 | 404 | No appointment has that reference |
 | 409 (`not_confirmed`) | The visit isn't confirmed |
 | 422 (`past`) | The visit is over, so it gets no confirmation |
@@ -349,7 +370,7 @@ The two POSTs answer:
 
 | Status | When |
 |---|---|
-| 200 | LINE took the message. The answer is `{ reference, status: "sent", message }`, with `knowledgeDocumentId` when the answer became a knowledge entry, and `warning: true` when something after the message went wrong |
+| 200 | LINE took the message. The answer is `{ reference, status: "sent", message }`, with `knowledgeDocumentId` when the answer became a knowledge entry, and `warning: true` when something after the message went wrong. For a made-up demo customer it is `status: "demo"`: nothing went to LINE, and the rest happened ([Demo customers](#demo-customers)) |
 | 400 (`invalid_input`) | The reference isn't like `Q-4821`, `text` is empty or longer than 2,000 characters, `title` is empty or longer than 200 characters, or there's no `category` while `addToKnowledge` is true |
 | 404 (`not_found`) | No question has that reference |
 | 409 (`already_taken`) | Let them know, for a question someone has taken already |
@@ -478,7 +499,7 @@ The routes are admin routes, so each takes an admin session that holds its permi
 | `GET /maison/inquiries?filter=…&limit=…` | Review customer inquiries | None. `filter` is `needs-answer` (the default), `complaint`, `praise`, `not-labelled` or `all`, and `limit` is 1 to 100 (50 by default) | `{ inquiries }`, newest first |
 | `GET /maison/inquiries/summary` | Review customer inquiries | None | `{ needsAnswer, complaint, praise, notLabelled }`, the open counts |
 | `GET /maison/inquiries/quota` | Review customer inquiries | None | `{ configured, used, limit }`: `configured` is false without a channel access token, and then `used` and `limit` are null, as they are when LINE gives no answer. `limit` is null for a channel with none |
-| `POST /maison/inquiries/:documentId/reply` | Reply to customer inquiries on LINE | `{ text }` | `{ documentId, status: "sent", message, warning? }` |
+| `POST /maison/inquiries/:documentId/reply` | Reply to customer inquiries on LINE | `{ text }` | `{ documentId, status: "sent", message, warning? }`, or `status: "demo"` for a made-up demo customer ([Demo customers](#demo-customers)) |
 | `POST /maison/inquiries/:documentId/close` | Reply to customer inquiries on LINE | `{ reason }`: `answered-elsewhere`, `not-needed` or `spam` | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label` | Reply to customer inquiries on LINE | `{ kind, sentimentLabel }`, one or both | `{ inquiry, message }` |
 | `POST /maison/inquiries/:documentId/label-again` | Reply to customer inquiries on LINE | None | `{ inquiry, message }` |
