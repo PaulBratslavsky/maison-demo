@@ -36,7 +36,7 @@
 - **Never read or print a value from any `.env` file:** names only. Paul keeps the key and restarts Strapi himself.
 - **Production:** no `AI_CHAT_MODEL` on Strapi Cloud and no change to `docs/production.md` until Paul approves.
 - **Ports:** Strapi runs on 1338 for the local run. 1337, 1340 and 3000 belong to other apps.
-- **Commits:** stage named paths only, and commit with a pathspec: `git add <paths>`, then `git commit -m "<subject>" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- <paths>`. Subjects start with `maison:` (code) or `docs:` (docs). Every message ends with that line.
+- **Commits:** stage named paths only, and commit with a pathspec: `git add <paths>`, then `git commit -m "<subject>" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- <paths>`. Subjects start with `maison:` (code) or `docs:` (docs). Every message ends with that line.
 - **Line numbers** in the steps are the files' as they are on the branch before this plan: the quoted text is what to match.
 
 ## Review Focus
@@ -490,7 +490,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/constants.ts strapi/src/plugins/maison/server/src/bootstrap.ts strapi/src/plugins/maison/server/src/config/index.ts strapi/src/plugins/maison/package.json strapi/src/plugins/maison/package-lock.json strapi/src/plugins/maison/test/unit/constants.test.ts strapi/src/plugins/maison/test/unit/config.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-dependencies.test.ts strapi/config/plugins.ts strapi/.env.example
-git commit -m "maison: the assistant.use permission, aiChatModel and the pinned TanStack AI packages" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/constants.ts strapi/src/plugins/maison/server/src/bootstrap.ts strapi/src/plugins/maison/server/src/config/index.ts strapi/src/plugins/maison/package.json strapi/src/plugins/maison/package-lock.json strapi/src/plugins/maison/test/unit/constants.test.ts strapi/src/plugins/maison/test/unit/config.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-dependencies.test.ts strapi/config/plugins.ts strapi/.env.example
+git commit -m "maison: the assistant.use permission, aiChatModel and the pinned TanStack AI packages" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/constants.ts strapi/src/plugins/maison/server/src/bootstrap.ts strapi/src/plugins/maison/server/src/config/index.ts strapi/src/plugins/maison/package.json strapi/src/plugins/maison/package-lock.json strapi/src/plugins/maison/test/unit/constants.test.ts strapi/src/plugins/maison/test/unit/config.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-dependencies.test.ts strapi/config/plugins.ts strapi/.env.example
 ```
 
 ### Task 2: `fence` for four tags, and the model's views
@@ -1093,7 +1093,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/domain/fence.ts strapi/src/plugins/maison/server/src/domain/inquiry-criteria.ts strapi/src/plugins/maison/server/src/assistant/views.ts strapi/src/plugins/maison/test/unit/fence.test.ts strapi/src/plugins/maison/test/unit/assistant-views.test.ts
-git commit -m "maison: fence covers four tags, and the views the assistant's model reads" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/domain/fence.ts strapi/src/plugins/maison/server/src/domain/inquiry-criteria.ts strapi/src/plugins/maison/server/src/assistant/views.ts strapi/src/plugins/maison/test/unit/fence.test.ts strapi/src/plugins/maison/test/unit/assistant-views.test.ts
+git commit -m "maison: fence covers four tags, and the views the assistant's model reads" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/domain/fence.ts strapi/src/plugins/maison/server/src/domain/inquiry-criteria.ts strapi/src/plugins/maison/server/src/assistant/views.ts strapi/src/plugins/maison/test/unit/fence.test.ts strapi/src/plugins/maison/test/unit/assistant-views.test.ts
 ```
 
 ### Task 3: New filters on the staff services, and `inquiries.view`
@@ -1634,7 +1634,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/services/appointments.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/services/inquiries.ts strapi/src/plugins/maison/test/unit/fake-filters.ts strapi/src/plugins/maison/test/unit/assistant-filters.test.ts
-git commit -m "maison: since, kind and reference filters on the staff lists, and inquiries.view" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/services/appointments.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/services/inquiries.ts strapi/src/plugins/maison/test/unit/fake-filters.ts strapi/src/plugins/maison/test/unit/assistant-filters.test.ts
+git commit -m "maison: since, kind and reference filters on the staff lists, and inquiries.view" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/services/appointments.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/services/inquiries.ts strapi/src/plugins/maison/test/unit/fake-filters.ts strapi/src/plugins/maison/test/unit/assistant-filters.test.ts
 ```
 
 ### Task 4: The read tools, by permission
@@ -2372,7 +2372,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/services/ai-tools.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts
-git commit -m "maison: the assistant's read tools, offered by the admin's permissions" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/services/ai-tools.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts
+git commit -m "maison: the assistant's read tools, offered by the admin's permissions" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/services/ai-tools.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts
 ```
 
 ### Task 5: The instructions, and the staff texts for errors
@@ -2912,7 +2912,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/assistant/errors.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/test/unit/assistant-errors.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts
-git commit -m "maison: the assistant's instructions and the staff texts for errors" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/errors.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/test/unit/assistant-errors.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts
+git commit -m "maison: the assistant's instructions and the staff texts for errors" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/errors.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/test/unit/assistant-errors.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts
 ```
 
 ### Task 6: The stream wrapper
@@ -3568,7 +3568,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/test/unit/assistant-wrapper.test.ts
-git commit -m "maison: the stream wrapper: staff errors, a 90-second deadline, max_turns and declined" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/test/unit/assistant-wrapper.test.ts
+git commit -m "maison: the stream wrapper: staff errors, a 90-second deadline, max_turns and declined" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/test/unit/assistant-wrapper.test.ts
 ```
 
 ### Task 7: One turn: the SDK loader, `chat()` and the assistant service
@@ -4691,7 +4691,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/assistant/sdk.ts strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/server/src/services/index.ts strapi/src/plugins/maison/scripts/check-esm-import.mjs strapi/src/plugins/maison/test/unit/fake-text-adapter.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/assistant-sdk-imports.test.ts
-git commit -m "maison: one chat turn with TanStack AI, loaded through one file" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/sdk.ts strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/server/src/services/index.ts strapi/src/plugins/maison/scripts/check-esm-import.mjs strapi/src/plugins/maison/test/unit/fake-text-adapter.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/assistant-sdk-imports.test.ts
+git commit -m "maison: one chat turn with TanStack AI, loaded through one file" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/sdk.ts strapi/src/plugins/maison/server/src/services/assistant.ts strapi/src/plugins/maison/server/src/services/index.ts strapi/src/plugins/maison/scripts/check-esm-import.mjs strapi/src/plugins/maison/test/unit/fake-text-adapter.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/assistant-sdk-imports.test.ts
 ```
 
 ### Task 8: The controller and the two assistant routes
@@ -5146,7 +5146,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/controllers/assistant.ts strapi/src/plugins/maison/server/src/controllers/index.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-controller.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts
-git commit -m "maison: the assistant's status and chat routes" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/controllers/assistant.ts strapi/src/plugins/maison/server/src/controllers/index.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-controller.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts
+git commit -m "maison: the assistant's status and chat routes" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/controllers/assistant.ts strapi/src/plugins/maison/server/src/controllers/index.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-controller.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts
 ```
 
 ### Task 9: The Ask tab's rules: the permission flag, the tab, and the chat's pure helpers
@@ -6086,7 +6086,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/admin/src/permissions.ts strapi/src/plugins/maison/admin/src/tabs.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/maison-tabs.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
-git commit -m "maison: the Ask tab's permission flag, its place in the tabs, and the chat's pure helpers" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/permissions.ts strapi/src/plugins/maison/admin/src/tabs.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/maison-tabs.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
+git commit -m "maison: the Ask tab's permission flag, its place in the tabs, and the chat's pure helpers" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/permissions.ts strapi/src/plugins/maison/admin/src/tabs.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/maison-tabs.test.ts strapi/src/plugins/maison/test/unit/admin-permissions.test.ts strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
 ```
 
 ### Task 10: The Ask tab: provider, messages, composer and the page
@@ -6703,7 +6703,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/ToolLine.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx
-git commit -m "maison: the Ask tab: chat provider, messages, composer and the page" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/ToolLine.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx
+git commit -m "maison: the Ask tab: chat provider, messages, composer and the page" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/ToolLine.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx
 ```
 
 ### The 7 October cut line
@@ -7536,7 +7536,7 @@ From the repo root:
 
 ```bash
 git add strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/admin/src/components/RequestsBoard.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/InquiryRow.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
-git commit -m "maison: Ask about this on each request, question and inquiry row" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/admin/src/components/RequestsBoard.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/InquiryRow.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
+git commit -m "maison: Ask about this on each request, question and inquiry row" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/admin/src/components/RequestsBoard.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/InquiryRow.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts
 ```
 
 - [ ] **Step 14: Check by hand (with Paul)**
@@ -8691,7 +8691,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/controllers/inquiries.ts strapi/src/plugins/maison/server/src/controllers/questions.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts strapi/src/plugins/maison/test/unit/assistant-read-routes.test.ts
-git commit -m "maison: the draft tools, their rules, and the two read routes" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/controllers/inquiries.ts strapi/src/plugins/maison/server/src/controllers/questions.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts strapi/src/plugins/maison/test/unit/assistant-read-routes.test.ts
+git commit -m "maison: the draft tools, their rules, and the two read routes" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/server/src/assistant/tools.ts strapi/src/plugins/maison/server/src/assistant/instructions.ts strapi/src/plugins/maison/server/src/services/questions.ts strapi/src/plugins/maison/server/src/controllers/inquiries.ts strapi/src/plugins/maison/server/src/controllers/questions.ts strapi/src/plugins/maison/server/src/routes/index.ts strapi/src/plugins/maison/test/unit/assistant-tools.test.ts strapi/src/plugins/maison/test/unit/assistant-instructions.test.ts strapi/src/plugins/maison/test/unit/assistant-stream.test.ts strapi/src/plugins/maison/test/unit/admin-routes.test.ts strapi/src/plugins/maison/test/unit/assistant-read-routes.test.ts
 ```
 
 ### Task 13: The draft card and the client tools
@@ -9614,7 +9614,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/DraftCard.tsx strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
-git commit -m "maison: draft cards in the Ask tab, with Use this draft" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/DraftCard.tsx strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
+git commit -m "maison: draft cards in the Ask tab, with Use this draft" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/assistant.ts strapi/src/plugins/maison/admin/src/components/assistant/DraftCard.tsx strapi/src/plugins/maison/admin/src/components/assistant/AssistantProvider.tsx strapi/src/plugins/maison/admin/src/components/assistant/ChatMessages.tsx strapi/src/plugins/maison/admin/src/components/assistant/AskTab.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/assistant-admin.test.ts strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
 ```
 
 ### Task 14: Use this draft: the fresh load, the pre-filled dialogs and the notices
@@ -10501,7 +10501,7 @@ From `/Users/paul/work/maison-demo`:
 
 ```bash
 git add strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiryReplyDialog.tsx strapi/src/plugins/maison/admin/src/components/AnswerDialog.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
-git commit -m "maison: Use this draft opens Reply on LINE and Answer with the text" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiryReplyDialog.tsx strapi/src/plugins/maison/admin/src/components/AnswerDialog.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
+git commit -m "maison: Use this draft opens Reply on LINE and Answer with the text" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/admin/src/drafts.ts strapi/src/plugins/maison/admin/src/components/InquiriesList.tsx strapi/src/plugins/maison/admin/src/components/QuestionsList.tsx strapi/src/plugins/maison/admin/src/components/InquiryReplyDialog.tsx strapi/src/plugins/maison/admin/src/components/AnswerDialog.tsx strapi/src/plugins/maison/admin/src/pages/MaisonPage.tsx strapi/src/plugins/maison/test/unit/drafts-admin.test.ts
 ```
 
 ---
@@ -11463,7 +11463,7 @@ Expected: only the five files this task names (and `.vscode/`, `liff/AGENTS.md` 
 
 ```bash
 git add strapi/src/plugins/maison/test/integration/assistant.test.mjs strapi/src/plugins/maison/test/integration/fake-text-adapter.mjs strapi/src/plugins/maison/test/integration/permissions.test.mjs strapi/src/plugins/maison/test/integration/harness.mjs strapi/src/plugins/maison/test/unit/integration-harness.test.ts
-git commit -m "maison: integration tests for the Ask tab on the demo activity, with a scripted model and a scan for LINE IDs and names" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/test/integration/assistant.test.mjs strapi/src/plugins/maison/test/integration/fake-text-adapter.mjs strapi/src/plugins/maison/test/integration/permissions.test.mjs strapi/src/plugins/maison/test/integration/harness.mjs strapi/src/plugins/maison/test/unit/integration-harness.test.ts
+git commit -m "maison: integration tests for the Ask tab on the demo activity, with a scripted model and a scan for LINE IDs and names" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/test/integration/assistant.test.mjs strapi/src/plugins/maison/test/integration/fake-text-adapter.mjs strapi/src/plugins/maison/test/integration/permissions.test.mjs strapi/src/plugins/maison/test/integration/harness.mjs strapi/src/plugins/maison/test/unit/integration-harness.test.ts
 ```
 
 ### Task 16: Live tests and the docs
@@ -12241,14 +12241,14 @@ Expected: PASS. The live file is left out of `npm test`.
 
 ```bash
 git add strapi/src/plugins/maison/test/live/assistant.live.test.ts
-git commit -m "maison: live tests of the Ask tab with Claude Sonnet 5.5: lookups, drafts, an injected message and the thinking round trip" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/test/live/assistant.live.test.ts
+git commit -m "maison: live tests of the Ask tab with Claude Sonnet 5.5: lookups, drafts, an injected message and the thinking round trip" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/test/live/assistant.live.test.ts
 ```
 
 - [ ] **Step 12: Commit the docs**
 
 ```bash
 git add strapi/src/plugins/maison/README.md strapi/src/plugins/maison/CHANGELOG.md
-git commit -m "docs: the Ask tab in the plugin's README and CHANGELOG" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/README.md strapi/src/plugins/maison/CHANGELOG.md
+git commit -m "docs: the Ask tab in the plugin's README and CHANGELOG" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- strapi/src/plugins/maison/README.md strapi/src/plugins/maison/CHANGELOG.md
 ```
 
 - [ ] **Step 13: The checks by hand, before anything merges (with Paul)**
