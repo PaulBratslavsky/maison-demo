@@ -2,6 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { CREATED_VIA, UID, type CreatedVia, type Locale } from '../constants';
+import { isDemoCustomer } from '../domain/demo-activity';
 import { checkOpenAt, validateOpeningHours, type Weekday } from '../domain/hours';
 import { generateReference } from '../domain/reference';
 import { failure, type ServiceResult } from '../domain/service-result';
@@ -47,6 +48,8 @@ export interface StaffAppointmentView {
   note: string;
   createdVia: CreatedVia;
   confirmationSent: boolean;
+  /** One of Load demo activity's made-up customers, who gets no LINE message: the board shows "demo customer", never "not sent". */
+  demoCustomer: boolean;
   createdAt: string;
 }
 
@@ -83,7 +86,10 @@ export interface RequestsSummary {
    * when the request came in and `note` is what the customer wrote, both as the board's rows have them.
    */
   recent: Array<
-    Pick<StaffAppointmentView, 'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'note' | 'confirmationSent' | 'createdAt'>
+    Pick<
+      StaffAppointmentView,
+      'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'note' | 'confirmationSent' | 'demoCustomer' | 'createdAt'
+    >
   >;
 }
 
@@ -222,6 +228,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       note: doc.customerNote ?? '',
       createdVia: (CREATED_VIA as readonly string[]).includes(doc.createdVia) ? (doc.createdVia as CreatedVia) : 'app',
       confirmationSent: sent.has(doc.reference),
+      demoCustomer: isDemoCustomer(doc.customer),
       createdAt: toZonedIso(new Date(doc.createdAt), timezone),
     }));
   };
@@ -318,6 +325,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const saved = await strapi.documents(UID.appointment).findOne({ documentId: created.documentId, status: 'draft', populate: POPULATE });
       const [view] = await toViews([saved as Doc], language);
       return { ok: true, value: view };
+    },
+
+    /**
+     * How many requests this customer has waiting for a boutique to confirm, with the visit still ahead at `now`: what
+     * `request` holds against maxOpenRequestsPerCustomer. Load demo activity asks it before it gives a request to the
+     * presenter's own LINE account.
+     */
+    countOpenRequests(subject: string, now: Date = new Date()): Promise<number> {
+      return openRequestCount(subject, now);
     },
 
     /** The customer's own appointments, newest first. */
@@ -425,8 +441,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
       return {
         counts: { waitingForStaff, confirmedUpcoming: upcoming.length, confirmationsSent: sent.size },
-        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt }) => ({
-          reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt,
+        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt }) => ({
+          reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt,
         })),
       };
     },

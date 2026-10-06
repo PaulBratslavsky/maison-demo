@@ -12,7 +12,9 @@ export type ErrorCode =
   | 'not_published'
   | 'not_configured'
   // Only the REST door answers this one: checking a customer's session failed on the server.
-  | 'temporarily_unavailable';
+  | 'temporarily_unavailable'
+  // Only the demo buttons answer this one: a load is still running in the background from the last press.
+  | 'already_loading';
 
 export interface ToolErrorResult {
   isError: true;

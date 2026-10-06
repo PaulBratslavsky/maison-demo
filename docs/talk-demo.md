@@ -7,15 +7,16 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 1. **The quick start:** `npm install`, `npm run dev`, `npm run setup`, and restart (see the [Quick start](../README.md#quick-start)).
 2. **The concierge's model:** `ANTHROPIC_API_KEY` in `liff/.env` for Claude, then restart the app. Without it, start Ollama.
 3. **The LINE confirmation on your phone:** [option A](line-setup.md#option-a-a-real-line-message-on-your-phone). Without it, the board shows each confirmed visit as "not sent".
+4. **Optional, demo items on your own LINE account:** set `MAISON_DEMO_LINE_USER_ID` in `strapi/.env` to your LINE user ID (`U` and 32 lowercase hex characters, the same ID as option A's), and restart Strapi. **Load demo activity** then gives your account one waiting request, one open question and one open complaint, so confirming, **Let them know**, **Answer** and **Reply on LINE** reach your phone. The made-up customers get no LINE message: their rows say "demo customer", in grey.
 
 ## Before going on stage
 
 - [ ] The day before: start over with a clean database ([Start over with a clean database](../README.md#start-over-with-a-clean-database)). Then no test customer, smoke-test token or rehearsal visit is left. After that, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits, questions, inquiries or tokens behind.
-- [ ] On the Maison page, press **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
+- [ ] On the Maison page, press **Load demo catalog** once after updating: a catalog loaded before gets the Japanese versions of Maison's 16 product knowledge entries, and the English ones if it has none. The notice says what it added.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key), the LINE confirmation, labelling with a key and **Reply on LINE** need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
-- [ ] In the Strapi admin: **Maison** → **Reset demo activity** (it asks first), then **Load demo activity**, which needs the catalog from **Load demo catalog** above. It adds five made-up customers' requests, questions and inquiries, received over the last three days, so each tab has rows to show. Set the board's filter to **All requests**.
+- [ ] In the Strapi admin: **Maison** → **Reset demo activity** (it asks first), then **Load demo activity**, which needs the catalog from **Load demo catalog** above. It answers at once ("Loading demo activity: the lists fill in over the next few seconds.") and adds five made-up customers' requests, questions and inquiries, received over the last three days, so each tab has rows to show. With `MAISON_DEMO_LINE_USER_ID` set, three of them are yours. Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
 - [ ] Run through every screen once, so each one is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
 - [ ] With option A: your phone at hand, with LINE's notifications on. The confirmation arrives there.
@@ -36,21 +37,22 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 
 **Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi. Or ask "Can I pay in bitcoin?": the search finds nothing (`MCP · search_knowledge ✓ 0 results`), the app records the question for staff itself, and the note with the question's `Q-` reference and **Send it in the LINE chat** appears under that line. If recording fails, the note says only where the team answers, with **Chat with Maison on LINE**. On the Maison page's **Inquiries** tab, the bitcoin question shows under **Needs an answer**, the default filter. Turns the concierge answered, such as the gift question, show under **All**.
 
-**In Japanese (JA),** the same run uses the same tools, with Japanese labels: the form's button is リクエストを送る, the second suggestion is 来店を予約できますか？, and the product page's button is 来店を予約.
+**In Japanese (JA),** the same run uses the same tools, with Japanese labels: the form's button is リクエストを送る, the second suggestion is 来店を予約できますか？, and the product page's button is 来店を予約. The optional questions are 「革のお手入れ方法を教えてください」, answered from the Japanese product knowledge, and 「ビットコインで支払えますか？」, which it has nothing on.
 
 **Fallbacks:**
 - **The concierge stalls, or the network drops:** use **Book a visit** on the product page. It calls the same `request_appointment` tool.
 - **No form appears after the first suggestion:** tap the second suggestion, **Can I book a visit?**.
 - **The concierge's turn ends with no words** (the local model, now and then): tap **Try again** under it, with a line ready while it answers again.
-- **The form says the limit of visit requests is reached:** the demo customer has 3 requests waiting. Confirm one on the board, or reset demo activity.
+- **The form says the limit of visit requests is reached:** the demo customer has 3 requests waiting. Confirm one on the board, or reset demo activity. With `MAISON_DEMO_LINE_USER_ID` set to the same ID as the app's demo customer, Load demo activity's waiting request is one of the 3.
 - **The note under a question has no `Q-` reference:** nothing was recorded. One reason is that the demo customer already has five questions open or taken, the most Strapi allows. **Reset demo activity**, or answer some under **Questions**.
 - **The concierge shows an error:** in local mode, a small technical line under the customer's message names the cause and the fix. After `npm run setup` or a clean start, reload the app's page: a session the server has dropped answers 502 until then.
-- **The LINE message doesn't arrive:** show the confirmed row on the board, and the message on the slide. If the row says "not sent", **Send again** retries it.
+- **The LINE message doesn't arrive:** show the confirmed row on the board, and the message on the slide. If the row says "not sent", **Send again** retries it. A row that says "demo customer" is a made-up customer's, who never gets a message.
+- **A demo button says "Strapi took too long to answer":** the work goes on in Strapi. Wait a few seconds: the lists refresh by themselves.
 - **Any step stalls for more than 10 seconds:** switch to the backup video.
 
 ## Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** and **Load demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** and **Load demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English and Japanese, so a Japanese chat answers care and policy questions from the Japanese entries. A question they don't cover goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each step works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.

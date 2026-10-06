@@ -17,7 +17,7 @@ const APPOINTMENT = 'plugin::maison.appointment';
 const NOTIFICATION = 'plugin::maison.notification';
 const REVIEW = 'plugin::maison.appointments.review';
 const CONFIRM = 'plugin::maison.appointments.confirm';
-const ROW_FIELDS = ['boutique', 'confirmationSent', 'createdAt', 'customer', 'note', 'reference', 'requestedFor', 'status'];
+const ROW_FIELDS = ['boutique', 'confirmationSent', 'createdAt', 'customer', 'demoCustomer', 'note', 'reference', 'requestedFor', 'status'];
 /** A customer's LINE user ID: their subject without "line:". No staff surface ever shows it. */
 const lineUserIdOf = (subject) => subject.slice('line:'.length);
 
@@ -114,6 +114,7 @@ describe('the requests summary behind the admin homepage widget', () => {
         requestedFor: tokyoTime(IN_30_DAYS, '14:00'),
         note: '',
         confirmationSent: false,
+        demoCustomer: false,
         createdAt: await createdAtOf(refs.late),
       });
       for (const row of recent) assert.deepEqual(Object.keys(row).sort(), ROW_FIELDS);
@@ -147,8 +148,8 @@ describe('the requests summary behind the admin homepage widget', () => {
       const board = (await appointments.listRequests({ status: 'all', limit: 5, now: NOW })).value;
       assert.deepEqual(
         recent,
-        board.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt }) => ({
-          reference, status, customer, boutique, requestedFor, note, confirmationSent, createdAt,
+        board.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt }) => ({
+          reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt,
         }))
       );
       assert.deepEqual(recent.map((row) => row.customer), ['line:Uaaa…aa', 'line:Uaaa…aa', 'line:Uaaa…aa', 'line:Ubbb…bb', 'line:Ubbb…bb']);

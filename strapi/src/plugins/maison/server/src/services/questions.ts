@@ -2,7 +2,8 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { MAX_OPEN_QUESTIONS, UID, type KnowledgeCategory, type Locale, type QuestionReason, type QuestionStatus } from '../constants';
-import { NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
+import { isDemoCustomer } from '../domain/demo-activity';
+import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
 import { getDisplayName, pushMessages } from '../domain/line-push';
 import { acknowledgementText, answerText, knowledgeTitleOf } from '../domain/question-messages';
 import { generateReference } from '../domain/reference';
@@ -44,7 +45,8 @@ export interface StaffQuestionView {
   answeredAt: string | null;
   answer: string | null;
   addedToKnowledge: boolean;
-  line: { outcome: 'sent' | 'failed'; detail: string } | null;
+  /** How the last LINE message went: `demo` for a made-up demo customer, who gets none. */
+  line: { outcome: 'sent' | 'failed' | 'demo'; detail: string } | null;
   createdAt: string;
 }
 
@@ -63,11 +65,13 @@ const STATUS_FILTERS: Record<NonNullable<QuestionFilters['status']>, Doc> = {
 /**
  * What became of a staff message:
  * - `sent`: LINE took it, and the question says so. With `warning`, something after that went wrong, and the message says what.
+ * - `demo`: the customer is one of Load demo activity's made-up customers. Nothing went to LINE, everything else the
+ *   action does happened, and the question records `demo`. With `warning`, as for `sent`.
  * - `failed`: LINE refused it or didn't answer. The question records why, and nothing else changed.
  * - `not_found`, `already_taken`, `already_answered`: nothing was sent.
  * - `not_configured`: there's no channel access token. Nothing was sent or recorded.
  */
-export type ReplyStatus = 'sent' | 'failed' | 'not_found' | 'already_taken' | 'already_answered' | 'not_configured';
+export type ReplyStatus = 'sent' | 'demo' | 'failed' | 'not_found' | 'already_taken' | 'already_answered' | 'not_configured';
 
 export interface ReplyOutcome {
   reference: string;
@@ -128,11 +132,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   /**
    * The question a staff message is for, with the token to send it with, or the outcome that says why nothing can be
    * sent: no such question, an answered one, a taken one when `refuseTaken` (Let them know; Answer may follow it), or no token.
+   * A made-up demo customer's question needs no token, since nothing goes to LINE: `token` is then whatever is set, or null.
    */
   const readyToSend = async (
     reference: string,
     refuseTaken: boolean
-  ): Promise<{ row: Doc; token: string } | { refusal: ReplyOutcome }> => {
+  ): Promise<{ row: Doc; token: string | null } | { refusal: ReplyOutcome }> => {
     const row = (await strapi.documents(UID.question).findFirst({ filters: { reference: { $eq: reference } } })) as Doc | null;
     if (!row) return { refusal: { reference, status: 'not_found', message: `No question ${reference}.` } };
     if (row.status === 'answered') {
@@ -142,6 +147,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       return { refusal: { reference, status: 'already_taken', message: `${row.staffName || 'Someone'} has let the customer know already.` } };
     }
     const { lineChannelAccessToken: token } = getConfig(strapi);
+    if (isDemoCustomer(row.customer)) return { row, token };
     if (!token) {
       strapi.log.warn(`[maison] ${NO_TOKEN}`);
       return { refusal: { reference, status: 'not_configured', message: NO_TOKEN } };
@@ -151,6 +157,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
   /** Writes `data` to the question. Strapi's types know only `id` and `documentId` for this content type, and `update` checks its data against them. */
   const updateQuestion = (row: Doc, data: Doc) => strapi.documents(UID.question).update({ documentId: row.documentId, data });
+
+  /** What the question records about LINE once the action is done: LINE took the message, or the customer is a made-up demo customer, who gets none. */
+  const lineFields = (demo: boolean) => (demo ? { lineOutcome: 'demo', lineDetail: DEMO_DETAIL } : { lineOutcome: 'sent', lineDetail: '' });
 
   /**
    * Pushes `text` to the question's customer. When LINE refuses it or doesn't answer, this records why on the question,
@@ -176,7 +185,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
    * LINE took the message, but the question couldn't be updated, so the board still shows it as unsent and staff
    * might send it again. The outcome is `sent`: the customer has it. `sent` is what was sent, in words, without the full stop.
    */
-  const sentUnrecorded = (reference: string, sent: string, error: unknown, token: string): ReplyOutcome => {
+  const sentUnrecorded = (reference: string, sent: string, error: unknown, token: string | null): ReplyOutcome => {
     const message = `${sent}, but recording it failed (${reasonOf(error, token)}). Don't send it again.`;
     strapi.log.error(`[maison] ${message}`);
     return { reference, status: 'sent', message, warning: true };
@@ -186,9 +195,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
    * The answer is the reply to every inquiry the question came from, so they show as replied, with it. The customer has the
    * answer by now, so a failure here never changes the outcome: it is logged, and the question stays answered.
    */
-  const markInquiriesReplied = async (row: Doc, text: string, staffName: string | null, at: Date, token: string): Promise<void> => {
+  const markInquiriesReplied = async (row: Doc, text: string, staffName: string | null, at: Date, token: string | null, demo: boolean): Promise<void> => {
+    const reply = { replyText: text, repliedBy: staffName ?? 'Maison', at, ...(demo ? { lineOutcome: 'demo' } : {}) };
     try {
-      await strapi.plugin('maison').service('inquiries').markQuestionReplied(row.reference, { replyText: text, repliedBy: staffName ?? 'Maison', at });
+      await strapi.plugin('maison').service('inquiries').markQuestionReplied(row.reference, reply);
     } catch (error) {
       strapi.log.warn(`[maison] ${row.reference} is answered, but its inquiries couldn't be marked replied: ${reasonOf(error, token)}`);
     }
@@ -280,7 +290,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     /**
      * Let them know: sends the customer one LINE message in the staff member's name, saying a person has the question
      * and will reply in the chat, and marks the question taken. Only an open question: a taken one is `already_taken`,
-     * and nothing is sent twice. `staffName` is the staff member's first name, or null to speak for the team.
+     * and nothing is sent twice. `staffName` is the staff member's first name, or null to speak for the team. A made-up
+     * demo customer gets no message: the question is taken all the same, and records `demo`.
      * `now` is only for tests. It defaults to the current time.
      */
     async notify(reference: string, staffName: string | null, now: Date = new Date()): Promise<ReplyOutcome> {
@@ -288,18 +299,26 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       if ('refusal' in ready) return ready.refusal;
       const { row, token } = ready;
 
+      // A made-up demo customer gets no LINE message: the question is taken all the same, and records `demo`.
+      if (isDemoCustomer(row.customer)) {
+        await updateQuestion(row, { status: 'taken', staffName, takenAt: now, ...lineFields(true) });
+        const message = `Marked ${reference} taken. Demo customer: no LINE message.`;
+        strapi.log.info(`[maison] ${message}`);
+        return { reference, status: 'demo', message };
+      }
+
       const text = acknowledgementText({
         language: row.language,
         staffName,
         question: row.question,
         productName: await productNameOf(row),
       });
-      const failed = await deliver(row, text, token);
+      const failed = await deliver(row, text, token as string);
       if (failed) return failed;
 
       const sent = `Sent the LINE message for ${reference}`;
       try {
-        await updateQuestion(row, { status: 'taken', staffName, takenAt: now, lineOutcome: 'sent', lineDetail: '' });
+        await updateQuestion(row, { status: 'taken', staffName, takenAt: now, ...lineFields(false) });
       } catch (error) {
         return sentUnrecorded(reference, sent, error, token);
       }
@@ -313,23 +332,28 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * becomes a published knowledge entry in the question's language, about its piece, titled as staff wrote it, or with
      * the customer's question when they wrote no title. The customer has the answer by then, so an entry that can't be
      * made never undoes it: the question is still answered, and the message says so, with `warning`. Once the question is
-     * answered, its inquiries are marked replied.
+     * answered, its inquiries are marked replied. A made-up demo customer gets no message: everything else happens, and the
+     * question and its inquiries record `demo`.
      * `now` is only for tests. It defaults to the current time.
      */
     async answer(reference: string, reply: Reply, staffName: string | null, now: Date = new Date()): Promise<ReplyOutcome> {
       const ready = await readyToSend(reference, false);
       if ('refusal' in ready) return ready.refusal;
       const { row, token } = ready;
+      // A made-up demo customer gets no LINE message: everything else Answer does still happens, and the question records `demo`.
+      const demo = isDemoCustomer(row.customer);
 
-      const text = answerText({
-        language: row.language,
-        staffName,
-        question: row.question,
-        productName: await productNameOf(row),
-        answer: reply.text,
-      });
-      const failed = await deliver(row, text, token);
-      if (failed) return failed;
+      if (!demo) {
+        const text = answerText({
+          language: row.language,
+          staffName,
+          question: row.question,
+          productName: await productNameOf(row),
+          answer: reply.text,
+        });
+        const failed = await deliver(row, text, token as string);
+        if (failed) return failed;
+      }
 
       let knowledgeDocumentId: string | undefined;
       let knowledgeProblem: string | undefined;
@@ -341,29 +365,36 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         }
       }
 
+      const data = {
+        status: 'answered',
+        staffName,
+        answeredAt: now,
+        answer: reply.text,
+        ...(knowledgeDocumentId ? { knowledgeDocumentId } : {}),
+        ...lineFields(demo),
+      };
       const sent = `Sent the answer to ${reference} on LINE`;
       try {
-        await updateQuestion(row, {
-          status: 'answered',
-          staffName,
-          answeredAt: now,
-          answer: reply.text,
-          ...(knowledgeDocumentId ? { knowledgeDocumentId } : {}),
-          lineOutcome: 'sent',
-          lineDetail: '',
-        });
+        await updateQuestion(row, data);
       } catch (error) {
+        // Nothing went out for a demo customer, so there's nothing to warn about sending twice: the error is the answer.
+        if (demo) throw error;
         return sentUnrecorded(reference, sent, error, token);
       }
-      await markInquiriesReplied(row, reply.text, staffName, now, token);
+      await markInquiriesReplied(row, reply.text, staffName, now, token, demo);
+      const status: ReplyStatus = demo ? 'demo' : 'sent';
+      // What happened, as a sentence without its full stop: "Sent the answer to Q-4821 on LINE", or for a demo customer "Answered Q-4821".
+      const done = demo ? `Answered ${reference}` : sent;
+      const noLine = demo ? ' Demo customer: no LINE message.' : '';
       if (knowledgeProblem !== undefined) {
-        const message = `${sent}. It couldn't be added to product knowledge: ${knowledgeProblem}`;
+        const message = `${done}.${noLine} It couldn't be added to product knowledge: ${knowledgeProblem}`;
         strapi.log.warn(`[maison] ${message}`);
-        return { reference, status: 'sent', message, warning: true };
+        return { reference, status, message, warning: true };
       }
-      const message = knowledgeDocumentId ? `${sent}. Added it to product knowledge.` : `${sent}.`;
+      let message = `${done}.${noLine}`;
+      if (knowledgeDocumentId) message = demo ? `${done} and added it to product knowledge.${noLine}` : `${sent}. Added it to product knowledge.`;
       strapi.log.info(`[maison] ${message}`);
-      return { reference, status: 'sent', message, ...(knowledgeDocumentId ? { knowledgeDocumentId } : {}) };
+      return { reference, status, message, ...(knowledgeDocumentId ? { knowledgeDocumentId } : {}) };
     },
   };
 };

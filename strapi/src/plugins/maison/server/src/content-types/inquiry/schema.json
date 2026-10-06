@@ -37,7 +37,7 @@
     "replyText": { "type": "text", "maxLength": 2000 },
     "repliedAt": { "type": "datetime" },
     "repliedBy": { "type": "string", "maxLength": 100 },
-    "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed"] },
+    "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed", "demo"] },
     "lineDetail": { "type": "text", "maxLength": 500 }
   }
 }

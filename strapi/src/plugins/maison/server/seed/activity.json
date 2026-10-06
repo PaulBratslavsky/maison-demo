@@ -41,7 +41,8 @@
       "createdVia": "concierge",
       "note": "I'd like to see the Tote Soleil next to the Carnet Wallet.",
       "confirmed": false,
-      "hoursAgo": 9
+      "hoursAgo": 9,
+      "owner": "you"
     },
     {
       "customer": "daniel",
@@ -126,7 +127,8 @@
           "reason": "The customer wants a wallet that matches the Tote Soleil. The concierge had no answer and handed it to staff.",
           "topic": "matching wallet"
         }
-      }
+      },
+      "owner": "you"
     },
     {
       "customer": "daniel",
@@ -185,7 +187,8 @@
         "answered": true,
         "reason": "The customer is unhappy that the Weekender 50's strap is fraying after two months. The concierge explained the warranty and the repair service.",
         "topic": "strap repair"
-      }
+      },
+      "owner": "you"
     },
     {
       "customer": "kenji",

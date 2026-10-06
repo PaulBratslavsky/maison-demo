@@ -540,3 +540,42 @@ describe('inquiries.quota', () => {
     for (const log of [strapi.log.warn, strapi.log.error, strapi.log.info]) expect(log).not.toHaveBeenCalled();
   });
 });
+
+describe('Reply on LINE to a made-up demo customer', () => {
+  const DEMO: Doc = { ...COMPLAINT, customer: 'line:Udec0de00000000000000000000000004' };
+
+  it('makes no LINE call, still marks the inquiry replied, and records the demo outcome', async () => {
+    const { service, update, stored } = world({ rows: [DEMO] });
+
+    const outcome = await service.reply('inq-4', `  ${TEXT}\n`, 'Jane', NOW);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledExactlyOnceWith({
+      documentId: 'inq-4',
+      data: { status: 'replied', replyText: TEXT, repliedAt: NOW, repliedBy: 'Jane', lineOutcome: 'demo', lineDetail: 'Demo customer: no LINE message' },
+    });
+    expect(stored[0]).toMatchObject({ status: 'replied', lineOutcome: 'demo' });
+    expect(outcome).toEqual({ documentId: 'inq-4', status: 'demo', message: 'Marked it replied. Demo customer: no LINE message.' });
+  });
+
+  it('shows staff the demo outcome on the row, never as a failure', async () => {
+    const w = world({ rows: [DEMO] });
+    await w.service.reply('inq-4', TEXT, 'Jane', NOW);
+    const listed = await w.service.list({ filter: 'all' });
+    expect(listed.ok && listed.value[0].line).toEqual({ outcome: 'demo', detail: 'Demo customer: no LINE message' });
+  });
+
+  it('works without a token: no LINE message was ever going to go', async () => {
+    const { service } = world({ rows: [DEMO], config: {} });
+    expect((await service.reply('inq-4', TEXT, 'Jane', NOW)).status).toBe('demo');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a hand-off, a closed and a replied inquiry, as for anyone', async () => {
+    const customer = DEMO.customer;
+    expect((await world({ rows: [{ ...HANDED_OFF, customer, documentId: 'inq-4' }] }).service.reply('inq-4', TEXT, 'Jane', NOW)).status).toBe('use_question');
+    expect((await world({ rows: [{ ...DEMO, status: 'closed' }] }).service.reply('inq-4', TEXT, 'Jane', NOW)).status).toBe('already_closed');
+    expect((await world({ rows: [{ ...DEMO, status: 'replied' }] }).service.reply('inq-4', TEXT, 'Jane', NOW)).status).toBe('already_replied');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

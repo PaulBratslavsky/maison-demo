@@ -18,6 +18,8 @@ export interface RequestsSummary {
     /** What the customer wrote, or an empty string. */
     note: string;
     confirmationSent: boolean;
+    /** One of Load demo activity's made-up customers, who gets no LINE message. */
+    demoCustomer: boolean;
     /** When the request came in, written like `requestedFor`. */
     createdAt: string;
   }>;

@@ -215,6 +215,79 @@ describe('sendConfirmation', () => {
   });
 });
 
+describe("a made-up demo customer's visit", () => {
+  const DEMO = { ...PUBLISHED, customer: 'line:Udec0de00000000000000000000000002' };
+
+  it('makes no LINE call, and records a demo outcome by strapi, with the plain detail', async () => {
+    const { sender, record } = world({ published: DEMO });
+    const outcome = await sender.sendConfirmation('APT-4821');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ reference: 'APT-4821', status: 'demo', message: 'Demo customer: no LINE confirmation for APT-4821.' });
+    expect(record).toHaveBeenCalledExactlyOnceWith({
+      reference: 'APT-4821',
+      status: 'demo',
+      detail: 'Demo customer: no LINE message',
+      recordedBy: 'strapi',
+    });
+  });
+
+  it('records it without a token or a liffUrl too: no LINE message was ever going to go', async () => {
+    const { sender, record } = world({ published: DEMO, config: {} });
+    expect((await sender.sendConfirmation('APT-4821')).status).toBe('demo');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledOnce();
+  });
+
+  it('logs it as info, never as a warning or an error', async () => {
+    const { sender, strapi } = world({ published: DEMO });
+    await sender.sendConfirmation('APT-4821');
+    expect(strapi.log.warn).not.toHaveBeenCalled();
+    expect(strapi.log.error).not.toHaveBeenCalled();
+    expect(strapi.log.info).toHaveBeenCalledWith('[maison] Demo customer: no LINE confirmation for APT-4821.');
+  });
+
+  it('still answers demo, and logs why, when recording it fails', async () => {
+    const { sender, record, strapi } = world({ published: DEMO });
+    record.mockRejectedValueOnce(new Error('database is locked'));
+    expect((await sender.sendConfirmation('APT-4821')).status).toBe('demo');
+    expect(strapi.log.error).toHaveBeenCalledWith(expect.stringContaining('database is locked'));
+  });
+
+  it('records nothing for a visit that is over: past, as for anyone', async () => {
+    const { sender, record } = world({ published: { ...DEMO, requestedFor: '2026-09-30T05:00:00.000Z' } });
+    expect((await sender.sendConfirmation('APT-4821', NOW)).status).toBe('past');
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('is not pending: pending_confirmations never lists it', async () => {
+    const { strapi } = world({ published: DEMO });
+    expect(await confirmations({ strapi }).listPending(10, NOW)).toEqual({ ok: true, value: [] });
+  });
+});
+
+describe('pending_confirmations and the demo outcome', () => {
+  it("leaves out a visit with a demo record, and counts only failed records as earlier attempts", async () => {
+    const findMany = vi.fn(async ({ filters }: Doc) => {
+      if (filters?.outcome) {
+        // The query for the visits with nothing left to send: it must ask for demo records as well as sent ones.
+        expect(filters.outcome).toEqual({ $in: ['sent', 'demo'] });
+        return [];
+      }
+      return [
+        { appointmentReference: 'APT-4821', outcome: 'failed' },
+        { appointmentReference: 'APT-4821', outcome: 'failed' },
+      ];
+    });
+    const w = world();
+    const documents = w.strapi.documents;
+    w.strapi.documents = Object.assign((uid: string) => (uid === UID.notification ? { findMany } : documents(uid)), { use: documents.use });
+    const listed = await confirmations({ strapi: w.strapi }).listPending(10, NOW);
+    expect(listed.ok).toBe(true);
+    expect((listed as { value: Doc[] }).value.map((row) => [row.reference, row.previousAttempts])).toEqual([['APT-4821', 2]]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ filters: { outcome: { $in: ['sent', 'demo'] } } }));
+  });
+});
+
 describe('the confirmation message', () => {
   it("is the one pending_confirmations lists for the same appointment, for the same customer", async () => {
     const { strapi, sender, appointmentFindOne, appointmentFindMany } = world();

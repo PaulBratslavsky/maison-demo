@@ -1056,3 +1056,84 @@ describe('a second click', () => {
     expect(w.stored).toMatchObject({ status: 'answered', staffName: 'Jane', takenAt: NOW, answeredAt: NOW });
   });
 });
+
+describe('a made-up demo customer', () => {
+  const DEMO_SUBJECT = 'line:Udec0de00000000000000000000000001';
+  const DEMO_OPEN: Doc = { ...OPEN, customer: DEMO_SUBJECT };
+  const DEMO_TAKEN: Doc = { ...TAKEN, customer: DEMO_SUBJECT, lineOutcome: 'demo', lineDetail: 'Demo customer: no LINE message' };
+
+  it('Let them know makes no LINE call, marks the question taken, and records the demo outcome', async () => {
+    const { service, update, stored } = world({ question: DEMO_OPEN });
+
+    const outcome = await service.notify('Q-4821', 'Jane', NOW);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledExactlyOnceWith({
+      documentId: 'doc-1',
+      data: { status: 'taken', staffName: 'Jane', takenAt: NOW, lineOutcome: 'demo', lineDetail: 'Demo customer: no LINE message' },
+    });
+    expect(stored).toMatchObject({ status: 'taken', staffName: 'Jane', lineOutcome: 'demo' });
+    expect(outcome).toEqual({ reference: 'Q-4821', status: 'demo', message: 'Marked Q-4821 taken. Demo customer: no LINE message.' });
+  });
+
+  it('Answer makes no LINE call, still answers the question, adds the answer to product knowledge, and marks its inquiries replied as demo', async () => {
+    const { service, update, createEntry, publishEntry, markQuestionReplied } = world({ question: DEMO_TAKEN });
+
+    const outcome = await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Tom', NOW);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createEntry).toHaveBeenCalledOnce();
+    expect(publishEntry).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledExactlyOnceWith({
+      documentId: 'doc-1',
+      data: {
+        status: 'answered',
+        staffName: 'Tom',
+        answeredAt: NOW,
+        answer: TEXT,
+        knowledgeDocumentId: 'k-new',
+        lineOutcome: 'demo',
+        lineDetail: 'Demo customer: no LINE message',
+      },
+    });
+    expect(markQuestionReplied).toHaveBeenCalledExactlyOnceWith('Q-4821', { replyText: TEXT, repliedBy: 'Tom', at: NOW, lineOutcome: 'demo' });
+    expect(outcome).toEqual({
+      reference: 'Q-4821',
+      status: 'demo',
+      message: 'Answered Q-4821 and added it to product knowledge. Demo customer: no LINE message.',
+      knowledgeDocumentId: 'k-new',
+    });
+  });
+
+  it('Answer without product knowledge says only that it answered', async () => {
+    const { service } = world({ question: DEMO_OPEN });
+    expect(await service.answer('Q-4821', ONLY_SEND, 'Tom', NOW)).toEqual({
+      reference: 'Q-4821',
+      status: 'demo',
+      message: 'Answered Q-4821. Demo customer: no LINE message.',
+    });
+  });
+
+  it('works without a token: no LINE message was ever going to go', async () => {
+    const { service } = world({ question: DEMO_OPEN, config: {} });
+    expect((await service.notify('Q-4821', 'Jane', NOW)).status).toBe('demo');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a question that is taken or answered already, as for anyone', async () => {
+    expect((await world({ question: DEMO_TAKEN }).service.notify('Q-4821', 'Jane', NOW)).status).toBe('already_taken');
+    const answered = { ...ANSWERED, customer: DEMO_SUBJECT };
+    expect((await world({ question: answered }).service.answer('Q-4821', ONLY_SEND, 'Jane', NOW)).status).toBe('already_answered');
+  });
+
+  it('answers with a warning when the answer could not be added to product knowledge', async () => {
+    const { service, createEntry } = world({ question: DEMO_OPEN });
+    createEntry.mockRejectedValueOnce(new Error('database is locked'));
+    expect(await service.answer('Q-4821', ADD_TO_KNOWLEDGE, 'Tom', NOW)).toEqual({
+      reference: 'Q-4821',
+      status: 'demo',
+      message: "Answered Q-4821. Demo customer: no LINE message. It couldn't be added to product knowledge: database is locked",
+      warning: true,
+    });
+  });
+});

@@ -51,8 +51,8 @@ export interface StaffInquiry {
   replyText: string | null;
   repliedAt: string | null;
   repliedBy: string | null;
-  /** How the last LINE message to the customer went, or null before there was one. */
-  line: { outcome: 'sent' | 'failed'; detail: string | null } | null;
+  /** How the last LINE message to the customer went, or null before there was one. `demo`: a made-up demo customer, who gets none. */
+  line: { outcome: 'sent' | 'failed' | 'demo'; detail: string | null } | null;
 }
 
 /** What GET /maison/inquiries/summary answers: the open inquiries each filter shows. */
@@ -74,10 +74,14 @@ export interface Quota {
   limit: number | null;
 }
 
-/** What the four POSTs answer with a 200: the server's own message, and `warning` when something after the action went wrong. */
+/**
+ * What the four POSTs answer with a 200: the server's own message, and `warning` when something after the action went
+ * wrong. Reply on LINE also says `status`: `demo` for a made-up demo customer, who gets no LINE message.
+ */
 export interface ActionAnswer {
   message: string;
   warning?: boolean;
+  status?: string;
 }
 
 /**
@@ -179,12 +183,6 @@ export const handOffText = ({ reference, status }: NonNullable<StaffInquiry['que
   if (status === 'answered') return `${reference} · answered under Questions`;
   if (status === null) return `${reference} · no longer under Questions`;
   return `${reference} · answer it under Questions`;
-};
-
-/** What a row says when the last LINE message to the customer failed, in LINE's own words, or nothing when it didn't. */
-export const lineFailure = (line: StaffInquiry['line']): string | null => {
-  if (line?.outcome !== 'failed') return null;
-  return line.detail ? `LINE message failed: ${line.detail}` : 'LINE message failed.';
 };
 
 /**

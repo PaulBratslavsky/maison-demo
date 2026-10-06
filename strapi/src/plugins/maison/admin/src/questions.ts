@@ -26,8 +26,8 @@ export interface StaffQuestion {
   answer: string | null;
   /** Whether the answer became a product knowledge entry. */
   addedToKnowledge: boolean;
-  /** How the last LINE message to the customer went, or null before there was one. */
-  line: { outcome: 'sent' | 'failed'; detail: string } | null;
+  /** How the last LINE message to the customer went, or null before there was one. `demo`: a made-up demo customer, who gets none. */
+  line: { outcome: 'sent' | 'failed' | 'demo'; detail: string } | null;
   /** When the concierge handed the question over, as an ISO string in UTC. */
   createdAt: string;
 }
@@ -157,10 +157,13 @@ export const countOfQuestions = (answer: unknown): number | null => {
   return Array.isArray(questions) ? questions.length : null;
 };
 
-/** What POST …/notify and POST …/answer answer with a 200 (a `sent` ReplyOutcome on the server). */
+/**
+ * What POST …/notify and POST …/answer answer with a 200: a `sent` ReplyOutcome on the server, or a `demo` one for a
+ * made-up demo customer, who gets no LINE message while the action still happens.
+ */
 export interface SentReply {
   reference: string;
-  status: 'sent';
+  status: 'sent' | 'demo';
   /** What happened, in the server's words. */
   message: string;
   /** True when the customer has the message but something after it went wrong, which `message` says. */
@@ -172,13 +175,18 @@ export interface SentReply {
 /**
  * The notice a 200 shows: the server's own message, as a warning when it says the message went out but something after
  * it went wrong. A warning stays until it is dismissed (`blockTransition`): it says "Don't send it again", which has to
- * be read, and a notice that fades after a few seconds can be missed. A success fades as any notice does.
+ * be read, and a notice that fades after a few seconds can be missed. A success fades as any notice does. For a made-up
+ * demo customer (`status: 'demo'`) it is an info notice: the action happened, and no LINE message went.
  */
 export const replyNotice = ({
   message,
   warning,
+  status,
 }: {
   message: string;
   warning?: boolean;
-}): { type: 'success' | 'warning'; message: string; blockTransition?: true } =>
-  warning === true ? { type: 'warning', message, blockTransition: true } : { type: 'success', message };
+  status?: string;
+}): { type: 'success' | 'warning' | 'info'; message: string; blockTransition?: true } => {
+  if (warning === true) return { type: 'warning', message, blockTransition: true };
+  return { type: status === 'demo' ? 'info' : 'success', message };
+};

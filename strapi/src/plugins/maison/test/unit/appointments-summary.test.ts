@@ -54,6 +54,7 @@ describe('appointments.summarizeRequests: the newest requests', () => {
         requestedFor: '2030-01-19T14:00:00+09:00',
         note: 'Window seat, please',
         confirmationSent: false,
+        demoCustomer: false,
         createdAt: '2030-01-01T00:00:07+09:00',
       },
       {
@@ -64,6 +65,7 @@ describe('appointments.summarizeRequests: the newest requests', () => {
         requestedFor: '2020-01-05T15:00:00+09:00',
         note: '',
         confirmationSent: false,
+        demoCustomer: false,
         createdAt: '2029-12-30T12:30:00+09:00',
       },
     ]);
@@ -84,8 +86,19 @@ describe('appointments.summarizeRequests: the newest requests', () => {
   it('leaves the products and the way the request was made out of the rows', async () => {
     const { recent } = await summarize();
     for (const row of recent) {
-      expect(Object.keys(row).sort()).toEqual(['boutique', 'confirmationSent', 'createdAt', 'customer', 'note', 'reference', 'requestedFor', 'status']);
+      expect(Object.keys(row).sort()).toEqual(['boutique', 'confirmationSent', 'createdAt', 'customer', 'demoCustomer', 'note', 'reference', 'requestedFor', 'status']);
     }
+  });
+
+  it("says which rows are a made-up demo customer's, whose LINE column the widget shows in grey", async () => {
+    appointmentFindMany.mockImplementationOnce(async () => [{ documentId: 'doc-oldest' }]);
+    appointmentFindMany.mockImplementationOnce(async () => []);
+    appointmentFindMany.mockImplementationOnce(async () => [{ ...drafts[0], customer: 'line:Udec0de00000000000000000000000003' }, drafts[1]]);
+    const { recent } = await summarize();
+    expect(recent.map((row) => [row.reference, row.customer, row.demoCustomer])).toEqual([
+      ['APT-3333', 'line:Udec…03', true],
+      ['APT-1111', 'line:Uaaa…aa', false],
+    ]);
   });
 
   it('keeps the counts as they were', async () => {

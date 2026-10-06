@@ -766,6 +766,24 @@ describe('inquiries.markQuestionReplied', () => {
     });
   });
 
+  it("records the demo outcome, with its plain detail, when the question was a made-up demo customer's", async () => {
+    const { service, update } = world({ rows: [handedOff('h-1')] });
+
+    await service.markQuestionReplied('Q-4821', { ...REPLY, lineOutcome: 'demo' });
+
+    expect(update).toHaveBeenCalledExactlyOnceWith({
+      documentId: 'h-1',
+      data: {
+        status: 'replied',
+        replyText: REPLY.replyText,
+        repliedAt: AT,
+        repliedBy: 'Jane',
+        lineOutcome: 'demo',
+        lineDetail: 'Demo customer: no LINE message',
+      },
+    });
+  });
+
   it('rejects when a write fails, for the caller to log', async () => {
     const { service, update } = world({ rows: [handedOff('h-1')] });
     update.mockRejectedValueOnce(new Error('database is locked'));

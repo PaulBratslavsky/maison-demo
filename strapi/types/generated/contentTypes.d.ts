@@ -944,7 +944,7 @@ export interface PluginMaisonInquiry extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 500;
       }>;
-    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed', 'demo']>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1101,7 +1101,7 @@ export interface PluginMaisonKnowledge extends Struct.CollectionTypeSchema {
 export interface PluginMaisonNotification extends Struct.CollectionTypeSchema {
   collectionName: 'maison_notifications';
   info: {
-    description: 'Append-only log of confirmation delivery attempts.';
+    description: "Append-only log of confirmation delivery attempts, and of demo customers' visits, which get no LINE message.";
     displayName: 'Maison notification';
     pluralName: 'notifications';
     singularName: 'notification';
@@ -1135,7 +1135,7 @@ export interface PluginMaisonNotification extends Struct.CollectionTypeSchema {
       'plugin::maison.notification'
     > &
       Schema.Attribute.Private;
-    outcome: Schema.Attribute.Enumeration<['sent', 'failed']> &
+    outcome: Schema.Attribute.Enumeration<['sent', 'failed', 'demo']> &
       Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     recordedBy: Schema.Attribute.String;
@@ -1348,7 +1348,7 @@ export interface PluginMaisonQuestion extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 500;
       }>;
-    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed']>;
+    lineOutcome: Schema.Attribute.Enumeration<['sent', 'failed', 'demo']>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

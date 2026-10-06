@@ -17,6 +17,8 @@ describe('httpStatus', () => {
     ['already_closed', 409],
     ['already_replied', 409],
     ['not_failed', 409],
+    // A demo button pressed again while its load is still running in the background.
+    ['already_loading', 409],
     ['in_the_past', 422],
     ['not_configured', 503],
     // A server fault while checking a customer's session: try again, it isn't a sign-out.

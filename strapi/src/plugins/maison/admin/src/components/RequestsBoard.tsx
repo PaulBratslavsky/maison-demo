@@ -17,7 +17,16 @@ import {
 } from '@strapi/design-system';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
-import { canSendAgain, canStillConfirm, confirmedNotice, sendAgainNotice, sentAfterConfirm, type SendAgainStatus } from '../board';
+import {
+  canSendAgain,
+  canStillConfirm,
+  confirmedNotice,
+  demoCustomerAfterConfirm,
+  lineColumn,
+  sendAgainNotice,
+  sentAfterConfirm,
+  type SendAgainStatus,
+} from '../board';
 import { startPolling } from '../poll';
 
 type Status = 'requested' | 'confirmed' | 'all';
@@ -34,6 +43,8 @@ interface StaffAppointment {
   /** "web" for a request a website made through the REST routes. */
   createdVia: 'concierge' | 'app' | 'web';
   confirmationSent: boolean;
+  /** One of Load demo activity's made-up customers, who gets no LINE message. */
+  demoCustomer: boolean;
   createdAt: string;
 }
 
@@ -95,11 +106,14 @@ export const RequestsBoard = ({
   const confirm = async (reference: string) => {
     setConfirming(reference);
     try {
-      const { data } = await post<{ appointment?: { confirmationSent?: boolean } }>(`/maison/appointments/${reference}/confirm`);
+      const { data } = await post<{ appointment?: { confirmationSent?: boolean; demoCustomer?: boolean } }>(
+        `/maison/appointments/${reference}/confirm`
+      );
       onChange?.();
       const rows = await load();
-      // Confirming sent the LINE confirmation before it answered, so the answer says whether it went out.
-      toggleNotification(confirmedNotice(reference, sentAfterConfirm(data, rows, reference)));
+      // Confirming sent the LINE confirmation before it answered, so the answer says whether it went out, or that the
+      // customer is a made-up demo customer, who gets none.
+      toggleNotification(confirmedNotice(reference, sentAfterConfirm(data, rows, reference), demoCustomerAfterConfirm(data, rows, reference)));
     } catch (error) {
       toggleNotification({ type: 'danger', message: (error as Error).message });
     } finally {
@@ -202,9 +216,7 @@ export const RequestsBoard = ({
                   <Badge variant={appointment.status === 'confirmed' ? 'success' : 'warning'}>{appointment.status}</Badge>
                 </Td>
                 <Td>
-                  <Badge variant={appointment.confirmationSent ? 'success' : 'neutral'}>
-                    {appointment.confirmationSent ? 'LINE sent' : 'not sent'}
-                  </Badge>
+                  <Badge variant={lineColumn(appointment).variant}>{lineColumn(appointment).label}</Badge>
                 </Td>
                 <Td>
                   <Typography>{appointment.createdVia}</Typography>

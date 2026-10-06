@@ -8,8 +8,8 @@ import { staffNameOf } from './staff-name';
 const REFERENCE_HINT = 'Use a reference like Q-4821.';
 const ANSWER_HINT = 'Write an answer of up to 2,000 characters, and pick a category to add it to product knowledge.';
 
-/** Strapi's error helper for each outcome that isn't sent. */
-const REPLY_ERRORS: Record<Exclude<ReplyStatus, 'sent'>, string> = {
+/** Strapi's error helper for each outcome that isn't sent, or demo. */
+const REPLY_ERRORS: Record<Exclude<ReplyStatus, 'sent' | 'demo'>, string> = {
   not_found: 'notFound',
   already_taken: 'conflict',
   already_answered: 'conflict',
@@ -25,12 +25,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   const questions = () => strapi.plugin('maison').service('questions');
 
   /**
-   * A 200 with the outcome when LINE took the message. Otherwise the error that says why not: 404, 409 when the
-   * question is taken or answered already, 502 when LINE refused it or couldn't be reached, and 503 when Strapi has no
-   * token to send with. The message goes to the admin as it is.
+   * A 200 with the outcome when LINE took the message, or when the customer is a made-up demo customer, who gets none.
+   * Otherwise the error that says why not: 404, 409 when the question is taken or answered already, 502 when LINE
+   * refused it or couldn't be reached, and 503 when Strapi has no token to send with. The message goes to the admin as it is.
    */
   const answerWith = (ctx, outcome: ReplyOutcome) => {
-    if (outcome.status === 'sent') {
+    if (outcome.status === 'sent' || outcome.status === 'demo') {
       ctx.body = outcome;
       return;
     }

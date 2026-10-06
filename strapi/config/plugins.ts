@@ -73,6 +73,10 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         aiModel: env('AI_MODEL', '').trim() || null,
         aiApiKey: env('AI_API_KEY', '').trim() || null,
         aiBaseUrl: env('AI_BASE_URL', '').trim() || null,
+        // Optional: your own LINE user ID (U and 32 lowercase hex characters). With it, Load demo activity gives your
+        // LINE account one waiting request, one open question and one open complaint, so confirming and replying on stage
+        // reach your phone. Unset: every demo item goes to the five made-up customers, who get no LINE message.
+        demoLineUserId: env('MAISON_DEMO_LINE_USER_ID', '').trim() || null,
       },
     },
     'strapi-oauth-mcp-manager': {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfig, getConfig, validateConfig } from '../../server/src/config';
+import { defaultConfig, demoLineUserIdProblem, getConfig, validateConfig } from '../../server/src/config';
 import { fakeStrapi } from './fake-strapi';
 
 describe('validateConfig', () => {
@@ -148,5 +148,53 @@ describe('the AI settings', () => {
       expect(message).toMatch(/aiApiKey/);
       expect(message).not.toContain('secret');
     }
+  });
+});
+
+describe('the demo LINE account (demoLineUserId)', () => {
+  const USER_ID = `U${'0123456789abcdef'.repeat(2)}`;
+
+  it('is not set by default', () => {
+    expect(defaultConfig.demoLineUserId).toBeNull();
+    expect(getConfig(fakeStrapi({ config: {} })).demoLineUserId).toBeNull();
+  });
+
+  it('accepts a LINE user ID: U and 32 lowercase hex characters', () => {
+    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: USER_ID })).not.toThrow();
+    expect(getConfig(fakeStrapi({ config: { demoLineUserId: USER_ID } })).demoLineUserId).toBe(USER_ID);
+  });
+
+  it('treats empty and null (MAISON_DEMO_LINE_USER_ID= in .env) as not set, so Strapi still starts', () => {
+    for (const demoLineUserId of ['', null, undefined]) {
+      expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).not.toThrow();
+      expect(getConfig(fakeStrapi({ config: { demoLineUserId } })).demoLineUserId).toBeNull();
+    }
+  });
+
+  it.each([
+    ['a user ID in capitals', `U${'0123456789ABCDEF'.repeat(2)}`],
+    ['a user ID one character short', USER_ID.slice(0, -1)],
+    ['a user ID one character long', `${USER_ID}0`],
+    ['a user ID without its U', USER_ID.slice(1)],
+    ['a subject (line:U…), not a user ID', `line:${USER_ID}`],
+    ['a user ID with a space in it', `${USER_ID.slice(0, 10)} ${USER_ID.slice(11)}`],
+    ['a user ID with a line break after it', `${USER_ID}\n`],
+    ['a group ID (C…)', `C${'0123456789abcdef'.repeat(2)}`],
+    ['a number', 42],
+  ])('ignores %s with a warning, so Strapi still starts and the demo activity goes to made-up customers', (_label, demoLineUserId) => {
+    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).not.toThrow();
+    expect(getConfig(fakeStrapi({ config: { demoLineUserId } })).demoLineUserId).toBeNull();
+    expect(demoLineUserIdProblem(demoLineUserId)).toMatch(/demoLineUserId .*LINE user ID/);
+  });
+
+  it('has no problem with a LINE user ID, or with no value', () => {
+    for (const value of [USER_ID, '', null, undefined]) expect(demoLineUserIdProblem(value)).toBeNull();
+  });
+
+  it('never repeats the value in its warning', () => {
+    const secret = `U${'5ec7e7'.repeat(5)}zz`;
+    const message = demoLineUserIdProblem(secret) ?? '';
+    expect(message).toMatch(/demoLineUserId/);
+    expect(message).not.toContain('5ec7e7');
   });
 });
