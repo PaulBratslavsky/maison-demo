@@ -4,6 +4,8 @@ import { Box, Flex, Tabs } from '@strapi/design-system';
 import { Layouts, Page, useRBAC } from '@strapi/strapi/admin';
 import { useSearchParams } from 'react-router-dom';
 
+import { AskTab } from '../components/assistant/AskTab';
+import { AssistantProvider } from '../components/assistant/AssistantProvider';
 import { DemoData } from '../components/DemoData';
 import { InquiriesList } from '../components/InquiriesList';
 import { QuestionsList } from '../components/QuestionsList';
@@ -46,59 +48,69 @@ const MaisonPage = () => {
   const activeTab = selectTab(tabs, searchParams.get('tab'));
   const waiting = tabCounts({ requests: requests.summary, questions: questions.count, inquiries: inquiries.summary });
 
+  const tabsRoot = activeTab && (
+    <Tabs.Root
+      variant="simple"
+      value={activeTab}
+      // The address is replaced, not added to: switching tabs isn't a place to go back to.
+      onValueChange={(tab) => setSearchParams({ tab }, { replace: true })}
+    >
+      <Tabs.List aria-label="Maison">
+        {tabs.map((tab) => (
+          <Tabs.Trigger key={tab} value={tab}>
+            {tabLabel(tab, waiting[tab])}
+          </Tabs.Trigger>
+        ))}
+      </Tabs.List>
+      {tabs.includes('requests') && (
+        // The counts come from the review route, so only these admins get them.
+        <Tabs.Content value="requests">
+          <Box paddingTop={6}>
+            <Flex direction="column" alignItems="stretch" gap={8}>
+              {requests.summary && <RequestCounts counts={requests.summary.counts} />}
+              <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onChange={refresh} />
+            </Flex>
+          </Box>
+        </Tabs.Content>
+      )}
+      {tabs.includes('questions') && (
+        <Tabs.Content value="questions">
+          <Box paddingTop={6}>
+            <QuestionsList canAnswer={allowedActions.canAnswer} refreshKey={refreshKey} onChange={questions.reload} />
+          </Box>
+        </Tabs.Content>
+      )}
+      {tabs.includes('inquiries') && (
+        <Tabs.Content value="inquiries">
+          <Box paddingTop={6}>
+            <InquiriesList
+              canReply={allowedActions.canReply}
+              refreshKey={refreshKey}
+              summary={inquiries.summary}
+              summaryError={inquiries.loadError}
+              onChange={inquiries.reload}
+            />
+          </Box>
+        </Tabs.Content>
+      )}
+      {tabs.includes('ask') && (
+        <Tabs.Content value="ask">
+          <Box paddingTop={6}>
+            <AskTab />
+          </Box>
+        </Tabs.Content>
+      )}
+    </Tabs.Root>
+  );
+
   return (
     <Page.Main>
       <Page.Title>Maison</Page.Title>
       <Layouts.Header title="Maison" subtitle={PAGE_SUBTITLE} />
       <Layouts.Content>
         <Flex direction="column" alignItems="stretch" gap={8}>
-          {activeTab && (
-            <Tabs.Root
-              variant="simple"
-              value={activeTab}
-              // The address is replaced, not added to: switching tabs isn't a place to go back to.
-              onValueChange={(tab) => setSearchParams({ tab }, { replace: true })}
-            >
-              <Tabs.List aria-label="Maison">
-                {tabs.map((tab) => (
-                  <Tabs.Trigger key={tab} value={tab}>
-                    {tabLabel(tab, waiting[tab])}
-                  </Tabs.Trigger>
-                ))}
-              </Tabs.List>
-              {tabs.includes('requests') && (
-                // The counts come from the review route, so only these admins get them.
-                <Tabs.Content value="requests">
-                  <Box paddingTop={6}>
-                    <Flex direction="column" alignItems="stretch" gap={8}>
-                      {requests.summary && <RequestCounts counts={requests.summary.counts} />}
-                      <RequestsBoard canConfirm={allowedActions.canConfirm} refreshKey={refreshKey} onChange={refresh} />
-                    </Flex>
-                  </Box>
-                </Tabs.Content>
-              )}
-              {tabs.includes('questions') && (
-                <Tabs.Content value="questions">
-                  <Box paddingTop={6}>
-                    <QuestionsList canAnswer={allowedActions.canAnswer} refreshKey={refreshKey} onChange={questions.reload} />
-                  </Box>
-                </Tabs.Content>
-              )}
-              {tabs.includes('inquiries') && (
-                <Tabs.Content value="inquiries">
-                  <Box paddingTop={6}>
-                    <InquiriesList
-                      canReply={allowedActions.canReply}
-                      refreshKey={refreshKey}
-                      summary={inquiries.summary}
-                      summaryError={inquiries.loadError}
-                      onChange={inquiries.reload}
-                    />
-                  </Box>
-                </Tabs.Content>
-              )}
-            </Tabs.Root>
-          )}
+          {/* The chat lives above the tabs, so it stays when staff look at a list and come back. Only admins who may use it have one. */}
+          {allowedActions.canUse === true ? <AssistantProvider>{tabsRoot}</AssistantProvider> : tabsRoot}
           {allowedActions.canManage && <DemoData onChange={refresh} />}
         </Flex>
       </Layouts.Content>
