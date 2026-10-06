@@ -1,6 +1,7 @@
 # Maison: Ask, a staff chat on the Maison page
 
 **Status:** approved by Paul on 6 October 2026, with the recommended answer to every open question except the model: the chat runs on Claude Sonnet 5.5 ("use sonnet since it is faster and cheaper", and "opus is overkill"). Sections marked proposed below are approved as written. Built on its own branch, `feat/maison-staff-chat` in maison-demo (from `main` at cf25f98), and tested against the local Strapi. Nothing reaches `main` or production before Paul approves it. The build goes in four steps (Build order, near the end). A demo on 7 October uses the branch only if step 1 passes the local run.
+**Amended 7 October 2026:** after his first look at the Ask tab, Paul asked for it to look and work like the chat in his strapi-plugin-tanstack-ai 1.6.0, with saved chats. The section "The Ask tab rebuild (7 October 2026)" at the end records his answers and the design. Where it and an earlier line disagree, the rebuild section wins.
 **Builds on:** the Maison admin page and its three tabs (`admin/src/pages/MaisonPage.tsx`), the Reply on LINE and Answer dialogs, and Maison's services for requests, questions, inquiries and the catalog.
 **Paths:** relative to `strapi/src/plugins/maison/` unless they start with `strapi/`. `R/` is strapi-plugin-tanstack-ai 1.6.0 at `/Users/paul/learning/tanstack-ai/strapi-plugin-tanstack-ai/`, a reference for patterns only: it isn't installed in the demo (`strapi/package.json`, `strapi/config/plugins.ts:33-93`). `N/` is `/Users/paul/work/launchpad-fork-latest/strapi/node_modules/@tanstack/`, where the TanStack AI 0.52.3 set this spec was checked against is installed. `D/` is the TanStack AI docs at `/Users/paul/learning/tanstack-ai/.reference/tanstack-ai/docs/` (version 0.49.1: where they differ, the installed code is the authority).
 
@@ -24,7 +25,7 @@ Then he decided:
 - **Ask about this** on each request, question and inquiry row switches to Ask and starts a chat about that item by its reference. The chat looks the item up itself. Nothing about the customer is pasted into the message.
 - **Tool lines** in the chat, such as `Maison · inquiries ✓ 12 results`.
 - **Drafts are shown as cards,** each with **Use this draft**.
-- **No saved history.** A chat lasts until the page reloads.
+- **No saved history.** A chat lasts until the page reloads. *Replaced on 7 October: chats are saved per admin (see the rebuild section).*
 
 ### How section 1 is built (proposed)
 
@@ -46,7 +47,7 @@ Then he decided:
   - While the tool runs: `Maison · <what> …`. When it fails: the line in red, with the tool's message.
   - `<what>` is requests, questions, inquiries, inquiry counts, knowledge, products or product.
   - The drafts have no line: the card is their result.
-- **Messages are plain text** with their line breaks. No Markdown rendering: the instructions ask for short plain text.
+- **Messages are plain text** with their line breaks. No Markdown rendering: the instructions ask for short plain text. *Replaced on 7 October: the assistant's answers render Markdown, tables included (see the rebuild section).*
 - **New chat**, a button that clears the chat, is a proposed addition. Open question 3.
 - **A chat also ends when staff leave the Maison page.** The chat lives in a provider inside `MaisonPage` (section 4). So going to another admin page and back starts a new chat, not only a reload. The approved text is unchanged. Open question 5 puts this to Paul.
 - **The files.** The tab's code is in `admin/src/components/assistant/`: `AssistantProvider.tsx`, `AskTab.tsx`, `ChatMessages.tsx`, `ToolLine.tsx` and `DraftCard.tsx`. The pure helpers are in `admin/src/assistant.ts`. There is no `admin/src/assistant/` folder, so `'../assistant'` names one file.
@@ -463,11 +464,11 @@ Each step comes with its own unit tests, and ends with the local run.
 
 ## Not in this version
 
-- Saved chats, memories or notes.
+- Memories or notes. (Saved chats came in on 7 October.)
 - Any tool that writes: confirm, Send again, Let them know, reply, answer, close, change a label.
 - Providers other than Anthropic, and a local model.
 - Moving labelling to TanStack AI. It stays on the AI SDK (`server/src/services/labelling.ts:2`).
-- Markdown in the chat.
+- (Markdown in the chat came in on 7 October.)
 - A rate limit across admins.
 - Production: no `AI_CHAT_MODEL` on Strapi Cloud and no change to `docs/production.md` until Paul approves.
 
@@ -477,4 +478,198 @@ Each step comes with its own unit tests, and ends with the local run.
 2. **TanStack AI:** the 0.52.3 set. Move all four packages to the 0.64 set together only if the local run shows a used draft as still waiting.
 3. **Ask about this** adds one message to the current chat, so earlier answers stay on screen. A New chat button clears the chat.
 4. **A drafted answer** keeps Add to product knowledge ticked, as now: staff read and edit the text, and the dialog says it's a draft.
-5. **Leaving the Maison page ends the chat.** Accepted for v1: no history is kept anywhere.
+5. **Leaving the Maison page ends the chat.** Accepted for v1: no history is kept anywhere. *Replaced on 7 October by saved chats.*
+
+## The Ask tab rebuild (7 October 2026)
+
+### Why
+
+Paul's first look at the Ask tab, 7 October. In his words and in summary:
+
+1. It must look and work like the chat in his strapi-plugin-tanstack-ai 1.6.0 (`R/`).
+2. His plugin shows tool calls in a more effective way.
+3. His plugin renders data more visually.
+4. The Ask tab "doesn't feel like a chat experience".
+5. He can't see which tools are available.
+6. He can't see which model is in use.
+7. His plugin has chat history.
+
+The first build used `R/` only for server patterns and the admin token code, and drew the chat screen from scratch. This rebuild copies `R/`'s chat screen. The rules Maison already has (errors, Stop, limits, the read-only rule) stay.
+
+### Paul's answers (7 October 2026)
+
+1. **Saved chats:** saved per admin. Each admin sees only their own. Ask reopens the most recent chat. New chat starts a fresh one and keeps the old one. Chats stay until their admin deletes them, or until Reset demo activity clears them.
+2. **Markdown:** yes, with tables. The model is told to use tables and lists for data. Images are blocked.
+3. **An opened tool box** shows the result as JSON, as `R/` does. Maison's customer-text tags are removed, and masked customer ids stay masked.
+4. **Memories and notes:** left out. They need tools that write.
+
+The other choices below are the defaults Paul saw in the plan on 7 October and didn't change.
+
+### What staff see
+
+The Ask tab holds one chat area, laid out as `R/admin/src/components/ChatPanel.tsx:61-111` and `:242-335`:
+
+- **The chat area.** A white (`neutral0`) rectangle with a 4px radius and the `tableShadow`. Left to right: the history sidebar, then the chat column. The chat column holds, top to bottom:
+  - the top bar
+  - the message list, the only part that scrolls
+  - the error box, when there is one
+  - the composer
+- **Its height.** The chat area fills the height left under the page header and the tab row, and the page doesn't scroll while Ask is open. The Demo data block isn't shown while Ask is open. How the height is set is tried in the running admin, as `R/admin/src/pages/HomePage.tsx:20-45` does with a full-height flex column. `calc(100vh - N)` is not used.
+- **The top bar,** as `R/admin/src/components/ChatPanel.tsx:93-111` and `R/admin/src/components/TopBarIcon.tsx`. Left to right:
+  - **History:** the square icon button that opens and closes the sidebar.
+  - **Tools (N):** the square icon button that opens a read-only list of the tools this admin's chat can use (below).
+  - **The model badge:** the design-system `Badge` with the model id from `GET /maison/assistant/status`, for example `CLAUDE-SONNET-5-5` (the badge draws capitals). Tooltip: "Model".
+  - a spacer
+  - **New chat:** the plus icon button. When the error notice offers a new chat (`notice.newChat`), the button also shows the words "New chat" and the primary colour.
+  - Not copied: Memories, Notes, the context badge and the "local" marker.
+- **The tools list,** as `R/admin/src/components/ToolSourcePicker.tsx`, without the switches, the browser storage or `forwardedProps`.
+  - One group, headed "Read only".
+  - Each tool shows its name as a code chip, a staff label and one line for staff.
+  - A line at the top says "The assistant looks things up. It never sends, confirms or changes anything."
+  - The labels:
+
+    | Tool | Label |
+    | --- | --- |
+    | list_requests | Visit requests |
+    | list_questions | Customer questions |
+    | list_inquiries | Inquiries |
+    | inquiry_counts | Inquiry counts |
+    | search_knowledge | Product knowledge |
+    | search_products | Product search |
+    | view_product | Product details |
+
+  - The draft tools (step 3) join the list with the labels "Draft a LINE reply" and "Draft an answer".
+- **The empty state,** centred as in `R/admin/src/components/MessageList.tsx:260-267`, `:346-357`:
+  - the title "Ask Maison" (`beta`, `neutral400`)
+  - the sentence "Ask about visit requests, customer questions and inquiries. The assistant looks things up and never sends, confirms or changes anything."
+  - the three starters as buttons below it
+- **Messages,** as `R/admin/src/components/MessageList.tsx:31-143`, `:381-416`:
+  - Staff messages sit on the right in a `primary600` bubble. The assistant's sit on the left in a `neutral100` bubble, with the 28px Sparkle avatar outside it.
+  - Each bubble starts with the label "You" or "Assistant".
+  - Staff text keeps its line breaks (`white-space: pre-wrap`).
+  - The assistant's text is Markdown, drawn by `react-markdown` with `remark-gfm`, with `R/`'s `MarkdownBody` styles. Its four literal black tints become theme colours, so code, tables and quotes show in the dark theme.
+  - Images are not drawn (`disallowedElements: ['img']`).
+  - A link opens in a new tab with `rel="noopener noreferrer"`, and only `http:` and `https:` links are links. Any other link is plain text. The link component drops react-markdown's `node` prop.
+  - Parts are drawn in the order they arrived: text, tool box, more text. `R/` joins all text and puts the tool boxes after it, and that order is not copied.
+- **Waiting.** `R/`'s three bouncing dots, inside an assistant bubble with the avatar, while `showsWorking` is true. They take the place of the line "The assistant is working…". They keep `role="status"` and the accessible name "Assistant is replying". While a tool runs under a text that has already arrived, `R/`'s "Working on it…" line with its spinner shows under the tool boxes.
+- **Tool boxes,** as `R/admin/src/components/ToolCallDisplay.tsx:97-156`, `:191-231`, one per tool call, inside the assistant's bubble, collapsed at first.
+  - The header is a full-width button with `aria-expanded`, holding:
+    - "▶" or "▼"
+    - "Tool: " and the tool's name, for example `Tool: list_requests`
+    - at the right, one of: a spinner while it runs; the count from today's tool line ("3 results", "1 result", or "done" for `inquiry_counts` and `view_product`); or "failed"
+  - A failed box has a `danger200` border and "failed" in `danger600`, so a failure is easy to see. `R/` shows only a faint word, and that is not copied.
+  - Opened, the body shows one of:
+    - "Waiting for result..." while the tool runs
+    - the failure text, which is Maison's own: `output.error.message`, or "Maison could not read that request." for the SDK's own failure strings, never the SDK's text
+    - the result as indented JSON, after one pure helper has removed the customer-text tags (`<customer_message>`, `<customer_question>`, `<customer_note>`, `<concierge_reply>`) and kept the text inside them
+
+    Masked ids stay as they are.
+  - No link chips. Maison rows have no address of their own.
+- **The composer,** as `R/admin/src/components/ChatInput.tsx:15-61`: one row with a 16px padding and a line on top. On the left is the text box, on the right the buttons.
+  - The text box stays Maison's multi-line `Textarea`, with its key rule: Enter sends, Shift+Enter adds a line, and the Enter that confirms a Japanese conversion sends nothing. It starts as one line and grows to at most six. Placeholder: "Type your message...". Accessible name: "Chat message".
+  - Send: size L, primary, with the Sparkle icon. Stop: size L, `danger-light`, with the Cross icon, beside Send, shown only while an answer comes. Send is off while an answer comes. Two buttons, not one slot, so a double click never stops an answer.
+- **Errors.** `R/`'s red box between the message list and the composer (`danger100`, text `danger600`), with `role="alert"` and Maison's staff texts from `errorNotice`. The "not set up" state uses `R/`'s `SetupNotice` look (`R/admin/src/pages/HomePage.tsx:84-95`): the title "The assistant isn't set up", the reason, and Check again. While the status loads: `Loader` with "Checking the assistant…".
+- **Scrolling.** Maison's rule stays: the list follows the newest message only while the reader is at the bottom. No smooth scrolling and no `scrollIntoView`.
+
+### Saved chats
+
+- **What staff see.**
+  - **The sidebar,** as `R/admin/src/components/ConversationSidebar.tsx`: 260px when open, closed at first. At its top is a New Chat button. Under that is the list of this admin's chats, newest first, each row a title and a trash button that shows on hover or focus.
+  - The open chat's row is highlighted. When the list is empty: "No saved chats yet."
+  - While an answer comes, the rows, New Chat and the trash buttons are off.
+  - A closed sidebar also takes its controls out of the tab order (`inert`).
+  - There is no "Manage history" link.
+- **Opening Ask** loads the list and reopens the most recent chat. With no saved chat, the empty state shows.
+- **Saving.** After each turn ends, Maison saves the open chat. A turn ends when the answer finishes, fails or is stopped.
+  - The messages saved are the cleaned ones, after `withoutOpenToolCalls` and `withoutFailedTurn`.
+  - Saves run one at a time. The first creates the chat and keeps its id, and later saves update it.
+  - The title is the first staff message, cut to 80 characters, or "New chat".
+  - Like `R/`'s, the loading and seeding follow `R/admin/src/hooks/useConversations.ts` and `R/admin/src/components/ChatPanel.tsx:177-206`. It switches chats with `setMessages`, never by changing `threadId`.
+- **New chat** starts an empty chat, which is saved after its first turn. The old chat stays in the sidebar. While an answer comes, it stops the answer first, as today.
+- **Ask about this** adds its message to the open chat.
+- **Delete** removes the chat at once, as in `R/`. If it was the open chat, the empty state shows.
+- **The draft** in the text box stays across a change of tab and a change of chat, as today.
+- **Limits.** A reopened chat still counts toward the 20 staff messages. The too-long notice offers New chat.
+- **The server.**
+  - **A content type** `plugin::maison.conversation`, with `collectionName` `maison_conversations` and `draftAndPublish: false`. It is hidden from the Content Manager and the Content-Type Builder, as `question` is (`server/src/content-types/question/schema.json`). Its attributes:
+    - `title`: `text`, cut to 80 characters on the server
+    - `messages`: `json`, required
+    - `adminUserId`: integer, required
+
+    No `string` attribute goes over 255 (`test/unit/content-type-schemas.test.ts`).
+  - **Five admin routes** under `/maison/conversations`: list, get one, create, update and delete. Each has `allow(ACTION.assistantUse)`.
+    - The list answers id, title and `updatedAt`, newest first, at most 100.
+  - **Every route is for the signed-in admin's own chats only.** Another admin's chat answers 404, as `R/server/src/lib/admin-ownership.ts` does.
+  - **The stored body** is `{ v: 1, messages }`, checked with zod, as in `R/server/src/lib/stored-messages.ts`.
+    - Parts keep every key they have. Thinking parts keep their signatures, because the model gets the history back whole (section 3).
+    - A body that fails the check answers 400 with a staff text.
+- **Reset demo activity** also deletes every saved chat, because chats quote demo customers.
+- **What a saved chat holds.** The messages as staff saw them, with the tool results: customer ids masked, customer text fenced and cut to 300 characters a row, at most 50 rows a list. Only its admin can read it. It isn't in the Content Manager.
+
+### Server changes
+
+- `GET /maison/assistant/status` also answers `tools: { name, label }[]`, built from `assistantTools(strapi, ability)`. That is the tools this admin's chat really gets, after the permissions and `disabledTools`, never `READ_TOOL_NAMES`.
+- The instructions line "Reply in short plain text, with no Markdown." becomes:
+  - "Write in Markdown."
+  - "When you list several items with the same fields, such as reference, customer, status and date, use a table."
+  - "Otherwise use short paragraphs or a short list."
+  - "Keep answers short. Never include images."
+
+  Its test changes with it.
+- The plugin declares `react-markdown` `^9.1.0` and `remark-gfm` `^4.0.1` as dependencies, as `R/package.json:113-114` does.
+- For the component tests, it declares `jsdom`, `@testing-library/react` `^16.3.2` and `@testing-library/user-event` `^14.6.1` as dev dependencies.
+
+### What stays
+
+- Every staff error text and how `errorNotice` maps errors.
+- The Stop cleanup and the failed-turn removal.
+- The draft kept in the provider.
+- The permission that hides the tab.
+- The limits: 6 steps a turn, 20 staff messages a chat.
+- The read-only rule.
+- The starters.
+- The Enter rule for Japanese input.
+- The scroll rule.
+- Focus moving to the text box after a send.
+- The rules stay as pure helpers in `admin/src/assistant.ts`, under unit test. The rebuild changes what the screen looks like, not these rules.
+
+### Tests
+
+- **Pure helpers, with unit tests:**
+  - the tag-removing JSON for a tool box
+  - the tool box's header text and state
+  - the conversation title
+  - the stored-body check
+  - the save queue
+  - the tool labels
+- **Server:**
+  - unit tests for the conversations controller and the ownership check
+  - integration tests in a new `test/integration/assistant-conversations.test.mjs`:
+    - one admin's chat is invisible to another (404)
+    - a bad body answers 400
+    - the list is newest first
+    - Reset demo activity deletes the chats
+  - the status answer's tools follow the admin's permissions and `disabledTools`
+- **Component tests** with jsdom and Testing Library, one file per component, run by `npm test`:
+  - the bubbles and avatar
+  - a Markdown table renders, and an image does not
+  - a tool box opens to tag-free JSON, and a failed box is marked
+  - the tools list and the model badge
+  - Send and Stop
+  - the sidebar opens a saved chat and New chat keeps the old one
+- **Paul's browser check** covers the height, the colours in both themes, and how it feels.
+
+### Build order, from 7 October
+
+- **Step 1** (Tasks 1 to 10) is built.
+- **Step 1b, the rebuild:**
+  - the chat area, top bar, model badge and tools list
+  - the bubbles, Markdown, tool boxes, dots and composer
+  - the status answer's tools
+  - the instructions line
+- **Step 1c:** saved chats.
+- **Steps 2 to 4** follow, built on the new components:
+  - The Ask about this message doesn't clear the draft.
+  - The draft cards sit inside the assistant's bubble.
+  - The draft tools count as something to draw.
+  - Saved chats keep the draft tools' results.
