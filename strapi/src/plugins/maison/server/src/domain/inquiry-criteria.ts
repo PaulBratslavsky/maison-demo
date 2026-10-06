@@ -1,6 +1,7 @@
 import { z } from '@strapi/utils';
 
 import { INQUIRY_KINDS, SENTIMENT_LABELS, type SentimentLabel } from '../constants';
+import { fence } from './fence';
 
 /** Bump when the prompt or the criteria change: each labelled row records the version that labelled it. */
 export const PROMPT_VERSION = 'inquiry-labels-1';
@@ -39,9 +40,6 @@ export interface LabelInput {
   knowledgeFound: boolean;
   handedOff: boolean;
 }
-
-/** The customer's text, and a reply that quotes it, can't close the tags the model reads them in: a `<` before either tag's name becomes `&lt;`. */
-const fence = (text: string) => text.replace(/<\s*(\/?)\s*(customer_message|concierge_reply)/gi, '&lt;$1$2');
 
 export const labelUserMessage = ({ message, reply, knowledgeFound, handedOff }: LabelInput): string =>
   [
