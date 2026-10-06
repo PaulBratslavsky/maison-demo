@@ -184,6 +184,97 @@ describe('errorResponse', () => {
     expect(events[0]).toMatchObject({ type: 'RUN_ERROR', code, message });
     expect(JSON.stringify(events)).not.toContain(KEY);
   });
+
+  // errorResponse is built by hand, so it works when the SDK cannot be loaded. It must still be what the page's reader
+  // expects, which is what toServerSentEventsResponse writes for the one event: the same status, headers and bytes.
+  it.each([
+    ['not_ready', { aiApiKey: null }],
+    ['not_ready', { aiProvider: 'openai' }],
+    ['chat_too_long', {}],
+    ['internal', {}],
+  ] as const)('is the same status, headers and bytes as toServerSentEventsResponse gives for the one %s event: %j', async (code, config) => {
+    const timestamp = 1_790_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(timestamp);
+    const { service } = setup({ config });
+    const staff = (await eventsOf(await service.errorResponse(code)))[0];
+    expect(staff).toMatchObject({ type: 'RUN_ERROR', code, timestamp });
+
+    // The event the way the SDK is given it, with the fields it drops from the wire left in.
+    const event = { type: 'RUN_ERROR', message: staff.message, code, error: { message: staff.message, code }, timestamp };
+    const { toServerSentEventsResponse } = await loadSdk();
+    async function* only() {
+      yield event;
+    }
+    const fromSdk = toServerSentEventsResponse(only() as never);
+    const byHand = await service.errorResponse(code);
+
+    expect(byHand.status).toBe(fromSdk.status);
+    expect(Object.fromEntries(byHand.headers)).toEqual(Object.fromEntries(fromSdk.headers));
+    expect(await byHand.text()).toBe(await fromSdk.text());
+  });
+});
+
+// The SDK ships with the plugin, so a failure to load it means a broken install. Staff still get a plain answer in the
+// stream, and the original, with the path it names, goes only to Strapi's log.
+describe('when the SDK cannot be loaded', () => {
+  const RAW = "Cannot find package '@tanstack/ai' imported from /secret/path/dist/server/index.js";
+
+  afterEach(() => {
+    vi.doUnmock('@tanstack/ai');
+    vi.resetModules();
+  });
+
+  /** The assistant service as a Strapi without @tanstack/ai would run it: fresh modules, whose load of the SDK fails. */
+  const withoutSdk = async (config: Doc = {}) => {
+    vi.resetModules();
+    vi.doMock('@tanstack/ai', () => {
+      throw new Error(RAW);
+    });
+    const { default: freshService } = await import('../../server/src/services/assistant');
+    const strapi = fakeStrapi({ config: { aiApiKey: KEY, ...config } });
+    return { service: freshService({ strapi }), strapi };
+  };
+  const params = bodyOf([staffSays('Hi')]) as never;
+  const request = () => ({ ability: everything, adminId: 7, responseController: new AbortController(), now: NOW });
+
+  it.each([
+    ['not_ready', NO_KEY, { aiApiKey: null }],
+    ['chat_too_long', CHAT_TOO_LONG_TEXT, {}],
+    ['internal', SOMETHING_WRONG_TEXT, {}],
+  ] as const)('answers errorResponse(%s) as a 200 event stream of one RUN_ERROR, without the SDK', async (code, message, config) => {
+    const { service } = await withoutSdk(config);
+    const response = await service.errorResponse(code);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(await eventsOf(response)).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code, message })]);
+  });
+
+  it('answers a turn that is not ready with the not_ready RUN_ERROR, and builds no adapter', async () => {
+    const { service, strapi } = await withoutSdk({ aiApiKey: null });
+    const adapterFor = vi.fn();
+    const response = await service.turn(params, { ...request(), adapterFor });
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(await eventsOf(new Response(text))).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code: 'not_ready', message: NO_KEY })]);
+    expect(text).not.toContain('secret');
+    expect(adapterFor).not.toHaveBeenCalled();
+    expect(strapi.log.error).not.toHaveBeenCalled();
+  });
+
+  it('answers a turn that cannot start with one internal RUN_ERROR in staff words, never the loader text, and logs the original once', async () => {
+    const { service, strapi } = await withoutSdk();
+    const response = await service.turn(params, request());
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(await eventsOf(new Response(text))).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code: 'internal', message: SOMETHING_WRONG_TEXT })]);
+    for (const raw of ['secret', 'Cannot find package', 'needs @tanstack/ai', 'npm install', '[maison]', KEY]) expect(text, raw).not.toContain(raw);
+    // The log has the loader's message, and the plugin's tag once: that message starts with the tag already.
+    expect(strapi.log.error).toHaveBeenCalledOnce();
+    const line = strapi.log.error.mock.calls[0][0] as string;
+    expect(line).toContain('The assistant needs @tanstack/ai');
+    expect(line).toContain('run npm install');
+    expect(line.match(/\[maison\]/g)).toHaveLength(1);
+  });
 });
 
 describe('turn, what the model receives', () => {
@@ -256,10 +347,31 @@ describe('turn, what the model receives', () => {
     for (const part of ['First?', 'First answer.', 'Second?']) expect(sent).toContain(part);
   });
 
-  it('does not write to the console: the SDK logging is off, so nothing bypasses the key filter', async () => {
-    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
-    await run(setup({ turns: [errorTurn('401', `401 invalid x-api-key ${KEY}`)] }));
+  // An adapter whose call throws is the one case where the SDK writes to the console, and only when its own logging is on
+  // (chat() logs the thrown message with console.error and console.dir). That is how a key in the message would bypass
+  // withoutKey. A provider error the adapter yields, as errorTurn does, never logs, so it cannot show the logging is off.
+  it('does not write to the console when the adapter throws: the SDK logging is off, so the key reaches only the filtered log line', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug', 'dir'] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    const adapter = {
+      kind: 'text',
+      name: 'broken',
+      model: 'm',
+      async *chatStream() {
+        throw new Error(`connection reset while sending ${KEY}`);
+      },
+      async structuredOutput() {
+        throw new Error('none');
+      },
+    };
+    const world = setup();
+    const { events } = await run(world, 'Hi', { adapterFor: () => adapter as never });
+    expect(errorsOf(events)).toHaveLength(1);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    // The one place the original goes: Strapi's log, with the key taken out.
+    expect(world.strapi.log.error).toHaveBeenCalledOnce();
+    const line = world.strapi.log.error.mock.calls[0][0] as string;
+    expect(line).toContain('connection reset while sending [key]');
+    expect(line).not.toContain(KEY);
   });
 });
 
@@ -522,6 +634,30 @@ describe('turn, the deadline and aborts', () => {
     responseController.abort();
     expect(world.requests[0].request.signal.aborted).toBe(true);
     await reading;
+  });
+
+  // The test above aborts the controller itself, so it shows the wrapper hears it. A closed tab does not abort it by hand:
+  // it cancels the response body, and toServerSentEventsResponse aborts the controller it was given. This holds that link.
+  it('stops the model call when the response body is cancelled: the browser closed the connection', async () => {
+    const world = setup({ turns: [toolCallTurn('inquiry_counts', {}), 'never'], services: { inquiries: { summary: vi.fn(async () => ({ needsAnswer: 1, complaint: 0, praise: 0, notLabelled: 0 })) } } });
+    const params = await world.service.parseBody(bodyOf([staffSays('Hi')]));
+    const responseController = new AbortController();
+    // A short deadline, so a missing link ends this test's model call soon instead of leaving it for 90 seconds.
+    const response = await world.service.turn(params, { ability: everything, adminId: 7, responseController, adapterFor: world.adapterFor, now: NOW, deadlineMs: 3_000 });
+
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    // The second model call hangs, as a model call does that the provider never answers.
+    await vi.waitFor(() => expect(world.requests).toHaveLength(2));
+    const modelCall: AbortSignal = world.requests[1].request.signal;
+    expect(modelCall.aborted).toBe(false);
+    expect(responseController.signal.aborted).toBe(false);
+
+    const cancelled = reader.cancel();
+    await vi.waitFor(() => expect(modelCall.aborted).toBe(true), { timeout: 500 });
+    expect(responseController.signal.aborted).toBe(true);
+    await cancelled;
   });
 });
 

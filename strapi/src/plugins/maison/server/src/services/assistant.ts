@@ -208,6 +208,12 @@ export type AssistantStatus = { ready: true; model: string } | { ready: false; r
 export const countStaffMessages = (messages: ReadonlyArray<{ role?: string }>): number => messages.filter((message) => message.role === 'user').length;
 
 /**
+ * What a thrown value says, for a log line that starts with the plugin's own `[maison]` tag. The loader's errors start
+ * with the tag already, so it is taken off, and the line shows it once.
+ */
+export const thrownText = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(/^\[maison\]\s*/, '');
+
+/**
  * What a tool answers when its service throws: fixed text, in the shape of the tools' other expected failures. Without
  * this, @tanstack/ai catches the throw and gives the model "Error executing tool: <the message>", and sends the same text
  * to the page in the tool's result event. The message can hold database text.
@@ -251,15 +257,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   /**
    * An answer that is a 200 event stream holding one RUN_ERROR with the staff text. ai-client 0.29.2 never reads the body
    * of an HTTP error, so a refusal sent as one would reach staff as a bare status. A stream's error reaches them whole.
+   *
+   * It is written by hand and loads nothing: it is also what staff get when the SDK itself cannot be loaded. It is what
+   * toServerSentEventsResponse writes for one RUN_ERROR, the same status, headers and bytes: a unit test compares the two.
+   * That function sends each event as `data: <the event as JSON>\n\n`, with the event cut to the fields the AG-UI spec
+   * names for it, which for a RUN_ERROR are `type`, `message`, `code` and `timestamp`.
    */
   const errorResponse = async (code: 'not_ready' | 'chat_too_long' | 'internal'): Promise<Response> => {
     const config = getConfig(strapi);
     const staff = staffErrorOf({ code }, { model: config.aiChatModel, notReady: notReadyReason(config) ?? undefined });
-    const { toServerSentEventsResponse } = await loadSdk();
-    async function* only(): AsyncGenerator<Chunk> {
-      yield { type: 'RUN_ERROR', message: staff.message, code: staff.code, error: { message: staff.message, code: staff.code }, timestamp: Date.now() };
-    }
-    return toServerSentEventsResponse(only() as never);
+    const event = { type: 'RUN_ERROR', message: staff.message, code: staff.code, timestamp: Date.now() };
+    return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
   };
 
   return {
@@ -322,7 +333,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         });
         return toServerSentEventsResponse(wrapped as never, { abortController: request.responseController });
       } catch (error) {
-        strapi.log.error(withoutKey(`[maison] The assistant could not start a turn: ${(error as Error)?.message ?? String(error)}`, config.aiApiKey));
+        strapi.log.error(withoutKey(`[maison] The assistant could not start a turn: ${thrownText(error)}`, config.aiApiKey));
         return errorResponse('internal');
       }
     },

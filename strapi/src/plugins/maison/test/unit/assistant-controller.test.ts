@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACTION, ASSISTANT_LIMITS } from '../../server/src/constants';
 import controllers from '../../server/src/controllers';
 import assistantController from '../../server/src/controllers/assistant';
@@ -200,6 +200,45 @@ describe('assistant.chat, before the model', () => {
     const logged = strapi.log.error.mock.calls[0][0] as string;
     expect(logged).toContain('/secret/path');
     expect(logged).not.toContain(KEY);
+    // The plugin's tag is there once: a loader's message starts with it already.
+    expect(logged.match(/\[maison\]/g)).toHaveLength(1);
+  });
+
+  describe('with an SDK that cannot be loaded at all', () => {
+    const RAW = "Cannot find package '@tanstack/ai' imported from /secret/path/dist/server/index.js";
+
+    afterEach(() => {
+      vi.doUnmock('@tanstack/ai');
+      vi.resetModules();
+    });
+
+    it('answers 200 with one internal RUN_ERROR in staff words and no raw text, never a 500, and logs the original once', async () => {
+      // Fresh modules, so the service's load of the SDK, which the real parseBody makes, fails as it would in a broken install.
+      vi.resetModules();
+      vi.doMock('@tanstack/ai', () => {
+        throw new Error(RAW);
+      });
+      const { default: freshService } = await import('../../server/src/services/assistant');
+      const { default: freshController } = await import('../../server/src/controllers/assistant');
+      const settings = { aiApiKey: KEY };
+      const strapi = fakeStrapi({ services: { assistant: freshService({ strapi: fakeStrapi({ config: settings }) }) }, config: settings });
+      const ctx = fakeCtx({ request: { body: chatOf(1) } });
+
+      await freshController({ strapi }).chat(ctx);
+
+      expect(ctx.status).toBe(200);
+      expect(ctx.badRequest).not.toHaveBeenCalled();
+      expect(ctx.internalServerError).not.toHaveBeenCalled();
+      expect(ctx.headers['Content-Type']).toBe('text/event-stream; charset=utf-8');
+      const text = await textOf(ctx.body);
+      expect(await eventsOf(Readable.from([text]))).toEqual([expect.objectContaining({ type: 'RUN_ERROR', code: 'internal', message: 'Something went wrong. Try again.' })]);
+      for (const raw of ['secret', 'Cannot find package', 'needs @tanstack/ai', 'npm install', '[maison]', KEY]) expect(text, raw).not.toContain(raw);
+      expect(strapi.log.error).toHaveBeenCalledOnce();
+      const logged = strapi.log.error.mock.calls[0][0] as string;
+      expect(logged).toContain('The assistant needs @tanstack/ai');
+      expect(logged).toContain('run npm install');
+      expect(logged.match(/\[maison\]/g)).toHaveLength(1);
+    });
   });
 
   it('does not refuse the 20th: it runs the turn', async () => {

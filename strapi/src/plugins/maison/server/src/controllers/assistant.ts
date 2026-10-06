@@ -5,7 +5,7 @@ import type { Core } from '@strapi/strapi';
 import { withoutKey } from '../assistant/errors';
 import { getConfig } from '../config';
 import { ASSISTANT_LIMITS } from '../constants';
-import { countStaffMessages } from '../services/assistant';
+import { countStaffMessages, thrownText } from '../services/assistant';
 
 /**
  * What chatParamsFromRequestBody says when the body is no run input. Its error is an AGUIError, which has no name of its
@@ -57,9 +57,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         if (isBadBody(error)) return ctx.badRequest((error as Error).message);
         // Not the browser's fault, such as an SDK that could not be loaded: the text can hold file paths. Staff get the plain
         // error as an event stream, and the original goes to Strapi's log once.
-        strapi.log.error(
-          withoutKey(`[maison] The assistant could not read a chat request: ${error instanceof Error ? error.message : String(error)}`, getConfig(strapi).aiApiKey)
-        );
+        strapi.log.error(withoutKey(`[maison] The assistant could not read a chat request: ${thrownText(error)}`, getConfig(strapi).aiApiKey));
         return send(ctx, await assistant().errorResponse('internal'));
       }
 
