@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Product knowledge in Japanese.** Each of the 16 seeded entries has a Japanese version, in a client advisor's polite register, with the same facts as the English, the catalog's Japanese product names, and Japanese keywords for the search. A Japanese chat's `search_knowledge` now answers care and policy questions from them, instead of handing every one to staff.
+  - The content is in `server/seed/knowledge.json`, each entry's Japanese title, answer and keywords under `ja`.
+  - **Load demo catalog** adds the English entries when there are none, as before. Then it finds each entry's English document by its English title, and when that document has no Japanese version, adds one with the Document Service (`update` with `locale: 'ja'`, then `publish` in `ja`). The category and products are shared, so Strapi copies them from the English version. A Strapi that has only the English entries gets the 16 Japanese versions. Pressing it again adds nothing, an entry whose English title staff changed is skipped, and the entries staff added by answering questions are never changed. The English entries stay as they are.
+  - `POST /maison/demo/seed` also answers `knowledgeJa`, the Japanese versions it added, and the notice names both languages: "Added 16 product knowledge entries in English and 16 in Japanese." `npm run setup` says the same.
+  - Reset demo activity keeps the seeded product knowledge in both languages.
+
 - **Load demo activity,** a button beside Load demo catalog under Demo data, adds five made-up customers' activity for the Maison page to show: five visit requests (three waiting for staff, two confirmed), five questions (three open, one taken, one answered) and ten inquiries (each question's hand-off, two complaints, one praise, one question answered from product knowledge, and one left for the labelling sweep), received over the last three days.
   - The customers have fixed LINE user IDs that belong to nobody (`line:Udec0de`, zeros, then a digit), and display names. Staff see them masked.
   - The requests go through the appointments service, so they get `APT-` references and pass its checks. Each is 2 to 13 days ahead, on a half-hour inside its boutique's opening hours (never Osaka on a Tuesday), for pieces the boutique has in stock when the button is pressed. The two confirmed ones are published as the board's Confirm does it, so the LINE confirmation hook runs and records what LINE answers.

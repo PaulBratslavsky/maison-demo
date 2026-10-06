@@ -66,7 +66,7 @@ Never run `npm run setup` against Strapi Cloud. On a new Strapi Cloud project, t
 2. **Variables.** Set the variables in [Strapi on Strapi Cloud](#strapi-on-strapi-cloud), then deploy.
 3. **The first admin.** Open `/admin` on the Strapi Cloud URL and fill in the registration form: first name, last name, email and password. The first admin is a Super Admin (Strapi's [Role-Based Access Control](https://docs.strapi.io/cms/features/rbac)). Create the customer token (step 7) and the client (step 9) as the same admin: a client can only map an admin token its creator owns. For a narrow service admin instead, see [The customer token](#the-customer-token).
 4. **Check that sign-in is ready.** Open **MCP OAuth** in the sidebar. It should show no "Strapi's MCP server is disabled" or "Encryption key missing" alert, and **Connection details** should read "LINE sign-in is on for channel" with your channel's ID. If not, fix `MCP_ENABLED`, `ENCRYPTION_KEY` or `LINE_LOGIN_CHANNEL_ID`, and redeploy.
-5. **The demo catalog.** Open **Maison** in the sidebar and press **Load demo catalog** under **Demo data** (the plugin's [admin page](../strapi/src/plugins/maison/README.md#the-admin-page)). It adds the `ja` and `en` locales, 3 boutiques, 3 collections and 12 products in both languages, their stock, and 16 product knowledge entries in English. It leaves an existing catalog alone. The Home page's text needs no step: Strapi writes and publishes it on a new database.
+5. **The demo catalog.** Open **Maison** in the sidebar and press **Load demo catalog** under **Demo data** (the plugin's [admin page](../strapi/src/plugins/maison/README.md#the-admin-page)). It adds the `ja` and `en` locales, 3 boutiques, 3 collections and 12 products in both languages, their stock, and 16 product knowledge entries in English and Japanese. It leaves an existing catalog alone. The Home page's text needs no step: Strapi writes and publishes it on a new database.
 6. **The Public role.** Go to **Settings** → **Users & Permissions plugin** → **Roles** → **Public** (Strapi's [Users & Permissions](https://docs.strapi.io/cms/features/users-permissions)). Tick these, leave the rest as it is, and save:
    - under **Maison**: `find` on collections, products, boutiques and knowledge, and `findOne` on products
    - under **Home-page**: `find`
@@ -102,7 +102,7 @@ Later:
 On a database set up before these features, the customer token lacks two actions, the Public role lacks one, and the catalog has no product knowledge:
 - **On the "Maison customer" token,** tick "MCP: hand questions to staff" (`plugin::maison.questions.ask`) and "MCP: log customer inquiries" (`plugin::maison.inquiries.log`). When the token's owner is a narrow service admin, add both to the owner's role first.
 - **On the Public role,** tick Maison's `find` on knowledge, for product knowledge over REST (`/api/maison/knowledge`). The concierge doesn't need it: it searches through MCP.
-- **Press Load demo catalog again.** It adds the 16 product knowledge entries when there are none, and leaves the catalog alone.
+- **Press Load demo catalog again.** It adds the 16 product knowledge entries in English when there are none, gives each English entry its Japanese version when it has none, and leaves the catalog alone. A database with only the English entries gets the 16 Japanese versions this way, and the notice says "Added 16 product knowledge entries in Japanese."
 - **Check steps 1 and 2.** Labelling needs Node 22.12 or later, and `AI_API_KEY`.
 
 ## Production notes

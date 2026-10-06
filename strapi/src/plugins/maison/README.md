@@ -92,7 +92,13 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `pending_confirmations` | MCP: send appointment confirmations | Confirmed upcoming visits whose confirmation hasn't gone out, each with a ready LINE flex message |
 | `record_confirmation` | MCP: send appointment confirmations | Records whether a LINE confirmation was delivered |
 
-**Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. **Load demo catalog** adds 16 entries in English, also to a catalog loaded before. It adds them only when no English entry exists, so if it stops partway through them, delete the English product knowledge entries and press **Load demo catalog** again.
+**Product knowledge** is a content type, `plugin::maison.knowledge`, localized with draft and publish. Each entry has a title, an answer of up to 2,000 characters, a category, the products it's about (`productSlugs`, empty for every piece) and keywords. `search_knowledge` scores published entries on the question's words: in the title most, then the keywords, then the answer. With `productSlugs`, it leaves out entries about other pieces, and an unknown or unpublished product is `not_found`. A search in `ja`, the default locale, reads only the Japanese versions. A search in `en` reads the English versions, and an entry's Japanese version where it has no English one.
+
+**Load demo catalog** adds 16 entries in English and Japanese, also to a catalog loaded before. Each entry is one document with an `en` and a `ja` version: the title, answer and keywords are in each language, and the category and products are shared. The content is in `server/seed/knowledge.json`, each entry's Japanese version under `ja`.
+- **English:** it adds the 16 English entries only when no English entry exists, so if it stops partway through them, delete the English product knowledge entries and press **Load demo catalog** again.
+- **Japanese:** then it finds each entry's English document by its English title, and when that document has no Japanese version, adds one and publishes it. A Strapi that has only the English entries gets the 16 Japanese versions, and pressing again adds nothing.
+- **Staff changes stay:** an entry whose English title staff changed is skipped, and the entries staff added by answering questions are never changed.
+- **The result:** Strapi answers `knowledge`, the English entries it added, and `knowledgeJa`, the Japanese versions, and the page's notice names both.
 
 The **`send_pending_confirmations` prompt** tells an ops agent how to deliver confirmations with [LINE Bot MCP](https://github.com/line/line-bot-mcp-server): the ones Strapi couldn't send, since Strapi sends them itself. It checks that each customer is reachable (`get_profile`) before pushing, because LINE's push API answers 200 even when it can't deliver. The prompt drives both `pending_confirmations` and `record_confirmation`, so disabling either one in `disabledTools` also drops the prompt.
 
@@ -369,7 +375,7 @@ And an answer:
 
 A question in Japanese gets both messages in Japanese, signed with "Maison" and the name joined by a full-width space. Without a piece, "about the Jewelry Coffret" is left out. Without a first name, or with the house's own as the first name ("Maison", in any case, or either `houseName` in the config), the message opens "Hello, this is Maison's client advisor team." and is signed "Maison".
 
-**Reset demo activity**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
+**Reset demo activity**, under Demo data, deletes every question and the product knowledge entries their answers added, in every language, as well as every inquiry, appointment and notification. The catalog and the seeded product knowledge, in both languages, stay. Strapi answers `{ appointments, notifications, questions, inquiries, knowledge }`, what it deleted, and the page says so.
 
 ## Customer inquiries
 

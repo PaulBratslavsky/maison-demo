@@ -11,7 +11,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 ## Before going on stage
 
 - [ ] The day before: start over with a clean database ([Start over with a clean database](../README.md#start-over-with-a-clean-database)). Then no test customer, smoke-test token or rehearsal visit is left. After that, don't run `npm run test:e2e`, `test:live` or Maison's smoke tests: they leave visits, questions, inquiries or tokens behind.
-- [ ] On the Maison page, press **Load demo catalog** once after updating: a catalog loaded before gets Maison's 16 product knowledge entries, in English.
+- [ ] On the Maison page, press **Load demo catalog** once after updating: a catalog loaded before gets the Japanese versions of Maison's 16 product knowledge entries, and the English ones if it has none. The notice says what it added.
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key), the LINE confirmation, labelling with a key and **Reply on LINE** need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
@@ -36,7 +36,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 
 **Optional, 20 seconds, after the booking:** ask "How do I care for the leather?". A line above the answer reads `MCP · search_knowledge ✓ …`, and the answer comes from Maison's own product knowledge in Strapi. Or ask "Can I pay in bitcoin?": the search finds nothing (`MCP · search_knowledge ✓ 0 results`), the app records the question for staff itself, and the note with the question's `Q-` reference and **Send it in the LINE chat** appears under that line. If recording fails, the note says only where the team answers, with **Chat with Maison on LINE**. On the Maison page's **Inquiries** tab, the bitcoin question shows under **Needs an answer**, the default filter. Turns the concierge answered, such as the gift question, show under **All**.
 
-**In Japanese (JA),** the same run uses the same tools, with Japanese labels: the form's button is リクエストを送る, the second suggestion is 来店を予約できますか？, and the product page's button is 来店を予約.
+**In Japanese (JA),** the same run uses the same tools, with Japanese labels: the form's button is リクエストを送る, the second suggestion is 来店を予約できますか？, and the product page's button is 来店を予約. The optional questions are 「革のお手入れ方法を教えてください」, answered from the Japanese product knowledge, and 「ビットコインで支払えますか？」, which it has nothing on.
 
 **Fallbacks:**
 - **The concierge stalls, or the network drops:** use **Book a visit** on the product page. It calls the same `request_appointment` tool.
@@ -50,7 +50,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 
 ## Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** and **Load demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** and **Load demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English and Japanese, so a Japanese chat answers care and policy questions from the Japanese entries. A question they don't cover goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each step works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.

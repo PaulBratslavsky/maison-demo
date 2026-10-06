@@ -86,7 +86,7 @@ curl "$STRAPI/api/maison/knowledge?query=How%20do%20I%20care%20for%20the%20leath
 ```
 
 - **The parameters are the tools' arguments,** with the same checks (`server/src/mcp/schemas.ts` in the plugin). Products take `query`, `collection`, `category`, `occasion`, `minPriceJpy`, `maxPriceJpy`, `personalizable`, `inStockAt` and `limit`. Product knowledge takes `query`, `productSlugs` and `locale`. A list repeats its parameter: `productSlugs=weekender-50&productSlugs=passport-cover`.
-- **`locale`** is `ja` (the default) or `en`. Product knowledge is in English only, so the knowledge route answers Japanese, which has no entries, unless you send `locale=en`.
+- **`locale`** is `ja` (the default) or `en`. Product knowledge is in both: without `locale`, the knowledge route searches the Japanese versions.
 - **An unknown product** answers 404 with the tool's hint: "Call search_products to find valid product slugs."
 - **Catalog calls send no `Authorization`.** Strapi reads any Bearer token on these routes as a users-permissions JWT or an API token, so a customer session there gets 401.
 
