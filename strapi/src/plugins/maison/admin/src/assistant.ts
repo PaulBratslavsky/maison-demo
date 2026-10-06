@@ -185,24 +185,131 @@ const failureMessage = (output: any): string => {
   return 'The tool failed.';
 };
 
+/** How a call stands: still running, failed (with the message to show), or done (with how many rows it gave, for the tools that give rows). */
+type Outcome = { tone: 'running' } | { tone: 'error'; message: string } | { tone: 'ok'; count: number | null };
+
+/** Whether the part is a call to one of the seven read tools. The draft tools have a card instead, and any other name has nothing. */
+const isReadToolCall = (call: PartLike): boolean => call.type === 'tool-call' && Object.prototype.hasOwnProperty.call(TOOL_LINES, call.name);
+
+const outcomeOf = (call: PartLike, result: PartLike | undefined): Outcome => {
+  const { rows } = TOOL_LINES[call.name];
+  const output = call.output;
+
+  const failed = call.state === 'error' || result?.state === 'error' || (typeof output === 'object' && output !== null && 'error' in output && Boolean(output.error));
+  if (failed) return { tone: 'error', message: failureMessage(output) };
+
+  if (RUNNING.has(call.state) || (call.state !== 'complete' && !result)) return { tone: 'running' };
+
+  const list = rows ? output?.[rows] : undefined;
+  return { tone: 'ok', count: Array.isArray(list) ? list.length : null };
+};
+
+/** "12 results", "1 result", "0 results". */
+const countText = (count: number): string => `${count} ${count === 1 ? 'result' : 'results'}`;
+
 /**
  * The line for a tool call: `Maison · inquiries ✓ 12 results`, `Maison · requests …` while it runs, or in red
  * `Maison · requests ✕ No request APT-4812.` when it failed. Only the seven read tools have one: the drafts have a card
  * instead, and any other name has none.
  */
 export const toolLineOf = (call: PartLike, result: PartLike | undefined): ToolLineModel | null => {
-  if (call.type !== 'tool-call' || !Object.prototype.hasOwnProperty.call(TOOL_LINES, call.name)) return null;
-  const { what, rows } = TOOL_LINES[call.name];
-  const output = call.output;
+  if (!isReadToolCall(call)) return null;
+  const { what } = TOOL_LINES[call.name];
+  const outcome = outcomeOf(call, result);
+  if (outcome.tone === 'error') return { text: `Maison · ${what} ✕ ${outcome.message}`, tone: 'error' };
+  if (outcome.tone === 'running') return { text: `Maison · ${what} …`, tone: 'running' };
+  return { text: outcome.count === null ? `Maison · ${what} ✓` : `Maison · ${what} ✓ ${countText(outcome.count)}`, tone: 'ok' };
+};
 
-  const failed = call.state === 'error' || result?.state === 'error' || (typeof output === 'object' && output !== null && 'error' in output && Boolean(output.error));
-  if (failed) return { text: `Maison · ${what} ✕ ${failureMessage(output)}`, tone: 'error' };
+/** The four tags the server wraps customer text in (`FENCED_TAGS` in server/src/domain/fence.ts, which a unit test holds this list to). */
+export const CUSTOMER_TAGS = ['customer_message', 'customer_question', 'customer_note', 'concierge_reply'] as const;
 
-  if (RUNNING.has(call.state) || (call.state !== 'complete' && !result)) return { text: `Maison · ${what} …`, tone: 'running' };
+const CUSTOMER_TAG = new RegExp(`</?(?:${CUSTOMER_TAGS.join('|')})>`, 'g');
 
-  const list = rows ? output?.[rows] : undefined;
-  if (!Array.isArray(list)) return { text: `Maison · ${what} ✓`, tone: 'ok' };
-  return { text: `Maison · ${what} ✓ ${list.length} ${list.length === 1 ? 'result' : 'results'}`, tone: 'ok' };
+/**
+ * `value` with the customer-text tags taken out of every string in it, and the text inside them kept: what staff read in an opened
+ * tool box. The tags are for the model, which reads customer text as data. The server writes a `<` before a tag name in customer text
+ * as `&lt;`, so every tag left in a result is one of its own. Anything that is not a string, an array or a plain object is as it was,
+ * and so is the masked customer (`line:U4af…88`). It makes a new value and never changes the one it was given.
+ */
+export const withoutCustomerTags = (value: unknown): unknown => {
+  if (typeof value === 'string') return value.replace(CUSTOMER_TAG, '');
+  if (Array.isArray(value)) return value.map(withoutCustomerTags);
+  if (typeof value === 'object' && value !== null) return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, withoutCustomerTags(inner)]));
+  return value;
+};
+
+/** What the opened box of a running call says. Three plain dots, as strapi-plugin-tanstack-ai's box does. */
+export const WAITING_FOR_RESULT = 'Waiting for result...';
+
+/** A tool call as its box in the chat shows it. */
+export interface ToolBoxModel {
+  /** The tool's name, which the header shows after "Tool: ". */
+  name: string;
+  state: 'running' | 'done' | 'failed';
+  /** What the header says at the right: "3 results", "1 result" or "done" for a call that is over, "failed" for one that failed, and null while it runs, when a spinner shows. */
+  status: string | null;
+  /** What the opened box shows: the wait, the failure's message, or the result as indented JSON with the customer-text tags taken out. */
+  body: string;
+}
+
+/** The result of a call: its output, else what its tool-result part carries (TanStack AI sends it as a JSON string). */
+const outputOf = (call: PartLike, result: PartLike | undefined): unknown => {
+  if (call.output !== undefined) return call.output;
+  const content: unknown = result?.content;
+  if (typeof content !== 'string') return content;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return content;
+  }
+};
+
+/**
+ * The box for a tool call, in the order the parts arrived. A running call waits. A failed call shows Maison's own message, or a fixed
+ * sentence for a call TanStack AI refused, never TanStack AI's text (see failureMessage). A finished call shows its count in the
+ * header (the same count as its line) and its result as JSON. Null for a part that has no box: the same parts that have no line.
+ */
+export const toolBoxOf = (call: PartLike, result: PartLike | undefined): ToolBoxModel | null => {
+  if (!isReadToolCall(call)) return null;
+  const outcome = outcomeOf(call, result);
+  if (outcome.tone === 'running') return { name: call.name, state: 'running', status: null, body: WAITING_FOR_RESULT };
+  if (outcome.tone === 'error') return { name: call.name, state: 'failed', status: 'failed', body: outcome.message };
+  return {
+    name: call.name,
+    state: 'done',
+    status: outcome.count === null ? 'done' : countText(outcome.count),
+    body: JSON.stringify(withoutCustomerTags(outputOf(call, result)), null, 2) ?? '',
+  };
+};
+
+/** What staff read under each tool's label in the list of tools: one plain line. A unit test holds this to the tools the server labels. */
+export const TOOL_NOTES: Record<string, string> = {
+  list_requests: 'Looks up visit requests: the ones waiting for staff, one visit day, or one request by its reference.',
+  list_questions: 'Looks up the questions the concierge handed to staff, open or answered, or one by its reference.',
+  list_inquiries: 'Looks up what customers wrote to the concierge, with its labels, or one inquiry by its ID.',
+  inquiry_counts: 'Counts the open inquiries in each queue.',
+  search_knowledge: 'Searches the product knowledge Maison wrote for customers.',
+  search_products: 'Finds products, with prices and stock.',
+  view_product: "Shows one product's details.",
+};
+
+/** The line for a tool in the list of tools, or null for a tool with none. */
+export const toolNoteOf = (name: string): string | null => (Object.prototype.hasOwnProperty.call(TOOL_NOTES, name) ? TOOL_NOTES[name] : null);
+
+/**
+ * The address a link in an answer may have: only an `http:` or `https:` address is a link. Anything else, such as `javascript:`,
+ * `data:`, `mailto:`, an address with no scheme, or one that does not parse, is not, and the answer shows its text as plain text.
+ * It answers the address as the browser reads it, so what is checked is what a link would open.
+ */
+export const safeLink = (href: string | null | undefined): string | null => {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 };
 
 /** A message as TanStack AI keeps it, as far as the helpers below read it. A UIMessage is one. */
@@ -233,6 +340,20 @@ export const showsWorking = (busy: boolean, messages: readonly MessageLike[]): b
   if (!busy) return false;
   const last = messages.at(-1);
   return !(last?.role === 'assistant' && drawableParts(partsOfMessage(last)).length > 0);
+};
+
+/**
+ * Whether the last message shows "Working on it…" under its tool boxes: the assistant is answering, its message already has text,
+ * and one of its tools is still running. With no text yet, the box's own spinner shows the wait, and between the end of a tool and
+ * the next words nothing shows.
+ */
+export const showsToolWait = (busy: boolean, messages: readonly MessageLike[]): boolean => {
+  if (!busy) return false;
+  const last = messages.at(-1);
+  if (last?.role !== 'assistant') return false;
+  const parts = partsOfMessage(last);
+  const hasText = parts.some((part) => part.type === 'text' && typeof part.content === 'string' && part.content.trim() !== '');
+  return hasText && parts.some((part) => toolBoxOf(part, toolResultOf(parts, part.id))?.state === 'running');
 };
 
 /**
