@@ -15,7 +15,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 - [ ] `npm run mode` says local. After option B, stop ngrok first (Ctrl-C in its terminal), then run `npm run mode:local` and restart Strapi and the app.
 - [ ] Put the laptop on a phone hotspot. Only the concierge's model (with a key), the LINE confirmation, labelling with a key and **Reply on LINE** need the internet.
 - [ ] `npm run dev`. `http://localhost:1338/_health` answers 204.
-- [ ] In the Strapi admin: **Maison** → **Reset demo activity** (it asks first). Set the board's filter to **All requests**.
+- [ ] In the Strapi admin: **Maison** → **Reset demo activity** (it asks first), then **Load demo activity**, which needs the catalog from **Load demo catalog** above. It adds five made-up customers' requests, questions and inquiries, received over the last three days, so each tab has rows to show. Set the board's filter to **All requests**.
 - [ ] Open `http://localhost:3003`, or reload it after the reset. Sign-in is automatic, and the collections appear. Set the language to **EN**: each browser remembers the last choice.
 - [ ] Run through every screen once, so each one is compiled before the audience sees it: home, a collection, a product, the booking sheet (close it without sending), **My visits**, and the concierge. Ask the concierge one question: on the local model, the first answer also loads the model.
 - [ ] With option A: your phone at hand, with LINE's notifications on. The confirmation arrives there.
@@ -29,7 +29,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 | 0:00-0:30 | UX | The app opens signed in with LINE. Browse Voyage, then the Weekender 50. Turn on **Agent view**: every screen is an MCP tool call, the same tools an agent uses. |
 | 0:30-1:10 | AX for the customer | **Ask the concierge**, and tap the first suggestion. A line above the answer names each tool call. The `Local · resolve_date` line shows the Saturday it worked out. Under the concierge's words, cards show the pieces it found, and the **Book a visit** form appears under them, filled in with Ginza, that Saturday and 14:00. The chat scrolls to the form's heading. |
 | 1:10-1:30 | Booking | Tap **Send request**. The visit's card replaces the form, the lines read `Local · choose_visit ✓ requested` and `MCP · request_appointment ✓`, and the concierge says the visit is requested and the boutique will confirm it on LINE. |
-| 1:30-1:50 | The request arrives | On the board, the request appears, created via `app`, with the customer masked. |
+| 1:30-1:50 | The request arrives | On the board, the request appears at the top of **All requests**, above the demo activity, created via `app`, with the customer masked. |
 | 1:50-2:20 | Staff confirm | Press **Confirm**. The row turns confirmed, and the notice says the customer's LINE confirmation was sent. |
 | 2:20-2:45 | The answer on LINE | The phone buzzes (option A): Strapi sent the confirmation the moment staff confirmed, with no agent in between. Show the message, in the language the customer booked in, and the board's LINE column: LINE sent. |
 | 2:45-3:00 | The integration slide | "Everything is ready for a LINE MINI App: sign-in, tools, and the message." QBurst continues from here (see [Running Maison as a LINE MINI App](line-mini-app.md)). |
@@ -50,7 +50,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 
 ## Rehearse
 
-Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
+Follow "Before going on stage" and "The 3-minute run" three times in local mode, with **Reset demo activity** and **Load demo activity** between runs. Then once more on the local model, and once in Japanese. Product knowledge is in English only, so in a Japanese chat the search finds nothing, and the question goes to Maison's client advisors, recorded in Strapi: they reply in the LINE chat. Before the talk, do at least one run on Claude, with your key.
 
 Expected:
 - **Each step works,** and the whole run fits in 3 minutes. On the local model, only the waits are longer.
