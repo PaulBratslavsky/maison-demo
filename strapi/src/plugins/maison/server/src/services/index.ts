@@ -1,5 +1,6 @@
 import aiTools from './ai-tools';
 import appointments from './appointments';
+import assistant from './assistant';
 import catalog from './catalog';
 import confirmations from './confirmations';
 import errors from './errors';
@@ -13,6 +14,7 @@ import seed from './seed';
 export default {
   'ai-tools': aiTools,
   appointments,
+  assistant,
   catalog,
   confirmations,
   errors,

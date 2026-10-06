@@ -1,4 +1,11 @@
-import type { RawRunError, StaffError } from '../assistant/errors';
+import type { Core } from '@strapi/strapi';
+
+import { notReadyReason, staffErrorOf, withoutKey, type RawRunError, type StaffError } from '../assistant/errors';
+import { instructions } from '../assistant/instructions';
+import { createAnthropicAdapter, loadSdk, toTools, type ChatAdapter, type ChatParams } from '../assistant/sdk';
+import { assistantTools, type Ability, type AssistantToolSpec } from '../assistant/tools';
+import { getConfig } from '../config';
+import { ASSISTANT_LIMITS } from '../constants';
 
 /** One event of the stream chat() gives: AG-UI's, with the fields this file reads. */
 export interface Chunk {
@@ -181,3 +188,143 @@ export async function* wrapStream(source: AsyncIterable<Chunk>, options: WrapOpt
     if (onDone) quietly(() => onDone({ tools, ms: Date.now() - startedAt }));
   }
 }
+
+export type AdapterFor = (model: string, apiKey: string) => ChatAdapter | Promise<ChatAdapter>;
+
+export interface TurnRequest {
+  ability: Ability;
+  adminId: number | null;
+  /** Held by the controller. Aborted only when the response closes before it ends. */
+  responseController: AbortController;
+  /** Tests only. Default: createAnthropicAdapter. */
+  adapterFor?: AdapterFor;
+  now?: Date;
+  deadlineMs?: number;
+}
+
+export type AssistantStatus = { ready: true; model: string } | { ready: false; reason: string };
+
+/** How many messages staff have sent in a chat: the ones with the role `user`. The model's answers and the tool results are not counted. */
+export const countStaffMessages = (messages: ReadonlyArray<{ role?: string }>): number => messages.filter((message) => message.role === 'user').length;
+
+/**
+ * What a tool answers when its service throws: fixed text, in the shape of the tools' other expected failures. Without
+ * this, @tanstack/ai catches the throw and gives the model "Error executing tool: <the message>", and sends the same text
+ * to the page in the tool's result event. The message can hold database text.
+ */
+const toolFailed = () => ({
+  error: {
+    code: 'tool_failed',
+    message: 'Maison could not read that just now.',
+    hint: 'Tell staff the lookup failed and suggest trying again. Do not guess the answer.',
+  },
+});
+
+/**
+ * The spec with an `execute` that never throws: when the original does, `onFailure` hears of it and the tool answers
+ * `toolFailed()`. A spec with no `execute` (a draft tool, which the browser runs) is as it was.
+ */
+const guarded = (spec: AssistantToolSpec, onFailure: (name: string, error: unknown) => void): AssistantToolSpec => {
+  const { execute } = spec;
+  if (!execute) return spec;
+  return {
+    ...spec,
+    async execute(args) {
+      try {
+        return await execute(args);
+      } catch (error) {
+        quietly(() => onFailure(spec.name, error));
+        return toolFailed();
+      }
+    },
+  };
+};
+
+/** The assistant: whether it is ready, the tools an admin gets, and one chat turn streamed with @tanstack/ai. */
+export default ({ strapi }: { strapi: Core.Strapi }) => {
+  const status = (): AssistantStatus => {
+    const config = getConfig(strapi);
+    const reason = notReadyReason(config);
+    return reason === null ? { ready: true, model: config.aiChatModel } : { ready: false, reason };
+  };
+
+  /**
+   * An answer that is a 200 event stream holding one RUN_ERROR with the staff text. ai-client 0.29.2 never reads the body
+   * of an HTTP error, so a refusal sent as one would reach staff as a bare status. A stream's error reaches them whole.
+   */
+  const errorResponse = async (code: 'not_ready' | 'chat_too_long' | 'internal'): Promise<Response> => {
+    const config = getConfig(strapi);
+    const staff = staffErrorOf({ code }, { model: config.aiChatModel, notReady: notReadyReason(config) ?? undefined });
+    const { toServerSentEventsResponse } = await loadSdk();
+    async function* only(): AsyncGenerator<Chunk> {
+      yield { type: 'RUN_ERROR', message: staff.message, code: staff.code, error: { message: staff.message, code: staff.code }, timestamp: Date.now() };
+    }
+    return toServerSentEventsResponse(only() as never);
+  };
+
+  return {
+    status,
+    errorResponse,
+
+    /** The tools this admin may use. */
+    tools(ability: Ability): AssistantToolSpec[] {
+      return assistantTools(strapi, ability);
+    },
+
+    /** The request body as chat parameters. It throws, with a message for staff's developer, when the body is not an AG-UI run input. */
+    async parseBody(body: unknown): Promise<ChatParams> {
+      const { chatParamsFromRequestBody } = await loadSdk();
+      return chatParamsFromRequestBody(body);
+    },
+
+    /** One turn of the chat, streamed. Every failure reaches staff as a RUN_ERROR in the stream, never as an HTTP error. */
+    async turn(params: ChatParams, request: TurnRequest): Promise<Response> {
+      const config = getConfig(strapi);
+      if (notReadyReason(config) !== null) return errorResponse('not_ready');
+      try {
+        const { chat, maxIterations, toServerSentEventsResponse } = await loadSdk();
+        const logToolFailure = (name: string, error: unknown) =>
+          strapi.log.error(withoutKey(`[maison] assistant tool ${name} failed: ${error instanceof Error ? error.message : String(error)}`, config.aiApiKey));
+        const specs = assistantTools(strapi, request.ability).map((spec) => guarded(spec, logToolFailure));
+        const names = specs.map((spec) => spec.name);
+        const tools = await toTools(specs);
+        const system = instructions({ today: request.now ?? new Date(), timezone: config.timezone, tools: names });
+        const adapter = await (request.adapterFor ?? createAnthropicAdapter)(config.aiChatModel, config.aiApiKey as string);
+
+        // Held only by chat() and the wrapper, so the wrapper can send its timeout error before chat() is stopped.
+        const chatController = new AbortController();
+        const stream = chat({
+          adapter,
+          stream: true,
+          messages: params.messages,
+          threadId: params.threadId,
+          runId: params.runId,
+          parentRunId: params.parentRunId,
+          ...(params.resume ? { resume: params.resume } : {}),
+          systemPrompts: [system],
+          ...(tools.length > 0 ? { tools: tools as never } : {}),
+          agentLoopStrategy: maxIterations(ASSISTANT_LIMITS.modelTurns),
+          abortController: chatController,
+          // The SDK's own logging would write the provider's errors to the console, without going through withoutKey.
+          debug: false,
+          modelOptions: { max_tokens: ASSISTANT_LIMITS.maxTokens, output_config: { effort: 'medium' } },
+        } as never);
+
+        const wrapped = wrapStream(stream as unknown as AsyncIterable<Chunk>, {
+          describe: (raw) => staffErrorOf(raw, { model: config.aiChatModel }),
+          onSourceError: (original) =>
+            strapi.log.error(withoutKey(`[maison] The assistant's model call failed (${original.code ?? 'no code'}): ${original.message ?? 'no message'}`, config.aiApiKey)),
+          onDone: ({ tools: called, ms }) =>
+            strapi.log.info(`[maison] Assistant turn for admin ${request.adminId ?? 'unknown'}: tools ${called.length > 0 ? called.join(', ') : 'none'}, ${ms} ms.`),
+          deadlineMs: request.deadlineMs ?? ASSISTANT_LIMITS.deadlineMs,
+          chatController,
+          responseSignal: request.responseController.signal,
+        });
+        return toServerSentEventsResponse(wrapped as never, { abortController: request.responseController });
+      } catch (error) {
+        strapi.log.error(withoutKey(`[maison] The assistant could not start a turn: ${(error as Error)?.message ?? String(error)}`, config.aiApiKey));
+        return errorResponse('internal');
+      }
+    },
+  };
+};
