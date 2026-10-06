@@ -1,7 +1,7 @@
 /**
  * What the Ask tab decides, apart from React: its starters, the state it shows, the notices under the messages, when
- * Send works, the line for each tool call, and where the admin's token is. The components read these, and the unit tests
- * hold them.
+ * Send works, the line for each tool call, what stays in the chat after Stop or a failed turn, what happens to the text
+ * box, and where the admin's token is. The components read these, and the unit tests hold them.
  */
 
 /** The assistant's two routes, served under /maison. */
@@ -46,10 +46,11 @@ const CUSTOM_NOTES: Record<string, string> = {
 /** The note under the messages for a custom event, or null for any other. */
 export const customEventNote = (name: string): string | null => (Object.prototype.hasOwnProperty.call(CUSTOM_NOTES, name) ? CUSTOM_NOTES[name] : null);
 
-/** What the tab says about a failed turn, and whether it offers New chat as the way on. */
+/** What the tab says about a failed turn, whether it offers New chat as the way on, and the code of the RUN_ERROR it came from, if it came from one. */
 export interface ErrorNotice {
   text: string;
   newChat: boolean;
+  code?: string;
 }
 
 // These two texts are the server's own (CHAT_TOO_LONG_TEXT and SOMETHING_WRONG_TEXT in server/src/assistant/errors.ts).
@@ -57,8 +58,22 @@ export interface ErrorNotice {
 const SOMETHING_WRONG = 'Something went wrong. Try again.';
 const CHAT_TOO_LONG = 'This chat is long. Start a new chat.';
 
+/** A 401 on the chat request means the admin's session ended while the page was open. Strapi's own sign-in shows only for requests made through its fetch client, and the chat is a plain fetch, so the page says what to do. */
+const SESSION_ENDED = 'Your Strapi session has ended. Reload the page to sign in again.';
+const CONNECTION_LOST = 'The connection to Strapi was lost. Try again.';
+
 /** What a browser says when a request never reached the server: Chrome ("Failed to fetch"), Firefox ("NetworkError…") and Safari ("Load failed"). */
 const NETWORK = /failed to fetch|load failed|network ?error|networkerror/i;
+
+/** The message ai-client 0.29.2 gives every StreamReadError, which wraps a rejected fetch and a body that failed while it was read. */
+const STREAM_READ_FAILED = 'Stream response body read failed';
+
+/** The message of an error's cause: an Error's own, or the cause itself when it is text. */
+const causeMessage = (cause: unknown): string => {
+  if (typeof cause === 'string') return cause;
+  const message = (typeof cause === 'object' && cause !== null ? (cause as { message?: unknown }).message : undefined) as unknown;
+  return typeof message === 'string' ? message : '';
+};
 
 /**
  * The notice for an error `useChat` reports.
@@ -66,26 +81,38 @@ const NETWORK = /failed to fetch|load failed|network ?error|networkerror/i;
  *   too long, or that Anthropic refused to continue, offers New chat.
  * - ai-client throws `HTTP error! status: <n>` for a failed request and never reads its body, so the status decides. The
  *   server sends a real HTTP error only for a bad body (400), a role that lost the permission (403), and a body over
- *   Strapi's limit (413).
- * - A request that never arrived is a lost connection. Only the messages browsers give for that decide it: a TypeError thrown by
- *   the page's own code is not one.
+ *   Strapi's limit (413). A 401 is a session that ended while the page was open.
+ * - A request that never arrived, or a stream that broke, is a lost connection. ai-client wraps the browser's error in a
+ *   StreamReadError, whose own message never says what happened (the browser's text is in its `cause`), and the RUN_ERROR it
+ *   makes from it has the same message and no cause. So the name, that message, or a browser's message in the cause decide, and
+ *   so does a browser's message in the error itself. A TypeError thrown by the page's own code is not a lost connection.
  */
 export const errorNotice = (error: unknown): ErrorNotice => {
-  const { code, message } = (typeof error === 'object' && error !== null ? error : {}) as { code?: unknown; message?: unknown };
+  const { code, message, name, cause } = (typeof error === 'object' && error !== null ? error : {}) as { code?: unknown; message?: unknown; name?: unknown; cause?: unknown };
   const text = typeof message === 'string' ? message : '';
 
   if (typeof code === 'string' && code !== '') {
-    return { text: text || SOMETHING_WRONG, newChat: code === 'chat_too_long' || code === 'history_rejected' };
+    return { text: text || SOMETHING_WRONG, newChat: code === 'chat_too_long' || code === 'history_rejected', code };
   }
 
   const status = /HTTP error! status: (\d{3})/.exec(text)?.[1];
+  if (status === '401') return { text: SESSION_ENDED, newChat: false };
   if (status === '403') return { text: "Your role can't use the assistant any more. Reload the page.", newChat: false };
   if (status === '413') return { text: CHAT_TOO_LONG, newChat: true };
   if (status) return { text: SOMETHING_WRONG, newChat: false };
 
-  if (NETWORK.test(text)) return { text: 'The connection to Strapi was lost. Try again.', newChat: false };
+  if (name === 'StreamReadError' || text === STREAM_READ_FAILED || NETWORK.test(text) || NETWORK.test(causeMessage(cause))) {
+    return { text: CONNECTION_LOST, newChat: false };
+  }
   return { text: SOMETHING_WRONG, newChat: false };
 };
+
+/**
+ * The notice after a check of the assistant's status. A "not set up" notice from a send is stale once the assistant is ready, so
+ * it goes. Every other notice stays: the check says nothing about it.
+ */
+export const noticeAfterStatus = (notice: ErrorNotice | null, status: AssistantStatus): ErrorNotice | null =>
+  notice?.code === 'not_ready' && status.ready ? null : notice;
 
 /** Send works for a message with something in it, when the assistant is ready and not answering: a second message waits. */
 export const canSend = ({ text, busy, ready }: { text: string; busy: boolean; ready: boolean }): boolean => ready && !busy && text.trim().length > 0;
@@ -127,11 +154,18 @@ const TOOL_LINES: Record<string, { what: string; rows?: string }> = {
 
 const RUNNING = new Set(['awaiting-input', 'input-streaming', 'input-complete']);
 
-/** The message of a failed call: the output's own, else the result part's, else a general one. */
-const failureMessage = (output: any, result: PartLike | undefined): string => {
+/** What a call that TanStack AI refused says: the model sent input the tool's schema doesn't take, or arguments that are not JSON. */
+export const UNREADABLE_REQUEST = 'Maison could not read that request.';
+
+/**
+ * The message of a failed call. Only Maison's own error object, `{ error: { message } }`, is shown as it is. When TanStack AI
+ * refuses a call itself it answers `{ error: "<its text>" }`, and that text names the tool and holds the model's own input, so
+ * it is never shown: a fixed sentence says the request could not be read. The result part's own `error` is TanStack AI's text
+ * too (its "Tool execution failed", or the same string), so it is not shown either.
+ */
+const failureMessage = (output: any): string => {
   if (typeof output?.error?.message === 'string' && output.error.message) return output.error.message;
-  if (typeof output?.error === 'string' && output.error) return output.error;
-  if (typeof result?.error === 'string' && result.error) return result.error;
+  if (typeof output?.error === 'string' && output.error) return UNREADABLE_REQUEST;
   return 'The tool failed.';
 };
 
@@ -146,7 +180,7 @@ export const toolLineOf = (call: PartLike, result: PartLike | undefined): ToolLi
   const output = call.output;
 
   const failed = call.state === 'error' || result?.state === 'error' || (typeof output === 'object' && output !== null && 'error' in output && Boolean(output.error));
-  if (failed) return { text: `Maison · ${what} ✕ ${failureMessage(output, result)}`, tone: 'error' };
+  if (failed) return { text: `Maison · ${what} ✕ ${failureMessage(output)}`, tone: 'error' };
 
   if (RUNNING.has(call.state) || (call.state !== 'complete' && !result)) return { text: `Maison · ${what} …`, tone: 'running' };
 
@@ -154,6 +188,121 @@ export const toolLineOf = (call: PartLike, result: PartLike | undefined): ToolLi
   if (!Array.isArray(list)) return { text: `Maison · ${what} ✓`, tone: 'ok' };
   return { text: `Maison · ${what} ✓ ${list.length} ${list.length === 1 ? 'result' : 'results'}`, tone: 'ok' };
 };
+
+/** A message as TanStack AI keeps it, as far as the helpers below read it. A UIMessage is one. */
+export interface MessageLike {
+  role: string;
+  parts: readonly unknown[];
+}
+
+const partsOfMessage = (message: MessageLike): readonly PartLike[] => message.parts as readonly PartLike[];
+
+/**
+ * The parts of a message the chat draws: text with something in it, and a tool call that has a line. Thinking, a tool's result
+ * (its call's line already reports it), and any other part are not drawn. The messages and the working line both read this,
+ * so what counts as an answer is decided in one place.
+ */
+export const drawableParts = (parts: readonly PartLike[]): PartLike[] =>
+  parts.filter((part) => {
+    if (part.type === 'text') return typeof part.content === 'string' && part.content.trim() !== '';
+    return part.type === 'tool-call' && toolLineOf(part, toolResultOf(parts, part.id)) !== null;
+  });
+
+/**
+ * Whether the tab says the assistant is working: it is answering, and its message has nothing drawn yet, because it holds no
+ * part at all, or only thinking, or because the last message is still the staff member's. Once text or a tool line is on the
+ * screen, that is the sign of work.
+ */
+export const showsWorking = (busy: boolean, messages: readonly MessageLike[]): boolean => {
+  if (!busy) return false;
+  const last = messages.at(-1);
+  return !(last?.role === 'assistant' && drawableParts(partsOfMessage(last)).length > 0);
+};
+
+/**
+ * The messages without any tool call that was cut off, which Stop, a failed turn or a stream that ended early leaves behind.
+ * TanStack AI finishes a call only when its stream ends normally, so a call that was being written when the stream stopped stays
+ * `awaiting-input`, `input-streaming` or `input-complete`, with no `output` and no tool-result part. The chat would draw it as
+ * "…" for ever, and the next send would replay it to Anthropic as a call with no answer.
+ * - A call is open when it has no `output` and no tool-result part of the same message. A finished call stays.
+ * - A tool-result part whose call is not in its message goes too: it is what a result that arrives after the call was removed
+ *   leaves behind, and a result with no call is refused by Anthropic as well.
+ * - An assistant message left with no parts is removed.
+ * Gives back the same array when nothing needs to go, so a caller can tell, and sets nothing for no reason.
+ */
+export const withoutOpenToolCalls = <M extends MessageLike>(messages: M[]): M[] => {
+  let changed = false;
+  const kept: M[] = [];
+  for (const message of messages) {
+    const parts = partsOfMessage(message);
+    const calls = new Set(parts.filter((part) => part.type === 'tool-call').map((part) => part.id));
+    const answered = new Set(parts.filter((part) => part.type === 'tool-result').map((part) => part.toolCallId));
+    const remaining = parts.filter((part) => {
+      if (part.type === 'tool-call') return part.output !== undefined || answered.has(part.id);
+      if (part.type === 'tool-result') return calls.has(part.toolCallId);
+      return true;
+    });
+    if (remaining.length === parts.length) {
+      kept.push(message);
+      continue;
+    }
+    changed = true;
+    // A message that is left with nothing goes: an assistant message of only a cut-off call.
+    if (remaining.length > 0 || message.role !== 'assistant') kept.push({ ...message, parts: remaining });
+  }
+  return changed ? kept : messages;
+};
+
+/**
+ * The messages without a turn that failed before anything came back: the staff member's question, and the empty assistant
+ * message a failed run leaves after it (TanStack AI adds one for the RUN_ERROR). Staff read the notice, and the question goes
+ * back into the text box, so sending it again doesn't put it in the chat twice. A turn that began to answer, with text or a
+ * tool line, stays as staff can read it. Gives back the same array when there is nothing to take back.
+ */
+export const withoutFailedTurn = <M extends MessageLike>(messages: M[]): M[] => {
+  let end = messages.length;
+  const last = messages[end - 1];
+  if (last?.role === 'assistant' && drawableParts(partsOfMessage(last)).length === 0) end -= 1;
+  if (end > 0 && messages[end - 1].role === 'user') end -= 1;
+  else if (end === messages.length) return messages;
+  return messages.slice(0, end);
+};
+
+/** Where a message came from: typed in the text box, or one of the starter buttons. */
+export type MessageSource = 'box' | 'starter';
+
+/** The last question staff sent, kept so a failed turn can put it back. */
+export interface SentQuestion {
+  text: string;
+  source: MessageSource;
+}
+
+/** The text box after a send. What was in the box is sent from the box, so it is emptied. A starter sends its own text and leaves the box as it was. */
+export const draftAfterSend = (draft: string, source: MessageSource): string => (source === 'box' ? '' : draft);
+
+/**
+ * The text box after a turn failed. A question staff typed goes back into the box, when the box is empty, so they don't retype
+ * it. A starter doesn't (staff did not type it, and its button is a click away), and a box with text in it is left alone. Stop is
+ * not a failure and never gets here.
+ */
+export const draftAfterFailure = ({ draft, question }: { draft: string; question: SentQuestion | null }): string =>
+  question?.source === 'box' && draft.trim() === '' ? question.text : draft;
+
+/**
+ * Whether the message box follows the newest message: while the reader is at its bottom, or within a few pixels of it (a browser
+ * may stop short by a fraction). A reader who has scrolled up to read is not pulled back down by the answer that is arriving.
+ */
+export const followsNewest = ({ scrollTop, clientHeight, scrollHeight }: { scrollTop: number; clientHeight: number; scrollHeight: number }, slack = 24): boolean =>
+  scrollHeight - (scrollTop + clientHeight) <= slack;
+
+/**
+ * Which buttons the text box has. Send and Stop sit side by side: Send is switched off while an answer is on its way, and Stop is
+ * there only then. A second click on Send, as in a double click, lands on a switched-off button and never on Stop.
+ */
+export const composerButtons = ({ text, busy, ready }: { text: string; busy: boolean; ready: boolean }): { sendDisabled: boolean; showStop: boolean } => ({
+  sendDisabled: !canSend({ text, busy, ready }),
+  showStop: busy,
+});
 
 /**
  * The admin's token, as the page's own requests send it. Strapi keeps it in localStorage, written as a JSON string (a bare

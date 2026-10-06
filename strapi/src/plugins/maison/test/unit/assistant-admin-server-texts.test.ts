@@ -29,7 +29,7 @@ describe('the texts the admin repeats from the server', () => {
 
     for (const staff of [tooLong, rejected]) {
       const error = Object.assign(new Error(staff.message), { code: staff.code });
-      expect(errorNotice(error), staff.code).toEqual({ text: staff.message, newChat: true });
+      expect(errorNotice(error), staff.code).toEqual({ text: staff.message, newChat: true, code: staff.code });
     }
   });
 

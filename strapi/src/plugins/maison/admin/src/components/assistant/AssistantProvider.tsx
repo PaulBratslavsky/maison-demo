@@ -4,7 +4,22 @@ import { useFetchClient } from '@strapi/strapi/admin';
 import { fetchServerSentEvents, type UIMessage } from '@tanstack/ai-client';
 import { useChat } from '@tanstack/ai-react';
 
-import { ASSISTANT_PATHS, adminTokenFrom, customEventNote, errorNotice, isStatus, type AssistantStatus, type ErrorNotice } from '../../assistant';
+import {
+  ASSISTANT_PATHS,
+  adminTokenFrom,
+  customEventNote,
+  draftAfterFailure,
+  draftAfterSend,
+  errorNotice,
+  isStatus,
+  noticeAfterStatus,
+  withoutFailedTurn,
+  withoutOpenToolCalls,
+  type AssistantStatus,
+  type ErrorNotice,
+  type MessageSource,
+  type SentQuestion,
+} from '../../assistant';
 import { useMounted } from '../../useMounted';
 
 /**
@@ -34,9 +49,14 @@ export interface AssistantApi {
   notice: ErrorNotice | null;
   /** A line about how the last turn ended (stopped after 6 steps, or declined). Cleared the same way. */
   note: string | null;
-  send: (text: string) => Promise<void>;
+  /** What staff have typed and not sent. It is kept here, so it is still there when staff come back from another tab. New chat leaves it alone. */
+  draft: string;
+  setDraft: (text: string) => void;
+  /** Sends a message: from the text box (the default), which empties the box, or from a starter, which leaves it as it was. */
+  send: (text: string, source?: MessageSource) => Promise<void>;
+  /** Stops the answer where it is, and takes out a tool call that was being written. Stop is no error. */
   stop: () => void;
-  /** Clears the chat: the messages, the notice and the note. */
+  /** Clears the chat: the messages, the notice and the note. The draft stays. */
   newChat: () => void;
   /** Asks /status again, for after the key was set. */
   recheck: () => Promise<void>;
@@ -78,6 +98,11 @@ export const AssistantProvider = ({ children }: { children: React.ReactNode }) =
   const [statusError, setStatusError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<ErrorNotice | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState('');
+  // The last question staff sent, so a failed turn can put it back in the box.
+  const asked = React.useRef<SentQuestion | null>(null);
+  // Set by onError, and settled when the chat is idle: by then the failed run's messages are in the chat.
+  const [failedTurn, setFailedTurn] = React.useState<{ question: SentQuestion | null } | null>(null);
 
   const recheck = React.useCallback(async (): Promise<void> => {
     try {
@@ -86,6 +111,8 @@ export const AssistantProvider = ({ children }: { children: React.ReactNode }) =
       if (isStatus(data)) {
         setStatus(data);
         setStatusError(null);
+        // A "not set up" notice from an earlier send is stale once the assistant is ready.
+        setNotice((current) => noticeAfterStatus(current, data));
       } else {
         setStatusError('The answer was not a status.');
       }
@@ -122,30 +149,75 @@ export const AssistantProvider = ({ children }: { children: React.ReactNode }) =
       // Stop ends the stream, and says nothing.
       if (error?.name === 'AbortError') return;
       setNotice(errorNotice(error));
+      setFailedTurn({ question: asked.current });
       if ((error as { code?: unknown } | undefined)?.code === 'not_ready') void recheck();
     },
     onCustomEvent: (name: string) => setNote(customEventNote(name)),
   });
 
-  const { sendMessage, stop, clear } = chat;
+  const { sendMessage, stop: stopChat, clear, setMessages } = chat;
   const ready = status?.ready === true;
   const busy = chat.isLoading;
 
+  // The handlers below read the chat as it is now, not as it was when they were made.
+  const messagesRef = React.useRef(chat.messages);
+  messagesRef.current = chat.messages;
+  const busyRef = React.useRef(busy);
+  busyRef.current = busy;
+
+  /** Takes out a tool call that was cut off (see withoutOpenToolCalls), so the chat never shows it as running and never replays it. */
+  const dropOpenToolCalls = React.useCallback(() => {
+    const current = messagesRef.current;
+    const cleaned = withoutOpenToolCalls(current);
+    if (cleaned !== current) setMessages(cleaned);
+  }, [setMessages]);
+
+  // Whenever nothing is answering, a tool call that was cut off is taken out, and a turn that failed with nothing to read is taken
+  // back. This is the one place that holds after Stop, a dropped connection and a timeout alike: TanStack AI goes on processing the
+  // chunks it already has after Stop, so a call taken out right after Stop can come back a moment later, and onError runs before
+  // the messages of the failed run have reached this component.
+  const idle = !busy;
+  React.useEffect(() => {
+    if (!idle) return;
+    let next = withoutOpenToolCalls(chat.messages);
+    if (failedTurn) {
+      setFailedTurn(null);
+      const { question } = failedTurn;
+      // A turn that failed before anything came back leaves the chat, and its question goes back to an empty box, so staff don't
+      // retype it and a second try doesn't put the question in the chat twice. A starter's text is not put back.
+      next = withoutFailedTurn(next);
+      setDraft((current) => draftAfterFailure({ draft: current, question }));
+    }
+    if (next !== chat.messages) setMessages(next);
+  }, [idle, chat.messages, failedTurn, setMessages]);
+
   const send = React.useCallback(
-    async (text: string): Promise<void> => {
+    async (text: string, source: MessageSource = 'box'): Promise<void> => {
+      // useChat would drop a send made while an answer is on its way. Nothing is changed for it: the box keeps its text.
+      if (busyRef.current) return;
+      dropOpenToolCalls();
+      asked.current = { text, source };
+      setFailedTurn(null);
       setNotice(null);
       setNote(null);
+      setDraft((current) => draftAfterSend(current, source));
       await sendMessage(text);
     },
-    [sendMessage]
+    [sendMessage, dropOpenToolCalls]
   );
 
+  const stop = React.useCallback(() => {
+    stopChat();
+    dropOpenToolCalls();
+  }, [stopChat, dropOpenToolCalls]);
+
   const newChat = React.useCallback(() => {
-    stop();
+    stopChat();
     clear();
     setNotice(null);
     setNote(null);
-  }, [stop, clear]);
+    setFailedTurn(null);
+  }, [stopChat, clear]);
 
   const api = React.useMemo<AssistantApi>(
     () => ({
@@ -156,12 +228,14 @@ export const AssistantProvider = ({ children }: { children: React.ReactNode }) =
       busy,
       notice,
       note,
+      draft,
+      setDraft,
       send,
       stop,
       newChat,
       recheck,
     }),
-    [status, statusError, ready, chat.messages, busy, notice, note, send, stop, newChat, recheck]
+    [status, statusError, ready, chat.messages, busy, notice, note, draft, send, stop, newChat, recheck]
   );
 
   return <AssistantContext.Provider value={api}>{children}</AssistantContext.Provider>;
