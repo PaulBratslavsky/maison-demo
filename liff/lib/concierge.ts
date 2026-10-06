@@ -5,11 +5,14 @@ import {
   asSchema,
   convertToModelMessages,
   createUIMessageStreamResponse,
+  hasToolCall,
   isStepCount,
   streamText,
   toUIMessageStream,
   tool,
   type LanguageModel,
+  type ModelMessage,
+  type TextStreamPart,
   type ToolSet,
   type UIMessage,
 } from 'ai';
@@ -19,6 +22,7 @@ import { tokyoDays } from './format';
 import { pieceSlugOf } from './piece-slug';
 import { RELATIVE_IDS, WEEKDAY_IDS, WEEK_IDS, resolveDate } from './resolve-date';
 import { MAX_BODY_BYTES, isCustomerSession, readBody } from './strapi-proxy';
+import { toolPartOf } from './tool-view';
 import { CHOOSE_VISIT } from './visit-picker';
 
 /** Tells the Maison plugin a call came from the concierge. Informational; never used for identity. */
@@ -34,6 +38,19 @@ const MAX_STEPS = 8; // resolve_date adds a step to most visits: the original 6 
 const LOG_TIMEOUT_MS = 5000;
 /** How many days the calendar in the instructions covers, today first. */
 const CALENDAR_DAYS = 14;
+/** How long the visit picker's extra pass may take at most (handleConcierge). The customer has the first reply meanwhile. */
+const PICKER_PASS_TIMEOUT_MS = 20_000;
+/** The least time the extra pass is worth starting with: with less left, it is skipped. */
+const PICKER_PASS_MIN_MS = 5_000;
+/**
+ * How long a turn may run, from the request's start to the end of the extra pass: the route's maxDuration (60 seconds,
+ * app/api/concierge/route.ts) less the log's LOG_TIMEOUT_MS, which comes after the pass.
+ */
+const TURN_BUDGET_MS = 55_000;
+/** The extra pass's steps at most: resolve_date for a day the customer named, choose_visit, and one to spare. */
+const PICKER_PASS_STEPS = 3;
+/** What the server's log says when the extra pass shows no picker, before the reason. */
+const NO_PICKER = '[concierge] The extra pass for a visit picker showed none, so the turn keeps its first reply:';
 const WEEKDAY_NAMES = {
   en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   ja: ['日', '月', '火', '水', '木', '金', '土'],
@@ -452,16 +469,132 @@ export const turnReplyOf = (content: ReadonlyArray<{ type: string; text?: string
 /** What the log says of a turn that ended at a visit picker, for the staff who read it: the concierge's words aren't the whole of what it did. */
 const PICKER_NOTE = '(The concierge showed a visit picker so the customer can request a visit.)';
 
+/** Whether a turn's content holds a choose_visit call that showed the picker. A call the schema refused (`invalid`) showed none. */
+const showsPicker = (content: ReadonlyArray<{ type: string; toolName?: string; invalid?: boolean }>): boolean =>
+  content.some((part) => part.type === 'tool-call' && part.toolName === CHOOSE_VISIT && part.invalid !== true);
+
 /**
  * The reply a finished turn is logged with: its words (turnReplyOf), and, when the turn holds a choose_visit call, the
  * note above on a paragraph of its own, or alone when no words came before the call. A turn that ends at the call has
  * nothing after it: the customer's answer comes in a later request, which isn't logged, so without the note staff's
- * labeller would see a customer with no answer. A call the schema refused (`invalid`) showed no picker, and doesn't count.
+ * labeller would see a customer with no answer. A call the schema refused showed no picker, and doesn't count (showsPicker).
  */
 const loggedReplyOf = (content: ReadonlyArray<{ type: string; text?: string; toolName?: string; invalid?: boolean }>): string => {
   const words = turnReplyOf(content);
-  const showedPicker = content.some((part) => part.type === 'tool-call' && part.toolName === CHOOSE_VISIT && part.invalid !== true);
-  return showedPicker ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
+  return showsPicker(content) ? [words, PICKER_NOTE].filter((paragraph) => paragraph !== '').join('\n\n') : words;
+};
+
+/** Whether a turn's content holds a choose_visit call in any state: one that showed the picker, or one that was refused. */
+const callsPicker = (content: ReadonlyArray<{ type: string; toolName?: string }>): boolean =>
+  content.some((part) => (part.type === 'tool-call' || part.type === 'tool-error') && part.toolName === CHOOSE_VISIT);
+
+/**
+ * The pieces a tool result names by slug: a search_products result's products, or a view_product result's product. None
+ * for a refusal (an isError result), a result with no structuredContent, any other tool, and a value that isn't a slug.
+ */
+const piecesFoundBy = ({ toolName, output }: { toolName: string; output: unknown }): string[] => {
+  if (!isObject(output) || output.isError === true || !isObject(output.structuredContent)) return [];
+  const { products, product } = output.structuredContent;
+  if (toolName === 'search_products' && Array.isArray(products)) return products.flatMap((found) => (isObject(found) ? (pieceSlugOf(found.slug) ?? []) : []));
+  const viewed = toolName === 'view_product' && isObject(product) ? pieceSlugOf(product.slug) : null;
+  return viewed ? [viewed] : [];
+};
+
+/**
+ * Whether the conversation holds a visit picker the customer answered with a request: a visit was requested in this chat.
+ * The answer's status is enough, whatever the visit it carries: a second picker after it could book the visit twice.
+ */
+const visitRequestedIn = (messages: UIMessage[]): boolean =>
+  messages.some((message) =>
+    message.parts.some((part) => {
+      const call = toolPartOf(part);
+      return call?.toolName === CHOOSE_VISIT && call.state === 'output-available' && isObject(call.output) && call.output.status === 'requested';
+    })
+  );
+
+/** Whether a turn's content holds a my_appointments call: the customer asked about the visits they have. */
+const callsMyAppointments = (content: ReadonlyArray<{ type: string; toolName?: string }>): boolean =>
+  content.some((part) => part.type === 'tool-call' && part.toolName === 'my_appointments');
+
+/** Seconds, for the server's log: 15 for 15000, 4.2 for 4200. */
+const secondsOf = (ms: number): number => Number((ms / 1000).toFixed(1));
+
+/** The tool calls in the conversation's earlier replies that came back whole, as the page sends them back (toolPartOf): each tool's name and result. */
+const earlierResultsOf = (messages: UIMessage[]): Array<{ toolName: string; output: unknown }> =>
+  messages.flatMap((message) =>
+    message.role !== 'assistant'
+      ? []
+      : message.parts.flatMap((part) => {
+          const call = toolPartOf(part);
+          return call?.state === 'output-available' ? [{ toolName: call.toolName, output: call.output }] : [];
+        })
+  );
+
+/** A pattern from words: each space matches any run of spaces, and the match ignores case. */
+const phrase = (...alternatives: string[]) => new RegExp(alternatives.join('|').replaceAll(' ', '\\s+'), 'i');
+/** An apostrophe, straight or curly. */
+const APOSTROPHE = "['’]";
+/** The cities of Maison's boutiques. */
+const CITY = '(?:ginza|omotesando|osaka|shinsaibashi)';
+/** What a customer asks to see: "it", "these", or a piece by name ("the Cabin Case 55"). */
+const PIECE = '(?:it|them|this|these|that|those|one|the [\\w-]+(?: [\\w-]+){0,3})';
+/** Ways to ask for a visit: book, visit, schedule, reserve, make an appointment, come in, drop by, stop by, or see a piece in person, in store, at a boutique or in a boutique's city. */
+const VISIT_VERB = `(?:book|visit|schedule|reserve|make (?:an? )?(?:appointment|booking|reservation)|come (?:in|by|over)|drop (?:in|by)|stop by|see ${PIECE} (?:in person|in(?:-| )store|in ${CITY}|at ${CITY}|at (?:the |your |a )?(?:${CITY} )?(?:boutique|store|shop)))`;
+/**
+ * A request for a visit in English, in the first person: "Can I", "Could we" or "May I", "I'd like to" or "we would
+ * love to", "I want to", each followed by a way to ask for a visit; "let's book" or "let's schedule"; or "book it",
+ * "book one", "book a visit" or "book an appointment".
+ */
+const ASKS_TO_VISIT = phrase(
+  `\\b(?:(?:can|could|may) (?:i|we)|(?:i${APOSTROPHE}d|i would|we${APOSTROPHE}d|we would) (?:like|love) to|(?:i|we) want to) (?:please |also |just )?${VISIT_VERB}\\b`,
+  `\\blet${APOSTROPHE}s (?:book|schedule)\\b`,
+  `\\bbook (?:it|one|a visit|an appointment)\\b`
+);
+/**
+ * What makes an English message something other than a request for a new visit, whatever else it says: a visit already
+ * asked for ("my booking"); cancelling, changing, moving, confirming or checking one, or its status; a policy, a cost,
+ * free, a fee or a charge; whether one is needed; a no; visiting hours; or a table, restaurant, hotel, taxi or flight.
+ */
+const NOT_A_REQUEST = phrase(
+  '\\b(?:my|our) (?:(?:next|upcoming|current|existing|last|previous|first) )?(?:visit|booking|appointment|reservation|request)s?\\b',
+  '\\b(?:cancel(?:s|led|ed|ling|ing|lation)?|chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|confirm(?:s|ed|ing|ation)?|check(?:s|ed|ing)?|status)\\b',
+  '\\b(?:polic(?:y|ies)|costs?|free|fees?|charg(?:e|es|ed|ing))\\b',
+  '\\b(?:need(?:s|ed)?|ha(?:ve|s|d)) to\\b',
+  '\\brequired\\b',
+  `\\b(?:don${APOSTROPHE}?t|do not|can${APOSTROPHE}?t|cannot|not now)\\b`,
+  '\\bno,? thank(?:s| you)\\b',
+  '\\bvisiting hours\\b',
+  '\\b(?:table|restaurant|hotel|taxi|flight)s?\\b'
+);
+/** A request for a visit in Japanese, on its own: I'd like to book (予約したい), can I book (予約できますか), I'd like to come (来店したい), I'd like to go and see (見に行きたい). */
+const ASKS_TO_VISIT_JA = /予約を?したい|予約できますか|予約をお願い|予約させて|来店したい|来店できますか|見に行きたい|見に行っても/;
+/** Calling on the boutique (伺いたい, お伺いしても, お伺いしたい), which asks for a visit only beside a place or a day (JA_PLACE_OR_DAY). */
+const CALLS_ON_JA = /伺いたい|お伺いしても|お伺いしたい/;
+/** Seeing or going (見られますか, 見たい, 行けますか), which asks for a visit only beside a boutique, a day or the piece itself (実物). */
+const SEES_JA = /見られますか|見たい|行けますか/;
+/** A boutique, a place in one, or a day. */
+const JA_PLACE_OR_DAY = /店舗|ブティック|お店|銀座|表参道|心斎橋|大阪|曜日|明日|来週|今週|日に/;
+/**
+ * What makes a Japanese message something other than a request for a new visit: whether a booking is needed (予約は必要),
+ * checking, changing or cancelling one, a pre-order (予約注文, 予約販売), not coming in (来店しなくても), or asking about
+ * something (について伺い, 伺いしたいこと).
+ */
+const NOT_A_REQUEST_JA = /予約は必要|予約が必要|予約の確認|予約を確認|予約の変更|予約を変更|キャンセル|予約注文|予約販売|来店しなくても|来店せず|について伺い|伺いしたいこと|を伺い|をお伺い/;
+
+/**
+ * Whether a customer's message asks for a new visit, in the words of a request, in English or Japanese: the first
+ * condition of the visit picker's safety net (handleConcierge). A plain question about hours or a product ("What time do
+ * you open?", "When is a good time to come in?", "What do you have?") doesn't, and the exclusions win over a request's
+ * words: a question about a visit already asked for ("Can I cancel my appointment?", 予約を確認したいです) would
+ * otherwise get a fresh picker, and Send request would book a second visit. The Japanese words that need a place or a
+ * day need it in the same sentence.
+ */
+export const asksToVisit = (text: string): boolean => {
+  if (NOT_A_REQUEST.test(text) || NOT_A_REQUEST_JA.test(text)) return false;
+  if (ASKS_TO_VISIT.test(text) || ASKS_TO_VISIT_JA.test(text)) return true;
+  return text
+    .split(/[。．！？!?\n]/)
+    .some((sentence) => (CALLS_ON_JA.test(sentence) && JA_PLACE_OR_DAY.test(sentence)) || (SEES_JA.test(sentence) && (JA_PLACE_OR_DAY.test(sentence) || sentence.includes('実物'))));
 };
 
 /** The request's JSON, or null when it isn't JSON: the conversation then counts as empty. */
@@ -491,6 +624,8 @@ const isWellFormed = (message: unknown): message is UIMessage =>
  * own session token goes to Strapi unchanged; the route adds no credential of its own.
  */
 export async function handleConcierge(request: Request, deps: ConciergeDeps): Promise<Response> {
+  // When the request started, for the extra pass's share of the route's time (TURN_BUDGET_MS), and the "now" of the turn.
+  const startedAt = deps.now?.() ?? new Date();
   const authorization = request.headers.get('authorization') ?? '';
   if (!isCustomerSession(authorization)) {
     return Response.json({ error: 'Sign in with LINE first.' }, { status: 401 });
@@ -530,7 +665,7 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
   };
 
   try {
-    const now = deps.now?.() ?? new Date(); // one "now" for the instructions and for resolve_date
+    const now = startedAt; // one "now" for the instructions and for resolve_date
     // log_inquiry is the app's own call, made once a turn is over. The model is never offered it: the log says what happened, not what the model says happened.
     // Nor request_appointment: the customer books in the visit picker (choose_visit), which calls it with their own session.
     const { log_inquiry: logTool, request_appointment: _bookedInThePicker, ...mcpTools } = await mcp.tools();
@@ -593,6 +728,100 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
       }
       if (why !== undefined) console.warn("[concierge] The turn couldn't be logged:", why);
     };
+    /** What a turn did, as the log reads it: its content and its tool results, of one pass or of both. */
+    type TurnRecord = Parameters<typeof logTurn>[0];
+    type Part = TextStreamPart<typeof tools>;
+    const instructions = conciergeInstructions(locale, now, piece);
+    // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as they
+    // did in that turn, and not as the raw MCP result. A visit picker the customer moved past by writing has no answer: a
+    // call without a result is one the model call refuses (MissingToolResultsError), so it is left out, and the model
+    // answers the new message (ignoreIncompleteToolCalls).
+    const modelMessages = await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true });
+
+    /**
+     * The visit picker's safety net. Rule 3 says to call choose_visit for a visit, but the model decides, and once in
+     * production it asked for the boutique, day and time in words instead. So a turn that ended whole (the caller checks
+     * `failed`) gets one extra pass when all of these hold:
+     * - it isn't a resume (the customer's answer to a picker);
+     * - the customer's message asks for a new visit, in the words of a request (asksToVisit);
+     * - no visit was requested in this chat yet (visitRequestedIn): after one, a question about it must not get a fresh
+     *   picker that books it twice, so the model alone decides;
+     * - the turn made no choose_visit call, in any state, a refused one included (callsPicker), and no my_appointments
+     *   call (callsMyAppointments): that customer asked about the visits they have;
+     * - a piece is known: the page's, or one that search_products or view_product returned in this conversation, in an
+     *   earlier reply or in this turn. Without one, asking which piece is the right reply.
+     * The caller then checks the time left (pickerPassBudget).
+     */
+    const needsPickerPass = (turn: TurnRecord): boolean =>
+      !resumed &&
+      asksToVisit(question) &&
+      !visitRequestedIn(messages) &&
+      !callsPicker(turn.content) &&
+      !callsMyAppointments(turn.content) &&
+      (piece !== null || [...earlierResultsOf(messages), ...turn.toolResults].some((result) => piecesFoundBy(result).length > 0));
+
+    /**
+     * How long the extra pass may take: what is left of TURN_BUDGET_MS since the request started, PICKER_PASS_TIMEOUT_MS
+     * at most. Or what is left, when that is under PICKER_PASS_MIN_MS: the pass is then skipped.
+     */
+    const pickerPassBudget = (): { ms: number } | { left: number } => {
+      const left = TURN_BUDGET_MS - ((deps.now?.() ?? new Date()).getTime() - startedAt.getTime());
+      return left < PICKER_PASS_MIN_MS ? { left } : { ms: Math.min(PICKER_PASS_TIMEOUT_MS, left) };
+    };
+
+    /**
+     * The extra pass: the same model, instructions and tools (choose_visit's check of its pieces included), with only
+     * resolve_date and choose_visit active and a tool call required. A step after the first must call choose_visit, so a
+     * day the customer named is resolved first (rule 4) and the picker follows. It stops at the call, or after
+     * PICKER_PASS_STEPS, and is cut off after `budgetMs`. Its messages are the conversation and the turn's own, without
+     * the reply's words when they come last: Claude Sonnet 5 refuses a request that ends with the assistant's turn (a
+     * prefill) with a 400.
+     *
+     * Its parts (without its start) are returned only when it ended whole with a picker. Otherwise it returns why it
+     * didn't, or null when the customer left, which isn't a failure. Nothing of a pass that fails reaches the page.
+     */
+    const pickerPass = async (turnMessages: ModelMessage[], budgetMs: number): Promise<(TurnRecord & { parts: Part[] }) | { why: string | null }> => {
+      const timeout = AbortSignal.timeout(budgetMs);
+      // Set by the callbacks below, so not narrowed to its first value.
+      let end = undefined as TurnRecord | undefined;
+      let error: unknown;
+      const pass = streamText({
+        model: deps.model,
+        instructions,
+        messages: [...modelMessages, ...turnMessages],
+        tools,
+        activeTools: ['resolve_date', CHOOSE_VISIT],
+        toolChoice: 'required',
+        prepareStep: ({ steps, stepNumber }) =>
+          stepNumber > 0 && !steps.some((step) => step.toolCalls.some((call) => call.toolName === CHOOSE_VISIT)) ? { toolChoice: { type: 'tool', toolName: CHOOSE_VISIT } } : undefined,
+        stopWhen: [hasToolCall(CHOOSE_VISIT), isStepCount(PICKER_PASS_STEPS)],
+        abortSignal: AbortSignal.any([request.signal, timeout]),
+        onEnd: (event) => {
+          end = { content: event.content, toolResults: event.toolResults };
+        },
+        // Given, so the SDK doesn't print it: the error part says the same, and the caller warns with it.
+        onError: ({ error: cause }) => {
+          error ??= cause;
+        },
+      });
+      const parts: Part[] = [];
+      try {
+        for await (const part of pass.stream) {
+          if (part.type === 'error') error ??= part.error;
+          if (part.type !== 'start') parts.push(part);
+        }
+      } catch (cause) {
+        error ??= cause;
+      }
+      if (request.signal.aborted) return { why: null };
+      if (timeout.aborted) return { why: `it took longer than ${secondsOf(budgetMs)} seconds` };
+      if (error !== undefined) return { why: describeModelError(error, deps.modelLabel, deps.modelFix) };
+      if (!end || !showsPicker(end.content)) return { why: 'it ended without a visit picker' };
+      return { ...end, parts };
+    };
+
+    /** What the extra pass adds to the page's message: its parts when it showed a picker, else none. Settled once the first pass has ended, however it ended. */
+    const added = Promise.withResolvers<Part[]>();
     /**
      * Whether the turn failed or was cut off. onEnd isn't told: it also runs for a turn that fails once a step has finished
      * (see onEnd below). No stream retries are set, so every onError ends the turn.
@@ -600,37 +829,95 @@ export async function handleConcierge(request: Request, deps: ConciergeDeps): Pr
     let failed = false;
     const result = streamText({
       model: deps.model,
-      instructions: conciergeInstructions(locale, now, piece),
-      // With the tools, an earlier turn's tool results reach the model as each tool shapes them (toModelOutput), as
-      // they did in that turn, and not as the raw MCP result. A visit picker the customer moved past by writing has no
-      // answer: a call without a result is one the model call refuses (MissingToolResultsError), so it is left out, and
-      // the model answers the new message (ignoreIncompleteToolCalls).
-      messages: await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true }),
+      instructions,
+      messages: modelMessages,
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: request.signal,
       // onEnd is skipped on abort, and when no step completes, so close in all three. It also runs, after onError, for a turn
       // that fails once a step has finished (a tool step, then a model call that throws or a stream that errors), so `failed`
-      // keeps that turn out of the log: only a turn that ended whole is logged, and before the client closes, since closing
-      // it first would cut the log short.
+      // keeps that turn out of the extra pass and the log: only a turn that ended whole gets them, and before the client
+      // closes, since closing it first would cut them short. The turn is logged once, after both passes: as the first pass
+      // ended when the extra pass showed no picker.
       onEnd: async (event) => {
-        if (!failed) await logTurn(event);
+        let turn: TurnRecord = { content: event.content, toolResults: event.toolResults };
+        const budget = !failed && needsPickerPass(turn) ? pickerPassBudget() : null;
+        if (budget && 'left' in budget) {
+          console.warn(NO_PICKER, `the turn had ${secondsOf(Math.max(0, budget.left))} seconds left, under the ${secondsOf(PICKER_PASS_MIN_MS)} the pass needs`);
+        } else if (budget) {
+          const turnMessages = [...event.responseMessages];
+          while (turnMessages.at(-1)?.role === 'assistant') turnMessages.pop();
+          const pass = await pickerPass(turnMessages, budget.ms);
+          if ('parts' in pass) {
+            added.resolve(pass.parts); // before the log, which the page doesn't wait for
+            turn = { content: [...turn.content, ...pass.content], toolResults: [...turn.toolResults, ...pass.toolResults] };
+          } else if (pass.why !== null) {
+            console.warn(NO_PICKER, pass.why);
+          }
+        }
+        added.resolve([]);
+        if (!failed) await logTurn(turn);
         await close();
       },
       onAbort: async () => {
         failed = true;
+        added.resolve([]);
         await close();
       },
       onError: async ({ error }) => {
         failed = true;
+        added.resolve([]);
         // The label too: in LINE mode the customer's screen never shows the detail (ErrorDetail is mock-only).
         console.error('[concierge]', describeModelError(error, deps.modelLabel, deps.modelFix), error);
         await close();
       },
     });
+
+    /**
+     * The turn's parts, as one message for the page: the first pass's, and after them the extra pass's when it showed a
+     * picker, with one start and one finish. The first pass's finish waits for what the extra pass adds, and is replaced
+     * by the extra pass's own when it adds parts. Its stream is read to its end meanwhile, which comes once its onEnd has
+     * run (the extra pass, the log, the client's close), so nothing waits on this reader, and the page's stream ends after
+     * the log, as it did with one pass.
+     */
+    async function* turnParts(): AsyncGenerator<Part> {
+      const first = result.stream[Symbol.asyncIterator]();
+      try {
+        for (let next = await first.next(); !next.done; next = await first.next()) {
+          if (next.value.type !== 'finish') {
+            yield next.value;
+            continue;
+          }
+          const rest = (async () => {
+            const tail: Part[] = [];
+            for (let more = await first.next(); !more.done; more = await first.next()) tail.push(more.value);
+            return tail;
+          })();
+          const extra = await Promise.race([added.promise, rest.then(() => added.promise)]);
+          yield* extra.filter((part) => part.type !== 'finish');
+          yield extra.findLast((part) => part.type === 'finish') ?? next.value;
+          yield* await rest;
+          return;
+        }
+      } finally {
+        await first.return?.();
+      }
+    }
+    const reply = turnParts();
+    const replyStream = new ReadableStream<Part>({
+      async pull(controller) {
+        const next = await reply.next();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel() {
+        // Not waited for: the generator stops at its next part, which may come only once the extra pass has ended.
+        reply.return(undefined).catch(() => {});
+      },
+    });
     return createUIMessageStreamResponse({
       stream: toUIMessageStream({
-        stream: result.stream,
+        stream: replyStream,
         originalMessages: messages,
         onError: (error) => describeModelError(error, deps.modelLabel, deps.modelFix),
       }),

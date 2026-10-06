@@ -6,11 +6,12 @@ import { APICallError, RetryError, dynamicTool, jsonSchema, readUIMessageStream,
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { SURFACE_HEADER, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, turnFactsOf, turnReplyOf, withAutoHandOff } from './concierge';
+import { SURFACE_HEADER, asksToVisit, conciergeInstructions, describeModelError, handleConcierge, pieceSlugOf, turnFactsOf, turnReplyOf, withAutoHandOff } from './concierge';
+import { COPY } from './copy';
 import { conciergeModel } from './model';
 import { resolveDate } from './resolve-date';
 import { handOffAt } from './tool-view';
-import { CHOOSE_VISIT } from './visit-picker';
+import { CHOOSE_VISIT, livePickerOf } from './visit-picker';
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
@@ -826,6 +827,659 @@ describe('the visit picker: choose_visit', () => {
     await converse({ messages, locale: 'en', product: 'weekender-50' }, { createMcpClient: resumed.createMcpClient });
     await vi.waitFor(() => expect(resumed.close).toHaveBeenCalled());
     expect(logged).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The safety net's first condition: the customer's latest message asks for a visit, in the words of a request. A plain
+// question about hours or a product doesn't, and nor does a question about a visit already requested, or about whether a
+// booking is needed: those exclusions win over the request's words, so a second picker can't book a visit twice.
+describe('asksToVisit', () => {
+  // Paul's five messages in production on 3 October, in order: only the third and the fifth ask for a visit.
+  const production: Array<[string, boolean]> = [
+    ['When is a good time to come into to the store', false],
+    ['Yes', false],
+    ['Can I book a visit?', true],
+    ['What do you have', false],
+    ['I would like to book a visit to see cabin case', true],
+  ];
+
+  it("reads Paul's production messages as he meant them", () => {
+    for (const [text, asks] of production) expect.soft(asksToVisit(text), text).toBe(asks);
+  });
+
+  it("hears the demo's suggestions that ask for a visit, in both languages", () => {
+    for (const locale of ['en', 'ja'] as const) {
+      for (const text of COPY[locale].suggestions) expect.soft(asksToVisit(text), text).toBe(true);
+    }
+    expect(COPY.en.suggestions[0]).toContain('Could I see it in Ginza on Saturday at 2 pm?');
+    expect(COPY.ja.suggestions[0]).toContain('土曜日の14時に銀座で見られますか？');
+  });
+
+  it('hears an English request: can, could or may I or we; I would, we would like to; I or we want to; let’s book; book it', () => {
+    const asks = [
+      // can / could / may + I / we, with each verb
+      'Can I book a visit?',
+      'Could we visit the Ginza boutique?',
+      'May I schedule a visit for Saturday?',
+      'Can we schedule one?',
+      'Can we reserve a time on Friday?',
+      'Can I make an appointment?',
+      'Could we make a booking for Saturday?',
+      'May I make a reservation?',
+      'Can I come in on Saturday?',
+      'Could we come by tomorrow afternoon?',
+      'Can I come over to see it?',
+      'Can I drop in this weekend?',
+      'Could I drop by on Sunday?',
+      'Can we stop by later today?',
+      'Could I please book a visit?',
+      // seeing a piece in person, in store, at a boutique, or in a boutique's city
+      'Can I see it in person?',
+      'Could I see them in store?',
+      'Can we see this at the boutique?',
+      'May I see these at the Omotesando boutique?',
+      'Can I see the Weekender 50 in person?',
+      'Could I see the Cabin Case 55 in Osaka?',
+      'Can I see it in Shinsaibashi?',
+      'Can I see it in Ginza?',
+      'Could I see them at the Omotesando boutique on Friday?',
+      // I'd / I would / we'd / we would like to (and love to)
+      "I'd like to book a visit.",
+      'I’d like to book a visit.',
+      'I would like to book a visit to see cabin case',
+      "We'd like to come in on Saturday.",
+      'We would like to see it in person.',
+      "I'd love to see these in person.",
+      // I / we want to
+      'I want to visit the Ginza boutique.',
+      'I want to see them in person',
+      'We want to schedule a visit.',
+      // let's book / schedule
+      "Let's book it.",
+      'Let’s schedule one for Saturday.',
+      // book it / one / a visit / an appointment
+      'Book it, please.',
+      'BOOK one for Saturday, please.',
+      'Please book one for Saturday.',
+      'Book a visit for me.',
+      'Book an appointment for Saturday at 2 pm.',
+    ];
+    for (const text of asks) expect.soft(asksToVisit(text), text).toBe(true);
+  });
+
+  it('hears no English request in a question, however it names a visit', () => {
+    const plain = [
+      'What time do you open?',
+      'When is a good time to come in?',
+      'What do you have?',
+      'How do I care for the leather?',
+      'Can it hold a watch?',
+      'Is it in stock in Ginza?',
+      'Can I see it?',
+      'Let me see, what do you have in Ginza?',
+      'A notebook for my father?',
+      'Do your visitors get gift wrapping?',
+      'Booking for two, please.',
+      "I'd like a reservation for Saturday.",
+      'Do I need a reservation?',
+      '',
+    ];
+    for (const text of plain) expect.soft(asksToVisit(text), text).toBe(false);
+  });
+
+  it('lets an English exclusion win over a request: a visit already asked for, changing or checking one, its cost, whether one is needed, a no, visiting hours, or another kind of booking', () => {
+    const excluded = [
+      // the review's examples: questions about a visit already requested
+      'When will the boutique confirm my visit?',
+      'Did my booking go through?',
+      'Can you show my appointments?',
+      'Can I cancel my appointment?',
+      'Is my booking confirmed?',
+      'Do I have any appointments?',
+      // my / our + visit, booking, appointment, reservation, request
+      'Can I book my visit for 3 pm instead?',
+      'Could we stop by for our booking?',
+      'Can I come in before my appointment?',
+      'I would like to visit for my reservation.',
+      'Can I book a visit? See my request.',
+      'Can we come by before our next visit?',
+      // cancel, change, reschedule, move, confirm, check, status
+      'Can I book a visit and cancel the other one?',
+      'Can I book a visit or change the day?',
+      'Can I reschedule and book a visit for Sunday?',
+      'Can we visit on Sunday instead, or move it?',
+      'Could I visit once the boutique can confirm it?',
+      'Can I book a visit and get it confirmed today?',
+      'Can I come in to check the colors?',
+      'Can I book a visit? What is the status?',
+      // policy, cost, free, fee, charge
+      'Can I book a visit? What is your policy?',
+      'Can I book a visit, and does it cost anything?',
+      'Can I book a visit for free?',
+      'Can I book a visit without a fee?',
+      'Do you charge if I want to book a visit?',
+      // need to, have to, required
+      'Do I need to book a visit?',
+      'Do I have to book a visit first?',
+      'Is a visit required, or can I just come in?',
+      // don't, can't, no thanks, not now
+      "I don't want to book a visit yet.",
+      'Sorry, I can’t book a visit after all.',
+      'No thanks, I would like to book a visit later.',
+      'Not now, but I want to visit later.',
+      // visiting hours
+      'Can I visit during visiting hours?',
+      // a table, restaurant, hotel, taxi or flight
+      'Can I book a table?',
+      'Could I book a restaurant near Ginza?',
+      'Can I book a hotel in Ginza?',
+      'Can I book a taxi to the boutique?',
+      'I would like to book a flight to Osaka.',
+    ];
+    for (const text of excluded) expect.soft(asksToVisit(text), text).toBe(false);
+  });
+
+  it('hears a Japanese request: 予約したい, 予約できますか, 来店したい, 見に行きたい, and 伺いたい or 見られますか with a place, a day or 実物', () => {
+    const asks = [
+      '予約したいです。',
+      '来店の予約をしたいです。',
+      '土曜日に予約できますか？',
+      '来店を予約できますか？',
+      '予約をお願いします。',
+      '予約させてください。',
+      '来店したいです。',
+      '明日来店できますか？',
+      '実物を見に行きたいです。',
+      '見に行ってもいいですか？',
+      // 伺いたい, お伺いしても, お伺いしたい: next to a place or a day
+      '土曜日に銀座のお店に伺いたいです。',
+      '表参道の店舗に伺いたいのですが。',
+      '明日お伺いしてもよろしいですか？',
+      '来週、心斎橋のブティックにお伺いしたいです。',
+      '今週の金曜日に伺いたいです。',
+      '10日に伺いたいです。',
+      // 見られますか, 見たい, 行けますか: with a boutique, a day or 実物
+      '土曜日の14時に銀座で見られますか？',
+      '実物を見たいです。',
+      '来週、心斎橋のブティックに行けますか？',
+      '明日、表参道で見られますか？',
+    ];
+    for (const text of asks) expect.soft(asksToVisit(text), text).toBe(true);
+  });
+
+  it('hears no Japanese request in 伺い or 見たい alone, or in a plain question', () => {
+    const plain = ['伺いたいです。', 'お伺いしてもよろしいですか？', 'この色も見たいです。', '見られますか？', '行けますか？', 'こんにちは', '営業時間は何時からですか？', 'おすすめは何ですか？', '予約について教えてください。', 'ご来店ありがとうございます。'];
+    for (const text of plain) expect.soft(asksToVisit(text), text).toBe(false);
+  });
+
+  it('lets a Japanese exclusion win over a request: whether a booking is needed, checking, changing or cancelling one, a pre-order, not coming in, or asking about something', () => {
+    const excluded = [
+      // the review's examples
+      '予約を確認したいです',
+      '予約をキャンセルしたい',
+      // each exclusion, beside a request's words
+      '予約は必要ですか？それとも来店できますか？',
+      '来店したいのですが、予約が必要ですか？',
+      '予約の確認と、別の日の予約をお願いします。',
+      '予約を確認してから来店したいです。',
+      '予約の変更をして、来店したいです。',
+      '予約を変更して、来店したいです。',
+      '来店の予約をキャンセルして、別の日に予約したいです。',
+      '予約注文で予約したいです。',
+      '予約販売の商品を予約したいです。',
+      '来店しなくても予約できますか？',
+      '来店せずに予約できますか？',
+      '銀座のお店について伺いたいです。',
+      '明日、銀座のお店にお伺いしたいことがあります。',
+      // 伺う after を is "to ask about" something, even beside a place or a day
+      '銀座店の営業時間を伺いたいです。',
+      '表参道のお店の場所を伺いたいです。',
+      '土曜日の営業時間を伺いたいです。',
+      '銀座店の営業時間をお伺いしたいです。',
+    ];
+    for (const text of excluded) expect.soft(asksToVisit(text), text).toBe(false);
+  });
+});
+
+// The visit picker's safety net. The model decides whether to call choose_visit, and on 3 October in production it
+// once asked for the boutique, day and time in words instead. So when a customer who asks to book or visit, with a piece
+// known, gets a reply without the call, the server runs one extra pass with only resolve_date and choose_visit, tool use
+// required, and its parts continue the same message: the picker appears under the reply.
+describe("the visit picker's safety net", () => {
+  const ASKED = 'I would like to book a visit to see cabin case';
+  /** The production reply that slipped: the boutique, day and time asked for in words, with no picker. */
+  const SLIPPED = 'Which boutique, day and time would you like for your visit to see the Cabin Case 55?';
+  const PICKER_NOTE = '(The concierge showed a visit picker so the customer can request a visit.)';
+  const NO_PICKER = '[concierge] The extra pass for a visit picker showed none, so the turn keeps its first reply:';
+  const CABIN_CASE = { slug: 'cabin-case-55', name: 'Cabin Case 55' };
+  const say = (text: string, id = 'u1') => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  /** A Maison tool's answer that found `products` (search_products), as the MCP client passes it on. */
+  const found = (...products: unknown[]) => ({ content: [{ type: 'text', text: JSON.stringify({ products }) }], structuredContent: { products } });
+  /** One model call's stream: `chunks`, then its finish. */
+  const step = (chunks: unknown[], finish: 'stop' | 'tool-calls' = 'stop') => ({
+    stream: simulateReadableStream({ chunks: [...chunks, { type: 'finish', finishReason: { unified: finish, raw: undefined }, usage }] }),
+  });
+  const words = (text: string, id = 't1') => [
+    { type: 'text-start', id },
+    { type: 'text-delta', id, delta: text },
+    { type: 'text-end', id },
+  ];
+  const call = (toolName: string, input: unknown, toolCallId: string) => ({ type: 'tool-call', toolCallId, toolName, input: JSON.stringify(input) });
+  const picks = (toolCallId = 'call-2', input: unknown = { productSlugs: ['cabin-case-55'] }) => step([call(CHOOSE_VISIT, input, toolCallId)], 'tool-calls');
+  /** A model whose calls get `steps`, one each, in order. A call after them gets nothing, and fails. */
+  const modelOf = (...steps: unknown[]) => new MockLanguageModelV4({ doStream: steps as any });
+  /** A model call that sends nothing and never ends, until it is aborted: its stream then errors with the reason, as fetch's does. */
+  const stalls = ({ abortSignal }: { abortSignal?: AbortSignal }) => ({
+    stream: new ReadableStream({
+      start(controller) {
+        abortSignal?.addEventListener('abort', () => controller.error(abortSignal.reason));
+      },
+    }),
+  });
+  /** A model whose first call replies `first` in words, and whose later calls get `later`. */
+  const repliesThen = (first: string, later: (options: { abortSignal?: AbortSignal }) => unknown) => {
+    let calls = 0;
+    return new MockLanguageModelV4({
+      doStream: async (options) => {
+        calls += 1;
+        return (calls === 1 ? step(words(first)) : later(options)) as any;
+      },
+    });
+  };
+  /** A Maison tool as mcp.tools() gives it, answering `answer`. */
+  const maisonTool = (answer: () => unknown) =>
+    dynamicTool({ description: 'A Maison tool.', inputSchema: jsonSchema({ type: 'object', properties: { query: { type: 'string' }, locale: { type: 'string' } } }), execute: async () => answer() });
+  const searchFinds = (...products: unknown[]) => ({ search_products: maisonTool(() => found(...products)) });
+  /** log_inquiry as mcp.tools() gives it, its execute a spy that logs. */
+  const logInquiry = () => {
+    const execute = vi.fn(async (_input: unknown, _options: unknown) => ({ content: [{ type: 'text', text: '{"logged":true}' }], structuredContent: { logged: true } }));
+    return { execute, tool: dynamicTool({ description: 'Logs a turn.', inputSchema: jsonSchema({ type: 'object', properties: {} }), execute }) };
+  };
+  /** The reply's message as the page rebuilds it from the stream (readUIMessageStream, as the chat reads it). */
+  const replyOf = async (events: Array<Record<string, any>>): Promise<UIMessage> => {
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const event of events) controller.enqueue(event as UIMessageChunk);
+        controller.close();
+      },
+    });
+    let message: UIMessage | undefined;
+    for await (const snapshot of readUIMessageStream({ stream })) message = snapshot;
+    return message as UIMessage;
+  };
+  const pickerIn = (message: UIMessage) => message.parts.find((part) => part.type === `tool-${CHOOSE_VISIT}`) as Record<string, any> | undefined;
+  const toolNamesOf = (model: MockLanguageModelV4, index: number) => model.doStreamCalls[index].tools?.map((entry) => entry.name).sort();
+  const wordsOf = (events: Array<Record<string, any>>) => events.filter((event) => event.type === 'text-delta').map((event) => event.delta).join('');
+  /** One turn through the route, with a log_inquiry that logs: the events, the message the page builds, and the log's spy, once the client has closed. */
+  const converse = async (body: Record<string, unknown>, model: MockLanguageModelV4, tools: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) => {
+    const log = logInquiry();
+    const { createMcpClient, close } = fakeMcp({ ...tools, log_inquiry: log.tool });
+    const response = await handleConcierge(ask('Bearer mcp_at_x', body), deps({ createMcpClient, model, ...overrides }));
+    expect(response.status).toBe(200);
+    const events = eventsOf(await response.text());
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    return { events, message: await replyOf(events), log: log.execute, close };
+  };
+  /** Runs `test` with console.warn and console.error held, so a failed pass's warning is the test's to check. */
+  const quietly = async (test: (warn: ReturnType<typeof vi.spyOn>, error: ReturnType<typeof vi.spyOn>) => Promise<void>) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await test(warn, error);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  };
+
+  it('runs one extra pass for a booking with a known piece that ended in words: only resolve_date and choose_visit, tool use required, the same instructions', async () => {
+    for (const [locale, asked] of [
+      ['en', ASKED],
+      ['ja', '来店を予約できますか？'],
+    ]) {
+      const model = modelOf(step(words(SLIPPED)), picks());
+      const { events, message } = await converse({ messages: [say(asked)], locale, product: 'cabin-case-55' }, model);
+      expect(model.doStreamCalls, locale).toHaveLength(2);
+      expect(toolNamesOf(model, 1), locale).toEqual([CHOOSE_VISIT, 'resolve_date']);
+      expect(model.doStreamCalls[1].toolChoice, locale).toEqual({ type: 'required' });
+      expect(model.doStreamCalls[1].prompt[0], `${locale}: the same instructions`).toEqual(model.doStreamCalls[0].prompt[0]);
+      // Never the assistant's turn last: Claude Sonnet 5 refuses that (a prefill) with a 400.
+      expect(model.doStreamCalls[1].prompt.at(-1)?.role, locale).toBe('user');
+
+      // One message, with one start and one finish: the reply's words, then the picker, waiting for the customer.
+      expect(events.filter((event) => event.type === 'start'), locale).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'finish'), locale).toHaveLength(1);
+      expect(events.at(-1)?.type, locale).toBe('finish');
+      expect(events.filter((event) => event.type === 'error'), locale).toEqual([]);
+      expect(wordsOf(events), locale).toBe(SLIPPED);
+      expect(pickerIn(message), locale).toMatchObject({ toolCallId: 'call-2', state: 'input-available', input: { productSlugs: ['cabin-case-55'] } });
+      expect(message.parts.findIndex((part) => part.type === 'text'), locale).toBeLessThan(message.parts.findIndex((part) => part.type === `tool-${CHOOSE_VISIT}`));
+      expect(livePickerOf([say(asked), message] as any), locale).toBe('call-2');
+    }
+  });
+
+  it('logs the turn once, after both passes, with the picker note, before the client closes', async () => {
+    const { log, close } = await converse({ messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, modelOf(step(words(SLIPPED)), picks()));
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toStrictEqual({ message: ASKED, reply: `${SLIPPED}\n\n${PICKER_NOTE}`, knowledgeFound: false, handedOff: false, productSlug: 'cabin-case-55', locale: 'en' });
+    expect(log.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
+  });
+
+  it('knows a piece search_products found in this turn, and the extra pass sees the turn up to its last words', async () => {
+    const model = modelOf(step([call('search_products', { query: 'cabin case' }, 'call-1')], 'tool-calls'), step(words(SLIPPED)), picks());
+    const { message } = await converse({ messages: [say(ASKED)], locale: 'en' }, model, searchFinds(CABIN_CASE));
+    expect(model.doStreamCalls).toHaveLength(3);
+    expect(toolNamesOf(model, 2)).toEqual([CHOOSE_VISIT, 'resolve_date']);
+    // The search and its result, and not the words after it: the last message is the search's result.
+    const prompt = model.doStreamCalls[2].prompt;
+    expect(prompt.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-1', toolName: 'search_products' }] });
+    expect(JSON.stringify(prompt)).not.toContain(SLIPPED);
+    expect(pickerIn(message)).toMatchObject({ toolCallId: 'call-2', state: 'input-available' });
+  });
+
+  it('knows a piece search_products or view_product found in an earlier turn of the conversation', async () => {
+    const earlier = (toolName: string, output: unknown) => ({
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'step-start' }, { type: 'dynamic-tool', toolName, toolCallId: 'call-0', state: 'output-available', input: {}, output }, { type: 'text', text: 'Here are a few highlights.' }],
+    });
+    const viewed = { content: [{ type: 'text', text: '{}' }], structuredContent: { product: CABIN_CASE } };
+    for (const [toolName, output] of [
+      ['search_products', found({ slug: 'voyage-trunk-110', name: 'Voyage Trunk 110' }, CABIN_CASE)],
+      ['view_product', viewed],
+    ] as const) {
+      const model = modelOf(step(words(SLIPPED)), picks());
+      const tools = { [toolName]: maisonTool(() => output) };
+      const { message } = await converse({ messages: [say('What do you have'), earlier(toolName, output), say(ASKED, 'u2')], locale: 'en' }, model, tools);
+      expect(model.doStreamCalls, toolName).toHaveLength(2);
+      expect(pickerIn(message), toolName).toMatchObject({ state: 'input-available' });
+    }
+  });
+
+  it('forces choose_visit on a step after the first, so a named day is resolved first and the picker follows it', async () => {
+    const model = modelOf(
+      step(words('Which boutique and time would suit you?')),
+      step([call('resolve_date', { weekday: 'saturday' }, 'call-2')], 'tool-calls'),
+      picks('call-3', { productSlugs: ['cabin-case-55'], date: '2026-10-10' })
+    );
+    const { message } = await converse({ messages: [say('Can I book a visit on Saturday?')], locale: 'en', product: 'cabin-case-55' }, model);
+    expect(model.doStreamCalls).toHaveLength(3);
+    expect(model.doStreamCalls[1].toolChoice).toEqual({ type: 'required' });
+    expect(model.doStreamCalls[2].toolChoice).toEqual({ type: 'tool', toolName: CHOOSE_VISIT });
+    expect(toolNamesOf(model, 2)).toEqual([CHOOSE_VISIT, 'resolve_date']);
+    expect(message.parts.find((part) => part.type === 'tool-resolve_date')).toMatchObject({ state: 'output-available', output: { date: '2026-10-10', weekday: 'Saturday' } });
+    expect(pickerIn(message)).toMatchObject({ toolCallId: 'call-3', state: 'input-available', input: { date: '2026-10-10' } });
+  });
+
+  // The SDK holds the model to the tool choice (ToolChoiceViolationError): a step that calls no tool when one is required,
+  // or not choose_visit when it is forced, ends the pass with an error. So the pass makes two model calls at most, and
+  // its limit of three steps is only a backstop.
+  it("keeps the first reply when the extra pass calls no tool, or not choose_visit on a step after the first: the SDK refuses the step, and the log says why", async () => {
+    await quietly(async (warn) => {
+      const resolves = (id: string) => step([call('resolve_date', { weekday: 'saturday' }, id)], 'tool-calls');
+      const cases: Array<[string, MockLanguageModelV4, number, string]> = [
+        ['words only', modelOf(step(words(SLIPPED)), step(words('Which boutique would you like?'))), 2, 'Model response did not contain a tool call even though tool choice was required.'],
+        ['resolve_date twice', modelOf(step(words(SLIPPED)), resolves('call-2'), resolves('call-3')), 3, "Model response did not contain a call to the required tool 'choose_visit'."],
+      ];
+      for (const [what, model, calls, why] of cases) {
+        warn.mockClear();
+        const { events, message, log } = await converse({ messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, model);
+        expect(model.doStreamCalls, what).toHaveLength(calls);
+        expect(message.parts.filter((part) => part.type !== 'step-start'), what).toEqual([expect.objectContaining({ type: 'text', text: SLIPPED })]);
+        expect(events.filter((event) => event.type === 'error'), what).toEqual([]);
+        expect(events.at(-1)?.type, what).toBe('finish');
+        expect(warn, what).toHaveBeenCalledTimes(1);
+        expect(warn, what).toHaveBeenCalledWith(NO_PICKER, why);
+        expect(log, what).toHaveBeenCalledTimes(1);
+        expect(log.mock.calls[0][0], what).toMatchObject({ reply: SLIPPED });
+      }
+    });
+  });
+
+  it("checks the extra pass's pieces as any choose_visit's: a piece Strapi doesn't know shows no picker, and the first reply stays", async () => {
+    await quietly(async (warn) => {
+      const received: unknown[] = [];
+      const notFound = { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'not_found', message: 'No published product "cabin-case-5".', hint: 'Call search_products.' } }) }] };
+      const findBoutiques = dynamicTool({
+        description: 'Lists boutiques.',
+        inputSchema: jsonSchema({ type: 'object', properties: { productSlugs: { type: 'array', items: { type: 'string' } }, locale: { type: 'string' } } }),
+        execute: async (input) => {
+          received.push(input);
+          return notFound;
+        },
+      });
+      const model = modelOf(step(words(SLIPPED)), picks('call-2', { productSlugs: ['cabin-case-5'] }));
+      const { message, log } = await converse({ messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, model, { find_boutiques: findBoutiques });
+      expect(received).toEqual([{ productSlugs: ['cabin-case-5'], locale: 'en' }]);
+      expect(model.doStreamCalls).toHaveLength(2); // the refused call ends the pass (hasToolCall)
+      expect(pickerIn(message)).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(NO_PICKER, 'it ended without a visit picker');
+      expect(log.mock.calls[0][0]).toMatchObject({ reply: SLIPPED });
+    });
+  });
+
+  it("makes no extra call for a message that isn't a booking request, or a reply that called choose_visit, even one it refused", async () => {
+    await quietly(async (warn) => {
+      const body = (text: string) => ({ messages: [say(text)], locale: 'en', product: 'cabin-case-55' });
+      const notAsked = modelOf(step(words('Here are three.')));
+      await converse(body('What do you have?'), notAsked);
+      expect(notAsked.doStreamCalls, 'not a booking request').toHaveLength(1);
+
+      const shown = callsThenReplies(CHOOSE_VISIT, { productSlugs: ['cabin-case-55'] });
+      await converse(body(ASKED), shown);
+      expect(shown.doStreamCalls, 'choose_visit called').toHaveLength(1);
+
+      const refused = callsThenReplies(CHOOSE_VISIT, {}); // refused, and the model answers in words
+      const { message } = await converse(body(ASKED), refused);
+      expect(refused.doStreamCalls, 'choose_visit refused').toHaveLength(2);
+      // The SDK makes a call it refused a dynamic one: its part is a dynamic-tool part, with the tool's name.
+      expect(message.parts.find((part) => part.type === 'dynamic-tool' && part.toolName === CHOOSE_VISIT)).toMatchObject({ state: 'output-error' });
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it('makes no extra call when no piece is known: no page, and no search that found one in the conversation', async () => {
+    await quietly(async (warn) => {
+      const noPage = modelOf(step(words('Which piece would you like to see?')));
+      await converse({ messages: [say(ASKED)], locale: 'en' }, noPage);
+      expect(noPage.doStreamCalls, 'no page').toHaveLength(1);
+
+      const refusal = { isError: true, content: [{ type: 'text', text: '{"error":{"code":"unavailable"}}' }] };
+      for (const [what, answer] of [
+        ['a search that found nothing', () => found()],
+        ['a refused search', () => refusal],
+      ] as const) {
+        const model = callsThenReplies('search_products', { query: 'cabin case' });
+        await converse({ messages: [say(ASKED)], locale: 'en' }, model, { search_products: maisonTool(answer) });
+        expect(model.doStreamCalls, what).toHaveLength(2);
+      }
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  /** The concierge's earlier message with a picker the customer answered (`output`), and the reply after it. */
+  const answeredPicker = (output: unknown, reply: string) => ({
+    id: 'a1',
+    role: 'assistant',
+    parts: [
+      { type: 'step-start' },
+      { type: `tool-${CHOOSE_VISIT}`, toolCallId: 'call-0', state: 'output-available', input: { productSlugs: ['cabin-case-55'] }, output },
+      { type: 'step-start' },
+      { type: 'text', text: reply },
+    ],
+  });
+  const REQUESTED = {
+    status: 'requested',
+    appointment: { reference: 'APT-0042', status: 'requested', boutique: { slug: 'ginza', name: 'Ginza Flagship' }, requestedFor: '2026-10-10T14:00:00+09:00', products: [CABIN_CASE], note: '', confirmationSent: false },
+  };
+
+  // A question about a visit already requested must not get a fresh picker, whose Send request would book it twice.
+  it('makes no extra call once a visit was requested in this chat: after that, the model alone decides', async () => {
+    await quietly(async (warn) => {
+      const requested = answeredPicker(REQUESTED, 'Your visit is requested. The boutique will confirm it on LINE.');
+      for (const asked of ['Is my booking confirmed?', 'Can I book a visit?']) {
+        const model = modelOf(step(words('It is requested, and the boutique will confirm it on LINE.')));
+        await converse({ messages: [say('Can I book a visit?'), requested, say(asked, 'u2')], locale: 'en', product: 'cabin-case-55' }, model);
+        expect(model.doStreamCalls, asked).toHaveLength(1);
+      }
+      // A picker closed without a request requested nothing: the customer may still want a visit.
+      const closed = modelOf(step(words(SLIPPED)), picks());
+      const { message } = await converse({ messages: [say('Can I book a visit?'), answeredPicker({ status: 'closed' }, 'Of course.'), say(ASKED, 'u2')], locale: 'en', product: 'cabin-case-55' }, closed);
+      expect(closed.doStreamCalls, 'closed').toHaveLength(2);
+      expect(pickerIn(message), 'closed').toMatchObject({ toolCallId: 'call-2', state: 'input-available' });
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it('makes no extra call when the turn called my_appointments: the customer asked about the visits they have', async () => {
+    await quietly(async (warn) => {
+      const tools = { my_appointments: maisonTool(() => ({ content: [{ type: 'text', text: '{"appointments":[]}' }], structuredContent: { appointments: [] } })) };
+      for (const asked of ['Do I have any appointments?', 'Can I book a visit?']) {
+        const model = modelOf(step([call('my_appointments', {}, 'call-1')], 'tool-calls'), step(words('You have no visits yet.')));
+        await converse({ messages: [say(asked)], locale: 'en', product: 'cabin-case-55' }, model, tools);
+        expect(model.doStreamCalls, `${asked}: the reply's own two calls, and no extra one`).toHaveLength(2);
+      }
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  /** deps.now as a clock: the request's start on its first call, and `laterMs` after it on every call after that. */
+  const clockAt = (laterMs: number) => {
+    const start = new Date('2026-10-07T01:00:00Z').getTime();
+    let calls = 0;
+    return () => new Date(start + (calls++ === 0 ? 0 : laterMs));
+  };
+
+  // The route may run for 60 seconds, and the log after the extra pass may take 5 of them.
+  it("gives the extra pass what is left of the turn's 55 seconds, 20 at most, and skips it with the warning when under 5 would be left", async () => {
+    await quietly(async (warn) => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      try {
+        const body = { messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' };
+        // 30 seconds gone: 20 are left of 25.
+        const early = modelOf(step(words(SLIPPED)), picks());
+        await converse(body, early, {}, { now: clockAt(30_000) });
+        expect(early.doStreamCalls).toHaveLength(2);
+        expect(timeout).toHaveBeenCalledWith(20_000);
+        // 40 seconds gone: 15 are left.
+        timeout.mockClear();
+        const later = modelOf(step(words(SLIPPED)), picks());
+        const { message } = await converse(body, later, {}, { now: clockAt(40_000) });
+        expect(later.doStreamCalls).toHaveLength(2);
+        expect(timeout).toHaveBeenCalledWith(15_000);
+        expect(pickerIn(message)).toMatchObject({ state: 'input-available' });
+        expect(warn).not.toHaveBeenCalled();
+        // 51 seconds gone: 4 would be left, so no extra pass, and the first reply stays.
+        const late = modelOf(step(words(SLIPPED)));
+        const { message: kept, log } = await converse(body, late, {}, { now: clockAt(51_000) });
+        expect(late.doStreamCalls).toHaveLength(1);
+        expect(pickerIn(kept)).toBeUndefined();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(NO_PICKER, 'the turn had 4 seconds left, under the 5 the pass needs');
+        expect(log).toHaveBeenCalledTimes(1);
+        expect(log.mock.calls[0][0]).toMatchObject({ reply: SLIPPED });
+      } finally {
+        timeout.mockRestore();
+      }
+    });
+  });
+
+  it("makes no extra call on a resume: the picker's answer continues a turn that was the customer's", async () => {
+    const answered = {
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'step-start' }, { type: `tool-${CHOOSE_VISIT}`, toolCallId: 'call-1', state: 'output-available', input: { productSlugs: ['cabin-case-55'] }, output: { status: 'closed' } }],
+    };
+    const model = modelOf(step(words('Of course. Let me know if I can help.')));
+    const { log } = await converse({ messages: [say(ASKED), answered], locale: 'en', product: 'cabin-case-55' }, model);
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('makes no extra call when the first pass failed: the model threw, or failed after a step that found the piece', async () => {
+    await quietly(async (warn) => {
+      const threw = new MockLanguageModelV4({
+        doStream: async () => {
+          throw new Error('The model broke.');
+        },
+      });
+      const first = await converse({ messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, threw);
+      expect(threw.doStreamCalls, 'threw').toHaveLength(1);
+      expect(first.log, 'threw').not.toHaveBeenCalled();
+
+      const afterAStep = modelOf(step([call('search_products', { query: 'cabin case' }, 'call-1')], 'tool-calls'), {
+        stream: simulateReadableStream({ chunks: [...words('Let me ch').slice(0, 2), { type: 'error', error: new Error('The provider broke.') }] }),
+      });
+      const second = await converse({ messages: [say(ASKED)], locale: 'en' }, afterAStep, searchFinds(CABIN_CASE));
+      expect(afterAStep.doStreamCalls, 'after a step').toHaveLength(2);
+      expect(second.events.filter((event) => event.type === 'error').map((event) => event.errorText)).toEqual(['The provider broke.']);
+      expect(second.log, 'after a step').not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps the first reply when the extra pass fails: the message finishes without an error part, the turn is logged once without the note, and the log says why', async () => {
+    await quietly(async (warn, error) => {
+      const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+      // The real signal, but quick: the twenty seconds' wait isn't what is under test.
+      const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(ms === 20_000 ? 20 : ms));
+      try {
+        const failures: Array<[string, (options: { abortSignal?: AbortSignal }) => unknown, string]> = [
+          [
+            'throws',
+            () => {
+              throw new Error('The model broke.');
+            },
+            'The model broke.',
+          ],
+          [
+            'an error chunk after some words',
+            () => ({ stream: simulateReadableStream({ chunks: [...words('Here is').slice(0, 2), { type: 'error', error: new Error('The provider broke.') }] }) }),
+            'The provider broke.',
+          ],
+          ['hangs', stalls, 'it took longer than 20 seconds'],
+        ];
+        for (const [what, second, why] of failures) {
+          warn.mockClear();
+          const model = repliesThen(SLIPPED, second);
+          const { events, message, log } = await converse({ messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, model);
+          expect(model.doStreamCalls, what).toHaveLength(2);
+          expect(events.filter((event) => event.type === 'error'), what).toEqual([]);
+          expect(events.filter((event) => event.type === 'finish'), what).toHaveLength(1);
+          expect(events.at(-1)?.type, what).toBe('finish');
+          expect(wordsOf(events), `${what}: nothing of the failed pass reaches the page`).toBe(SLIPPED);
+          expect(message.parts.filter((part) => part.type !== 'step-start'), what).toEqual([expect.objectContaining({ type: 'text', text: SLIPPED })]);
+          expect(log, what).toHaveBeenCalledTimes(1);
+          expect(log.mock.calls[0][0], what).toMatchObject({ message: ASKED, reply: SLIPPED });
+          expect(warn, what).toHaveBeenCalledTimes(1);
+          expect(warn, what).toHaveBeenCalledWith(NO_PICKER, why);
+        }
+        expect(timeout).toHaveBeenCalledWith(20_000);
+        expect(error).not.toHaveBeenCalled(); // the first pass didn't fail, so the turn isn't reported as failed
+      } finally {
+        timeout.mockRestore();
+      }
+    });
+  });
+
+  it('says nothing, and logs the turn as the first pass ended, when the customer leaves during the extra pass', async () => {
+    await quietly(async (warn) => {
+      const model = repliesThen(SLIPPED, stalls);
+      const log = logInquiry();
+      const { createMcpClient, close } = fakeMcp({ log_inquiry: log.tool });
+      const gone = new AbortController();
+      const response = await handleConcierge(ask('Bearer mcp_at_x', { messages: [say(ASKED)], locale: 'en', product: 'cabin-case-55' }, gone.signal), deps({ createMcpClient, model }));
+      const text = response.text();
+      await vi.waitFor(() => expect(model.doStreamCalls).toHaveLength(2));
+      gone.abort();
+      const events = eventsOf(await text);
+      await vi.waitFor(() => expect(close).toHaveBeenCalled());
+      expect(wordsOf(events)).toBe(SLIPPED);
+      expect(events.filter((event) => event.type === 'error')).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+      expect(log.execute).toHaveBeenCalledTimes(1);
+      expect(log.execute.mock.calls[0][0]).toMatchObject({ reply: SLIPPED });
+    });
   });
 });
 

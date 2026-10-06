@@ -24,9 +24,10 @@ Three commands run the demo's tests from the repo root, and Maison's own suites 
 - "How do I care for the leather?" is answered from Maison's product knowledge
 - "Can I pay in bitcoin?" shows the hand-off note, with Strapi's reference only when Strapi recorded the question
 
-**Claude** runs with `LIVE_MODEL=claude npm run test:live`, with the key the app uses from `liff/.env`: `ANTHROPIC_API_KEY`, or `AI_GATEWAY_API_KEY`. It is skipped without one, and only checks that a key is set, never printing it. Each run calls Claude, which costs money. It checks the visit picker's two cases:
+**Claude** runs with `LIVE_MODEL=claude npm run test:live`, with the key the app uses from `liff/.env`: `ANTHROPIC_API_KEY`, or `AI_GATEWAY_API_KEY`. It is skipped without one, and only checks that a key is set, never printing it. Each run calls Claude, which costs money. It checks the visit picker's three cases:
 - "Can we schedule one?", asked from the Weekender 50's page, shows one picker for that piece, with no boutique, day or time filled in, no call to `resolve_date`, and a reply that says no visit is confirmed or requested
 - the demo's first suggestion ends in the same picker as on the local model
+- Paul's production conversation of 3 October, then "I would like to book a visit to see cabin case", ends in a picker for the Cabin Case 55, and the reply doesn't say the visit is requested. The "What do you have" reply goes back as the page sends it, with its `search_products` call, so the piece is known from an earlier turn. The picker may come from the model's own call or from the safety net's extra pass, but Claude rarely slips, so this case mostly checks the model's own call. The unit tests check the extra pass
 
 **What it leaves in the demo database:** each turn is logged as an inquiry, and the bitcoin test leaves a question for staff open until you reset or answer it. Strapi allows a customer five questions open or taken: past that, nothing is recorded, and the test still passes, on the plain note. Reset between rehearsals.
 
