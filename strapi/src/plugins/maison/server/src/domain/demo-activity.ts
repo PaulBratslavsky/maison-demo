@@ -1,3 +1,4 @@
+import seed from '../../seed/activity.json';
 import type { AnalysisStatus, CreatedVia, InquiryKind, InquiryQueue, Locale, QuestionReason, SentimentLabel } from '../constants';
 import { checkOpenAt, hoursForDate, toMinutes, zonedParts, type OpeningHoursEntry } from './hours';
 import { sentimentLabelOf } from './inquiry-criteria';
@@ -5,8 +6,8 @@ import { queueFor } from './inquiry-queue';
 import { zonedDayRange } from './time';
 
 /*
- * The rules behind Load demo activity, as pure functions. What it adds is data, in server/seed/activity.json, typed by
- * ActivitySeed below.
+ * The rules behind Load demo activity, as pure functions, and who its made-up customers are. What it adds is data, in
+ * server/seed/activity.json, typed by ActivitySeed below.
  */
 
 /** A made-up customer of the demo: a fixed, clearly fake LINE subject, and the display name staff see. */
@@ -15,6 +16,12 @@ export interface SeedCustomer {
   subject: string;
   name: string;
 }
+
+/**
+ * An item marked `"owner": "you"` goes to the presenter's own LINE account when the plugin's demoLineUserId is set, in
+ * place of its made-up customer.
+ */
+export type SeedOwner = 'you';
 
 /** A visit request: when, as days ahead and a Tokyo time, and the pieces it wants, before the boutique's stock is read. */
 export interface SeedAppointment {
@@ -28,6 +35,7 @@ export interface SeedAppointment {
   note: string | null;
   confirmed: boolean;
   hoursAgo: number;
+  owner?: SeedOwner;
 }
 
 /** Labels as the model gives them. The sentiment label, the queue and the rest follow from them (inquiryLabels). */
@@ -53,6 +61,7 @@ export interface SeedQuestion {
   answeredHoursAgo?: number;
   hoursAgo: number;
   handOff: { reply: string; labels: SeedLabels };
+  owner?: SeedOwner;
 }
 
 /** A concierge turn that handed nothing off. `labels` is null for one the labelling sweep should label. */
@@ -65,6 +74,7 @@ export interface SeedInquiry {
   knowledgeFound: boolean;
   hoursAgo: number;
   labels: SeedLabels | null;
+  owner?: SeedOwner;
 }
 
 export interface ActivitySeed {
@@ -211,3 +221,56 @@ export const demoActivityLoaded = ({ appointments, questions, inquiries }: DemoA
 
 /** `hours` hours before `now`. */
 export const hoursBefore = (now: Date, hours: number): Date => new Date(now.getTime() - hours * HOUR_MS);
+
+/** The subjects of Load demo activity's five made-up customers, from activity.json. */
+const DEMO_SUBJECTS: ReadonlySet<string> = new Set((seed as ActivitySeed).customers.map((customer) => customer.subject));
+
+/**
+ * Whether `subject` is one of Load demo activity's made-up customers (activity.json's `customers`). Their LINE user IDs
+ * are made up, so LINE refuses every message to them: Strapi sends them nothing, and records the outcome `demo`.
+ */
+export const isDemoCustomer = (subject: unknown): boolean => typeof subject === 'string' && DEMO_SUBJECTS.has(subject);
+
+/** Who gets the items marked `"owner": "you"`. */
+export interface ActivityOwners {
+  /** The presenter's own LINE account as a subject (`line:U…`), from demoLineUserId, or null when that isn't set. */
+  you: string | null;
+  /** False when that account has as many open requests as a customer may have: its request then stays with the made-up customer. */
+  youCanRequest: boolean;
+}
+
+/** A seed item, and who it is for: `subject`, and whether that is the presenter's own account. */
+export interface Assigned<T> {
+  item: T;
+  subject: string;
+  yours: boolean;
+}
+
+export interface AssignedActivity {
+  appointments: Array<Assigned<SeedAppointment>>;
+  questions: Array<Assigned<SeedQuestion>>;
+  inquiries: Array<Assigned<SeedInquiry>>;
+}
+
+/**
+ * Who each item of the seed is for, in the seed's order. An item marked `"owner": "you"` is the presenter's when
+ * `owners.you` is set (and, for a request, when `owners.youCanRequest`). Every other item is its made-up customer's.
+ * Throws for an item whose customer the seed doesn't name.
+ */
+export const assignActivity = (activity: ActivitySeed, { you, youCanRequest }: ActivityOwners): AssignedActivity => {
+  const subjectOf = (key: string): string => {
+    const customer = activity.customers.find((candidate) => candidate.key === key);
+    if (!customer) throw new Error(`activity.json names no customer "${key}".`);
+    return customer.subject;
+  };
+  const assign = <T extends { customer: string; owner?: SeedOwner }>(items: T[], youMay: boolean): Array<Assigned<T>> =>
+    items.map((item) => {
+      const yours = you !== null && youMay && item.owner === 'you';
+      return { item, subject: yours ? (you as string) : subjectOf(item.customer), yours };
+    });
+  return {
+    appointments: assign(activity.appointments, youCanRequest),
+    questions: assign(activity.questions, true),
+    inquiries: assign(activity.inquiries, true),
+  };
+};

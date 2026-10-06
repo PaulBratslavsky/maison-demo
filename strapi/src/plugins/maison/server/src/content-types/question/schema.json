@@ -24,7 +24,7 @@
     "answeredAt": { "type": "datetime" },
     "answer": { "type": "text", "maxLength": 2000 },
     "knowledgeDocumentId": { "type": "string" },
-    "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed"] },
+    "lineOutcome": { "type": "enumeration", "enum": ["sent", "failed", "demo"] },
     "lineDetail": { "type": "text", "maxLength": 500 }
   }
 }

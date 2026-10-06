@@ -2,12 +2,17 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Core } from '@strapi/strapi';
 
+import { errors } from '@strapi/utils';
+
 import content from '../../seed/content.json';
 import knowledge from '../../seed/knowledge.json';
 import { UID } from '../constants';
-import { englishData, japaneseToAdd, type SeedKnowledgeEntry } from '../domain/knowledge-seed';
-import type { ServiceResult } from '../domain/service-result';
-import { loadDemoActivity, type ActivityResult } from './demo-activity';
+import { mapConcurrently } from '../domain/concurrency';
+import { englishData, japaneseToAdd, type KnowledgeVersion, type SeedKnowledgeEntry } from '../domain/knowledge-seed';
+import { failure, type ServiceResult } from '../domain/service-result';
+import { asSentence } from '../domain/text';
+import { inBackground } from './background';
+import { loadDemoActivity, startDemoActivity, type ActivityResult, type ActivityStart } from './demo-activity';
 
 type Localized = { ja: string; en: string };
 const paragraph = (text: string) => [{ type: 'paragraph', children: [{ type: 'text', text }] }];
@@ -17,6 +22,20 @@ const RESET_READ = 5000;
 
 /** The most documents a read for the seeded product knowledge answers: many more than its 16 entries could match. */
 const KNOWLEDGE_READ = 1000;
+
+/**
+ * How many Japanese versions are written at once. Each is an update and then a publish, in turn. Four at a time cuts
+ * the wait on a remote database to about a quarter, and stays well inside its connection pool.
+ */
+const JAPANESE_AT_ONCE = 4;
+
+const CATALOG_ALREADY_LOADING = 'The demo catalog is still loading from the last press.';
+
+/**
+ * True from a press of Load demo catalog until the load it started has ended, whether it finished or failed.
+ * Module-level, so every press in this Strapi process sees it.
+ */
+let catalogLoading = false;
 
 /** At runtime this file is bundled into dist/server/index.js, so the package root is two levels up. */
 const seedDir = () => path.resolve(__dirname, '..', '..', 'server', 'seed');
@@ -54,6 +73,32 @@ export interface SeedResult {
 /** The seeded product knowledge, in English with each entry's Japanese version. */
 const seedKnowledge: SeedKnowledgeEntry[] = knowledge.entries;
 
+/** What a press answers when it starts a load: what it will add, in the background. */
+export type CatalogCounts = Omit<SeedResult, 'created'>;
+
+/**
+ * What a press of Load demo catalog did: started the load in the background, with what it will add and `done`, which
+ * settles when it has ended, or found everything there, with `result`.
+ */
+export type CatalogStart = { started: true; counts: CatalogCounts; done: Promise<SeedResult> } | { started: false; result: SeedResult };
+
+/** A Japanese version to add: the English document, and the entry's Japanese fields. */
+type JapaneseVersion = { documentId: string; data: KnowledgeVersion };
+
+/**
+ * What a press of Load demo catalog will write, read before anything is: whether the catalog and the English product
+ * knowledge are missing, and the Japanese versions to add to the English entries there are now. When the English
+ * entries are missing, the Japanese versions are worked out once they've been added.
+ */
+interface CatalogPlan {
+  catalog: boolean;
+  english: boolean;
+  japanese: JapaneseVersion[];
+}
+
+const catalogStoppedPartway = (error: unknown): string =>
+  `Loading the demo catalog stopped partway: ${asSentence(String((error as Error)?.message ?? error))} Press Load demo catalog again: it adds only what is missing.`;
+
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const uploadImage = async (fileName: string, alternativeText: string): Promise<number> => {
     const filepath = path.join(seedDir(), 'images', fileName);
@@ -82,13 +127,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
   const pick = (value: Localized, locale: 'ja' | 'en') => value[locale];
 
+  /** The demo catalog: its boutiques, collections, products and stock, one after another. The plan runs it only when the catalog isn't there. */
   const loadCatalog = async (): Promise<Omit<SeedResult, 'knowledge' | 'knowledgeJa'>> => {
-    const existing = await strapi.documents(UID.collection).findFirst({
-      locale: 'ja',
-      filters: { slug: { $eq: content.collections[0].slug } },
-    });
-    if (existing) return { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
-
     for (const b of content.boutiques) {
       const image = await uploadImage(b.image, b.name.en);
       const version = (locale: 'ja' | 'en') => ({
@@ -135,13 +175,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     };
   };
 
+  /** Whether the demo catalog is there: its first collection, in Japanese. */
+  const catalogThere = async (): Promise<boolean> =>
+    Boolean(await strapi.documents(UID.collection).findFirst({ locale: 'ja', filters: { slug: { $eq: content.collections[0].slug } } }));
+
   /**
-   * Maison's product knowledge in English: one published en document per entry. It loads when there's no en entry yet,
-   * whether or not the catalog was there before, so a Strapi that loaded the catalog earlier gets it too. Returns how
-   * many it added.
+   * Maison's product knowledge in English: one published en document per entry, one after another. The plan adds it
+   * when there's no en entry yet, whether or not the catalog was there before, so a Strapi that loaded the catalog
+   * earlier gets it too. Returns how many it added.
    */
   const loadEnglishKnowledge = async (): Promise<number> => {
-    if ((await strapi.documents(UID.knowledge).count({ locale: 'en' })) > 0) return 0;
     for (const entry of seedKnowledge) {
       const { documentId } = await strapi.documents(UID.knowledge).create({ locale: 'en', data: englishData(entry) });
       await strapi.documents(UID.knowledge).publish({ documentId, locale: 'en' });
@@ -150,22 +193,17 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   /**
-   * The Japanese version of each seeded entry, on the English document with the entry's title, published in ja: only
-   * where that document has none yet (japaneseToAdd has the rules). Returns how many it added.
-   *
-   * In Strapi 5's Document Service, update() with a locale the document doesn't have yet creates that locale's version,
-   * with the fields every locale shares copied from an existing one (@strapi/core's document-service repository, and
-   * docs.strapi.io's REST API locale page: "Create a new, or update an existing, locale version"). publish() with that
-   * locale publishes only that version.
+   * The Japanese version of each seeded entry to add, on the English document with the entry's title: only where that
+   * document has none yet (japaneseToAdd has the rules). It only reads.
    */
-  const loadJapaneseKnowledge = async (): Promise<number> => {
+  const japaneseVersionsToAdd = async (): Promise<JapaneseVersion[]> => {
     const english = (await strapi.documents(UID.knowledge).findMany({
       locale: 'en',
       filters: { title: { $in: seedKnowledge.map((entry) => entry.title) } },
       fields: ['documentId', 'title'],
       limit: KNOWLEDGE_READ,
     })) as Array<{ documentId: string; title?: string | null }>;
-    if (english.length === 0) return 0;
+    if (english.length === 0) return [];
     const documentIds = english.map(({ documentId }) => documentId);
     const japanese = (await strapi.documents(UID.knowledge).findMany({
       locale: 'ja',
@@ -179,18 +217,107 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       limit: KNOWLEDGE_READ,
     })) as Array<{ knowledgeDocumentId?: string | null }>;
 
-    const toAdd = japaneseToAdd(seedKnowledge, {
+    return japaneseToAdd(seedKnowledge, {
       english: english.map(({ documentId, title }) => ({ documentId, title: title ?? '' })),
       withJapanese: japanese.map(({ documentId }) => documentId),
       answers: answers.map(({ knowledgeDocumentId }) => knowledgeDocumentId).filter((id): id is string => Boolean(id)),
     });
-    for (const { documentId, data } of toAdd) {
+  };
+
+  /**
+   * Adds the Japanese versions, JAPANESE_AT_ONCE at a time, each published in ja right after it is written. Returns how
+   * many it added.
+   *
+   * In Strapi 5's Document Service, update() with a locale the document doesn't have yet creates that locale's version,
+   * with the fields every locale shares copied from an existing one (@strapi/core's document-service repository, and
+   * docs.strapi.io's REST API locale page: "Create a new, or update an existing, locale version"). publish() with that
+   * locale publishes only that version.
+   */
+  const addJapaneseVersions = async (versions: JapaneseVersion[]): Promise<number> => {
+    await mapConcurrently(versions, JAPANESE_AT_ONCE, async ({ documentId, data }) => {
       // The plugin has no generated types for its content types, so update()'s types don't know these fields: a plain record.
       const version: Record<string, string> = { ...data };
       await strapi.documents(UID.knowledge).update({ documentId, locale: 'ja', data: version });
       await strapi.documents(UID.knowledge).publish({ documentId, locale: 'ja' });
+    });
+    return versions.length;
+  };
+
+  /** What a press of Load demo catalog will write (CatalogPlan). It only reads, after it adds a missing ja or en locale. */
+  const planCatalog = async (): Promise<CatalogPlan> => {
+    await ensureLocales();
+    const [catalog, englishCount] = await Promise.all([catalogThere(), strapi.documents(UID.knowledge).count({ locale: 'en' })]);
+    const english = englishCount === 0;
+    return { catalog: !catalog, english, japanese: english ? [] : await japaneseVersionsToAdd() };
+  };
+
+  /** What a plan will add, as a press answers it. With the English entries missing, every one of them gets its Japanese version. */
+  const countsOf = (plan: CatalogPlan): CatalogCounts => {
+    const stockLevels = Object.values(content.stock).reduce((total, perBoutique) => total + Object.keys(perBoutique).length, 0);
+    return {
+      collections: plan.catalog ? content.collections.length : 0,
+      products: plan.catalog ? content.products.length : 0,
+      boutiques: plan.catalog ? content.boutiques.length : 0,
+      stockLevels: plan.catalog ? stockLevels : 0,
+      knowledge: plan.english ? seedKnowledge.length : 0,
+      knowledgeJa: plan.english ? seedKnowledge.length : plan.japanese.length,
+    };
+  };
+
+  /** The writes of a press, in turn: the catalog, the English product knowledge, then the Japanese versions. */
+  const writeCatalog = async (plan: CatalogPlan): Promise<SeedResult> => {
+    const catalog = plan.catalog ? await loadCatalog() : { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
+    const englishKnowledge = plan.english ? await loadEnglishKnowledge() : 0;
+    // New English entries have no Japanese version yet: those to add are known once they are written.
+    const japanese = plan.english ? await japaneseVersionsToAdd() : plan.japanese;
+    return { ...catalog, knowledge: englishKnowledge, knowledgeJa: await addJapaneseVersions(japanese) };
+  };
+
+  /** What the log says once a load of the catalog has finished. */
+  const catalogLoadedLine = (result: SeedResult): string =>
+    `[maison] Loaded the demo catalog: ${result.products} products, ${result.collections} collections, ${result.boutiques} boutiques, ${result.stockLevels} stock levels, ${result.knowledge} product knowledge entries in English and ${result.knowledgeJa} in Japanese.`;
+
+  /**
+   * A press of Load demo catalog. It first reads what is missing (planCatalog), and answers at once with `started: false`
+   * and nothing added when everything is there. Otherwise it starts the writes in the background and answers at once
+   * with what it will add. A failure there is logged as an error, and never escapes. A press while a load is running,
+   * planning included, is `already_loading`, and starts nothing.
+   */
+  const startDemoCatalog = async (): Promise<ServiceResult<CatalogStart>> => {
+    if (catalogLoading) {
+      return failure('already_loading', CATALOG_ALREADY_LOADING, 'Wait for it to finish, then press Load demo catalog again to check it is all there.');
     }
-    return toAdd.length;
+    // Set before anything is awaited, so a second press in the same moment finds it set.
+    catalogLoading = true;
+    let handedOver = false;
+    try {
+      const plan = await planCatalog();
+      const counts = countsOf(plan);
+      if (!plan.catalog && !plan.english && plan.japanese.length === 0) {
+        return { ok: true, value: { started: false, result: { created: false, ...counts } } };
+      }
+      const done = inBackground(
+        async () => {
+          try {
+            return await writeCatalog(plan);
+          } catch (error) {
+            throw new errors.ApplicationError(catalogStoppedPartway(error));
+          }
+        },
+        {
+          release: () => {
+            catalogLoading = false;
+          },
+          finished: (result) => strapi.log.info(catalogLoadedLine(result)),
+          failed: (error) => strapi.log.error(`[maison] ${error instanceof errors.ApplicationError ? error.message : catalogStoppedPartway(error)}`),
+        }
+      );
+      handedOver = true;
+      return { ok: true, value: { started: true, counts, done } };
+    } finally {
+      // Nothing was started: the next press may plan afresh. Once the writes have started, they clear it when they end.
+      if (!handedOver) catalogLoading = false;
+    }
   };
 
   /**
@@ -212,25 +339,33 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     }
   };
 
-  /** The Load demo activity under way, or the last one. Each waits for the one before it, so two presses never both add it. */
-  let loadingActivity: Promise<unknown> = Promise.resolve();
-
   return {
+    /** The route's Load demo catalog: what is there is answered at once, and anything missing is added in the background. */
+    startDemoCatalog,
+
+    /**
+     * Load demo catalog, waiting for it to end: the catalog it created (all zeros when it was there already), and the
+     * product knowledge it added. A press while a load is running throws, and a failure partway rejects. Tests and the
+     * integration suites use it; the route uses startDemoCatalog.
+     */
     async loadDemoCatalog(): Promise<SeedResult> {
-      await ensureLocales();
-      const catalog = await loadCatalog();
-      const englishKnowledge = await loadEnglishKnowledge();
-      return { ...catalog, knowledge: englishKnowledge, knowledgeJa: await loadJapaneseKnowledge() };
+      const started = await startDemoCatalog();
+      if (started.ok === false) throw new errors.ApplicationError(started.message);
+      const { value } = started;
+      return value.started === false ? value.result : value.done;
     },
 
     /**
-     * Load demo activity (demo-activity.ts): five made-up customers' requests, questions and inquiries, once. A press while
-     * one is loading waits for it, and then finds it there. `now` is only for tests. It defaults to the current time.
+     * The route's Load demo activity (demo-activity.ts): five made-up customers' requests, questions and inquiries, once,
+     * written in the background after an answer at once. `now` is only for tests. It defaults to the current time.
      */
+    startDemoActivity(now?: Date): Promise<ServiceResult<ActivityStart>> {
+      return startDemoActivity(strapi, now);
+    },
+
+    /** Load demo activity, waiting for it to end (demo-activity.ts). `now` is only for tests. */
     loadDemoActivity(now?: Date): Promise<ServiceResult<ActivityResult>> {
-      const loading = loadingActivity.then(() => loadDemoActivity(strapi, now));
-      loadingActivity = loading.catch(() => undefined);
-      return loading;
+      return loadDemoActivity(strapi, now);
     },
 
     /**

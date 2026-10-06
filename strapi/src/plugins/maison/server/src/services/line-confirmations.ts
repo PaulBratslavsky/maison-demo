@@ -2,6 +2,8 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { PLUGIN_ID, UID } from '../constants';
+import { isDemoCustomer } from '../domain/demo-activity';
+import { DEMO_DETAIL } from '../domain/line-outcome';
 import { pushMessages } from '../domain/line-push';
 import { toZonedIso } from '../domain/time';
 import { CONFIRMATION_POPULATE, confirmationFor, inVisitLanguage, type Outcome } from './confirmations';
@@ -19,9 +21,12 @@ type Doc = Record<string, any>;
  * - `past`: the visit is over, so nothing was sent, as pending_confirmations lists none.
  * - `not_found`: no appointment has this reference.
  * - `not_configured`: there's no channel access token, or no liffUrl for the message's link. Nothing was sent or recorded.
+ * - `demo`: the visit is one of Load demo activity's made-up customers, whose LINE user ID is made up. Nothing was
+ *   sent, and a `demo` notification records that, with or without a token.
  */
 export type SendStatus =
   | 'sent'
+  | 'demo'
   | 'sent_unrecorded'
   | 'failed'
   | 'already_sent'
@@ -83,6 +88,25 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     return { reference, status, message };
   };
 
+  /**
+   * A made-up demo customer's visit: no LINE call, since LINE refuses a user ID nobody has, and a `demo` notification
+   * that says so. It never throws: a record that fails is logged, and the answer is still `demo`.
+   */
+  const recordDemo = async (reference: string): Promise<SendOutcome> => {
+    const message = `Demo customer: no LINE confirmation for ${reference}.`;
+    try {
+      const recorded = await strapi
+        .plugin(PLUGIN_ID)
+        .service('confirmations')
+        .record({ reference, status: 'demo', detail: DEMO_DETAIL, recordedBy: 'strapi' });
+      if (!recorded.ok) strapi.log.error(`[maison] The demo outcome for ${reference} couldn't be recorded: ${recorded.message}`);
+    } catch (error) {
+      strapi.log.error(`[maison] The demo outcome for ${reference} couldn't be recorded: ${String((error as Error | undefined)?.message ?? error)}`);
+    }
+    strapi.log.info(`[maison] ${message}`);
+    return { reference, status: 'demo', message };
+  };
+
   /** One confirmation, sent and recorded. sendConfirmation makes sure only one runs per reference. */
   const send = async (reference: string, now: Date): Promise<SendOutcome> => {
     const sent = await strapi.documents(UID.notification).findFirst({
@@ -116,6 +140,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         message: `The visit for ${reference} was at ${toZonedIso(when, timezone)}, which has passed, so it gets no confirmation.`,
       };
     }
+    if (isDemoCustomer(published.customer)) return recordDemo(reference);
     if (!token) return notConfigured(reference, NO_TOKEN);
     if (!liffUrl) return notConfigured(reference, NO_LIFF_URL);
 
@@ -137,7 +162,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * Sends the LINE confirmation of a confirmed visit, the one pending_confirmations lists for it, and records the
      * outcome. A visit with a `sent` notification gets nothing more: that is the only send-once rule. Calls for a
      * visit that is being sent share that send, so this process never pushes one visit twice at once. Publishing an
-     * appointment calls this, whichever way it was published, and so does the board's Send again.
+     * appointment calls this, whichever way it was published, and so does the board's Send again. A made-up demo
+     * customer's visit gets no push: it records `demo` instead.
      * `now` is only for tests. It defaults to the current time.
      */
     sendConfirmation(reference: string, now: Date = new Date()): Promise<SendOutcome> {

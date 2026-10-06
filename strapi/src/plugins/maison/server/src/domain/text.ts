@@ -54,3 +54,6 @@ export function fitUnits(text: string, max: number): string {
 export function fitLines(text: string, max: number): string {
   return cutToUnits(text.trim(), max);
 }
+
+/** `text` as a sentence: trimmed, ending in a full stop unless it ends in one already, or another mark. */
+export const asSentence = (text: string): string => (/[.!?。]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);

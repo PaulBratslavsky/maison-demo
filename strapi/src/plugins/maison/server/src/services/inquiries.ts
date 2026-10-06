@@ -14,9 +14,10 @@ import {
   type QuestionStatus,
   type SentimentLabel,
 } from '../constants';
+import { isDemoCustomer } from '../domain/demo-activity';
 import { queueFor } from '../domain/inquiry-queue';
 import { inquiryReplyText } from '../domain/inquiry-replies';
-import { NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
+import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
 import { getMonthlyUsage, pushMessages, type MonthlyUsage } from '../domain/line-push';
 import { failure, type ServiceResult } from '../domain/service-result';
 import { lineUserIdOf, maskSubject } from '../domain/subject';
@@ -68,7 +69,8 @@ export interface StaffInquiryView {
   replyText: string | null;
   repliedAt: string | null;
   repliedBy: string | null;
-  line: { outcome: 'sent' | 'failed'; detail: string | null } | null;
+  /** How the last LINE message went: `demo` for a made-up demo customer, who gets none. */
+  line: { outcome: 'sent' | 'failed' | 'demo'; detail: string | null } | null;
 }
 
 export interface InquiryFilters {
@@ -94,12 +96,22 @@ export interface InquiryQuota extends MonthlyUsage {
 /**
  * What became of Reply on LINE:
  * - `sent`: LINE took the message, and the inquiry says so. With `warning`, recording it failed, and `message` says so.
+ * - `demo`: the customer is one of Load demo activity's made-up customers. Nothing went to LINE, the inquiry is replied
+ *   all the same, and records `demo`.
  * - `failed`: LINE refused it or didn't answer. The inquiry records why, and stays open.
  * - `not_found`, `already_closed`, `already_replied`: nothing was sent.
  * - `use_question`: the inquiry is a hand-off, which is answered under Questions. Nothing was sent.
  * - `not_configured`: there's no channel access token. Nothing was sent or recorded.
  */
-export type InquiryReplyStatus = 'sent' | 'not_found' | 'already_closed' | 'already_replied' | 'use_question' | 'failed' | 'not_configured';
+export type InquiryReplyStatus =
+  | 'sent'
+  | 'demo'
+  | 'not_found'
+  | 'already_closed'
+  | 'already_replied'
+  | 'use_question'
+  | 'failed'
+  | 'not_configured';
 
 export interface InquiryReplyOutcome {
   documentId: string;
@@ -211,9 +223,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   /**
    * The inquiry a reply is for, with the token to send it with, or the outcome that says why nothing can be sent: no
    * such inquiry, a closed or a replied one, a hand-off (answered under Questions), or no token. The inquiry's own state
-   * comes before the token: it is what staff can see on the row, and a refusal never depends on the setup.
+   * comes before the token: it is what staff can see on the row, and a refusal never depends on the setup. A made-up
+   * demo customer's inquiry needs no token, since nothing goes to LINE: `token` is then whatever is set, or null.
    */
-  const readyToReply = async (documentId: string): Promise<{ row: Doc; token: string } | { refusal: InquiryReplyOutcome }> => {
+  const readyToReply = async (documentId: string): Promise<{ row: Doc; token: string | null } | { refusal: InquiryReplyOutcome }> => {
     const refuse = (status: InquiryReplyStatus, message: string) => ({ refusal: { documentId, status, message } });
     const row = await findRow(documentId);
     if (!row) return refuse('not_found', noInquiry(documentId));
@@ -221,6 +234,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     if (row.status === 'replied') return refuse('already_replied', ALREADY_REPLIED);
     if (row.questionReference) return refuse('use_question', `Answer it under Questions (${row.questionReference}).`);
     const { lineChannelAccessToken: token } = getConfig(strapi);
+    if (isDemoCustomer(row.customer)) return { row, token };
     if (!token) {
       strapi.log.warn(`[maison] ${NO_TOKEN}`);
       return refuse('not_configured', NO_TOKEN);
@@ -251,7 +265,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
    * LINE took the reply, but the inquiry couldn't be updated, so the row still shows it as unsent and staff might send it
    * again. The outcome is `sent`: the customer has it.
    */
-  const sentUnrecorded = (documentId: string, error: unknown, token: string): InquiryReplyOutcome => {
+  const sentUnrecorded = (documentId: string, error: unknown, token: string | null): InquiryReplyOutcome => {
     const message = `Sent the reply on LINE, but recording it failed (${reasonOf(error, token)}). Don't send it again.`;
     strapi.log.error(`[maison] Inquiry ${documentId}: ${message}`);
     return { documentId, status: 'sent', message, warning: true };
@@ -386,7 +400,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
      * and never sent: the reply goes out as Maison's, and a null name is recorded as Maison. Only an open inquiry with no
      * question: a closed or a replied one is refused, and a hand-off is answered under Questions (`use_question`), so
      * nothing is sent twice or around the question's flow. A message LINE refuses is recorded as failed, with LINE's
-     * answer, and the inquiry stays open. `now` is only for tests. It defaults to the current time.
+     * answer, and the inquiry stays open. A made-up demo customer gets no message: the inquiry is replied all the same, and
+     * records `demo`. `now` is only for tests. It defaults to the current time.
      */
     async reply(documentId: string, text: string, staffName: string | null, now: Date = new Date()): Promise<InquiryReplyOutcome> {
       const ready = await readyToReply(documentId);
@@ -394,7 +409,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const { row, token } = ready;
       const replyText = text.trim();
 
-      const failed = await deliver(row, inquiryReplyText({ language: row.language, message: row.message, text: replyText }), token);
+      // A made-up demo customer gets no LINE message: the inquiry is replied all the same, and records `demo`.
+      if (isDemoCustomer(row.customer)) {
+        await updateInquiry(documentId, {
+          status: 'replied',
+          replyText,
+          repliedAt: now,
+          repliedBy: staffName ?? 'Maison',
+          lineOutcome: 'demo',
+          lineDetail: DEMO_DETAIL,
+        });
+        const message = 'Marked it replied. Demo customer: no LINE message.';
+        strapi.log.info(`[maison] Inquiry ${documentId}: ${message}`);
+        return { documentId, status: 'demo', message };
+      }
+
+      const failed = await deliver(row, inquiryReplyText({ language: row.language, message: row.message, text: replyText }), token as string);
       if (failed) return failed;
 
       try {
@@ -426,12 +456,17 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * The question was answered on LINE: every open inquiry that came from its hand-off is replied, with the answer.
-     * Called by `questions.answer`, which never lets a failure here change its outcome.
+     * `lineOutcome` is `demo` when the question was a made-up demo customer's, who got no LINE message. Called by
+     * `questions.answer`, which never lets a failure here change its outcome.
      */
-    async markQuestionReplied(reference: string, reply: { replyText: string; repliedBy: string; at: Date }): Promise<void> {
+    async markQuestionReplied(
+      reference: string,
+      reply: { replyText: string; repliedBy: string; at: Date; lineOutcome?: 'sent' | 'demo' }
+    ): Promise<void> {
       const rows = (await strapi.documents(UID.inquiry).findMany({
         filters: { questionReference: { $eq: reference }, status: { $eq: 'open' } },
       })) as Doc[];
+      const line = reply.lineOutcome === 'demo' ? { lineOutcome: 'demo', lineDetail: DEMO_DETAIL } : { lineOutcome: 'sent' };
       await Promise.all(
         rows.map((row) =>
           updateInquiry(row.documentId, {
@@ -439,7 +474,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
             replyText: reply.replyText,
             repliedAt: reply.at,
             repliedBy: reply.repliedBy,
-            lineOutcome: 'sent',
+            ...line,
           })
         )
       );

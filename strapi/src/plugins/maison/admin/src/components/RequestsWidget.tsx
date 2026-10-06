@@ -1,6 +1,7 @@
 import { Badge, Box, Flex, Table, Tbody, Td, Th, Thead, Tr, Typography } from '@strapi/design-system';
 import { Widget } from '@strapi/strapi/admin';
 
+import { lineColumn } from '../board';
 import { fullTime, timeAgo, visitTime } from '../time';
 import { useRequestsSummary } from '../useRequestsSummary';
 import { RequestCounts } from './RequestCounts';
@@ -95,8 +96,8 @@ const RequestsWidget = () => {
                   </Badge>
                 </Td>
                 <Td>
-                  <Badge size="S" variant={request.confirmationSent ? 'success' : 'neutral'}>
-                    {request.confirmationSent ? 'LINE sent' : 'not sent'}
+                  <Badge size="S" variant={lineColumn(request).variant}>
+                    {lineColumn(request).label}
                   </Badge>
                 </Td>
               </Tr>

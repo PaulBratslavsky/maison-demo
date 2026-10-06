@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { canSendAgain, canStillConfirm, confirmedNotice, sendAgainNotice, sentAfterConfirm } from '../../admin/src/board';
+import {
+  canSendAgain,
+  canStillConfirm,
+  confirmedNotice,
+  demoCustomerAfterConfirm,
+  lineColumn,
+  sendAgainNotice,
+  sentAfterConfirm,
+} from '../../admin/src/board';
 
 const NOW = Date.parse('2026-10-05T00:00:00Z');
 const AHEAD = '2026-10-10T14:00:00+09:00';
@@ -20,6 +28,7 @@ describe('Send again on the board', () => {
     ['a request staff have not confirmed', { status: 'requested' as const }],
     ['a visit whose confirmation went out', { confirmationSent: true }],
     ['a visit that is over, as Strapi sends no confirmation for it', { requestedFor: OVER }],
+    ["a demo customer's visit, as there is nothing to resend", { demoCustomer: true }],
   ])('hides on %s', (_label, overrides) => {
     expect(canSendAgain(row(overrides), NOW)).toBe(false);
   });
@@ -84,5 +93,43 @@ describe("Confirm's notice", () => {
     expect(sentAfterConfirm({}, rows, 'APT-4821')).toBe(true);
     expect(sentAfterConfirm(undefined, [], 'APT-4821')).toBeUndefined();
     expect(sentAfterConfirm({}, null, 'APT-4821')).toBeUndefined();
+  });
+});
+
+describe('the LINE column', () => {
+  it('says "LINE sent" in green once the confirmation went out', () => {
+    expect(lineColumn({ confirmationSent: true, demoCustomer: false })).toEqual({ label: 'LINE sent', variant: 'success' });
+  });
+
+  it('says "not sent", in grey, until it has', () => {
+    expect(lineColumn({ confirmationSent: false, demoCustomer: false })).toEqual({ label: 'not sent', variant: 'neutral' });
+  });
+
+  it("says \"demo customer\", in grey and never red, for a made-up customer's visit, which gets no LINE message", () => {
+    expect(lineColumn({ confirmationSent: false, demoCustomer: true })).toEqual({ label: 'demo customer', variant: 'neutral' });
+  });
+
+  it('treats a row that does not say as a real customer\'s', () => {
+    expect(lineColumn({ confirmationSent: false })).toEqual({ label: 'not sent', variant: 'neutral' });
+  });
+});
+
+describe("Confirm's notice for a demo customer", () => {
+  it('says plainly that no LINE message goes to a made-up customer, as an info notice, never a warning', () => {
+    expect(confirmedNotice('APT-4821', false, true)).toEqual({ type: 'info', message: 'Confirmed APT-4821. Demo customer: no LINE message.' });
+  });
+
+  it("reads whether it is a demo customer's visit from confirm's answer, and from the reloaded row when the answer doesn't say", () => {
+    const rows = [{ reference: 'APT-4821', confirmationSent: false, demoCustomer: true }];
+    expect(demoCustomerAfterConfirm({ appointment: { demoCustomer: false } }, rows, 'APT-4821')).toBe(false);
+    expect(demoCustomerAfterConfirm({ appointment: { demoCustomer: true } }, null, 'APT-4821')).toBe(true);
+    expect(demoCustomerAfterConfirm({}, rows, 'APT-4821')).toBe(true);
+    expect(demoCustomerAfterConfirm(undefined, [], 'APT-4821')).toBe(false);
+  });
+});
+
+describe("Send again's notice for a demo customer", () => {
+  it('says no LINE message goes to a made-up customer, as an info notice', () => {
+    expect(sendAgainNotice('APT-4821', 'demo')).toEqual({ type: 'info', message: 'Demo customer: no LINE confirmation for APT-4821.' });
   });
 });

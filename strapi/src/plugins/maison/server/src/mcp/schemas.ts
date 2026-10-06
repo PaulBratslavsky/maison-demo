@@ -159,6 +159,9 @@ export const staffAppointmentOutput = z.object({
     .enum(CREATED_VIA)
     .describe('"concierge" when the AI concierge made the request, "app" for the app screens, "web" for a website through the REST routes.'),
   confirmationSent: z.boolean().describe('Whether the LINE confirmation has been delivered.'),
+  demoCustomer: z
+    .boolean()
+    .describe("True for one of Load demo activity's made-up customers. Strapi sends them no LINE message, so their confirmation is never sent."),
   createdAt: z.string().describe('When the request was made, ISO 8601 with offset.'),
 });
 

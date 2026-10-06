@@ -150,3 +150,52 @@ describe('the AI settings', () => {
     }
   });
 });
+
+describe('the demo LINE account (demoLineUserId)', () => {
+  const USER_ID = `U${'0123456789abcdef'.repeat(2)}`;
+
+  it('is not set by default', () => {
+    expect(defaultConfig.demoLineUserId).toBeNull();
+    expect(getConfig(fakeStrapi({ config: {} })).demoLineUserId).toBeNull();
+  });
+
+  it('accepts a LINE user ID: U and 32 lowercase hex characters', () => {
+    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: USER_ID })).not.toThrow();
+    expect(getConfig(fakeStrapi({ config: { demoLineUserId: USER_ID } })).demoLineUserId).toBe(USER_ID);
+  });
+
+  it('treats empty and null (MAISON_DEMO_LINE_USER_ID= in .env) as not set, so Strapi still starts', () => {
+    for (const demoLineUserId of ['', null, undefined]) {
+      expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).not.toThrow();
+      expect(getConfig(fakeStrapi({ config: { demoLineUserId } })).demoLineUserId).toBeNull();
+    }
+  });
+
+  it.each([
+    ['a user ID in capitals', `U${'0123456789ABCDEF'.repeat(2)}`],
+    ['a user ID one character short', USER_ID.slice(0, -1)],
+    ['a user ID one character long', `${USER_ID}0`],
+    ['a user ID without its U', USER_ID.slice(1)],
+    ['a subject (line:U…), not a user ID', `line:${USER_ID}`],
+    ['a user ID with a space in it', `${USER_ID.slice(0, 10)} ${USER_ID.slice(11)}`],
+    ['a user ID with a line break after it', `${USER_ID}\n`],
+    ['a group ID (C…)', `C${'0123456789abcdef'.repeat(2)}`],
+    ['a number', 42],
+  ])('rejects %s, which stops the boot', (_label, demoLineUserId) => {
+    expect(() => validateConfig({ ...defaultConfig, demoLineUserId: demoLineUserId as never })).toThrow(
+      /config\.demoLineUserId must be a LINE user ID/
+    );
+  });
+
+  it('never repeats the value in an error', () => {
+    const secret = `U${'5ec7e7'.repeat(5)}zz`;
+    let message = '';
+    try {
+      validateConfig({ ...defaultConfig, demoLineUserId: secret });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/demoLineUserId/);
+    expect(message).not.toContain('5ec7e7');
+  });
+});

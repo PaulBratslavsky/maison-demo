@@ -2,13 +2,19 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { LOCALES, UID, type Locale } from '../constants';
+import { isDemoCustomer } from '../domain/demo-activity';
 import { buildConfirmationMessage, type FlexMessage } from '../domain/flex-message';
 import { failure, type ServiceResult } from '../domain/service-result';
 import { lineUserIdOf, parseSubject } from '../domain/subject';
 import { formatEnDateTime, formatJaDateTime, toZonedIso } from '../domain/time';
 
 type Doc = Record<string, any>;
-export type Outcome = 'sent' | 'failed';
+/**
+ * What a notification records: LINE took the confirmation (`sent`), refused it or couldn't be reached (`failed`), or
+ * the visit is a made-up demo customer's, who gets no LINE message (`demo`). Only Strapi records `demo`:
+ * record_confirmation takes `sent` and `failed`.
+ */
+export type Outcome = 'sent' | 'failed' | 'demo';
 /** Who recorded an outcome: Strapi itself, when it sent the confirmation, or the ops agent, through record_confirmation. */
 export type RecordedBy = 'strapi' | 'ops-agent';
 
@@ -174,7 +180,7 @@ const clip = (text: string) => {
 };
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
-  /** Per appointment reference: whether a `sent` notification exists, and how many `failed` ones. */
+  /** Per appointment reference: whether a `sent` or `demo` notification exists (nothing left to send), and how many `failed` ones. */
   const outcomes = async (references: string[]) => {
     const map = new Map<string, { sent: boolean; failed: number }>();
     if (references.length === 0) return map;
@@ -186,17 +192,21 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     for (const row of rows as Doc[]) {
       const reference = row.appointmentReference as string;
       const entry = map.get(reference) ?? { sent: false, failed: 0 };
-      if (row.outcome === 'sent') entry.sent = true;
-      else entry.failed += 1;
+      // A demo record leaves nothing to send, as a sent one does, and was never an attempt.
+      if (row.outcome === 'sent' || row.outcome === 'demo') entry.sent = true;
+      if (row.outcome === 'failed') entry.failed += 1;
       map.set(reference, entry);
     }
     return map;
   };
 
-  /** References of every appointment with a `sent` notification. Not capped: a cap would let sent ones be listed again. */
+  /**
+   * References of every appointment with nothing left to send: a `sent` notification, or a `demo` one. Not capped: a cap
+   * would let them be listed again.
+   */
   const sentReferences = async (): Promise<string[]> => {
     const rows = await strapi.documents(UID.notification).findMany({
-      filters: { outcome: { $eq: 'sent' } },
+      filters: { outcome: { $in: ['sent', 'demo'] } },
       fields: ['appointmentReference'],
     });
     return [...new Set((rows as Doc[]).map((row) => row.appointmentReference as string))];
@@ -208,7 +218,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   });
 
   return {
-    /** Upcoming published (staff-confirmed) appointments without a `sent` notification, soonest visit first. */
+    /**
+     * Upcoming published (staff-confirmed) appointments without a `sent` notification, soonest visit first. A made-up demo
+     * customer's visit is never pending: Strapi records `demo` for it, and there's nothing to send.
+     */
     async listPending(limit: number, now: Date = new Date()): Promise<ServiceResult<PendingConfirmation[]>> {
       const { liffUrl, timezone, houseName } = getConfig(strapi);
       if (!liffUrl) {
@@ -235,7 +248,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const pending: PendingConfirmation[] = [];
       // Each visit's message is in its language, with the names Strapi's sender uses too.
       for (const doc of await inVisitLanguage(strapi, published)) {
-        if (state.get(doc.reference)?.sent) continue; // recorded as sent since the query above
+        if (state.get(doc.reference)?.sent) continue; // recorded as sent (or demo) since the query above
+        if (isDemoCustomer(doc.customer)) continue; // a made-up customer gets no LINE message
         const confirmation = confirmationFor(doc, { liffUrl, timezone, houseName });
         if (!confirmation) {
           strapi.log.warn(`[maison] Appointment ${doc.reference} has no valid LINE customer, so it can't be confirmed over LINE.`);
@@ -258,8 +272,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     /**
-     * Appends a delivery outcome. A second `sent` for the same appointment returns the first one instead.
-     * `recordedBy` defaults to the ops agent, so record_confirmation, which never passes it, keeps writing 'ops-agent'.
+     * Appends a delivery outcome. A second `sent` for the same appointment returns the first one instead, and so does a
+     * second `demo`. `recordedBy` defaults to the ops agent, so record_confirmation, which never passes it, keeps writing
+     * 'ops-agent'.
      */
     async record(input: {
       reference: string;
@@ -286,9 +301,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           'Only published appointments get confirmations. Do not message the customer; call pending_confirmations for the ones to send.'
         );
       }
-      if (input.status === 'sent') {
+      if (input.status === 'sent' || input.status === 'demo') {
         const existing = (await strapi.documents(UID.notification).findFirst({
-          filters: { outcome: { $eq: 'sent' }, appointmentReference: { $eq: input.reference } },
+          filters: { outcome: { $eq: input.status }, appointmentReference: { $eq: input.reference } },
           sort: 'sentAt:asc',
         })) as Doc | null;
         if (existing) return { ok: true, value: toRecorded(input.reference, existing, true) };

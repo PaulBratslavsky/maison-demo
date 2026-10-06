@@ -1127,26 +1127,112 @@ describe('inquiries controller', () => {
 
 describe('demo controller: Load demo activity', () => {
   const ADDED = { created: true, customers: 5, appointments: 5, confirmed: 2, questions: 5, inquiries: 10 };
-  const controllerLoading = (loadDemoActivity: () => Promise<unknown>) => demoController({ strapi: fakeStrapi({ services: { seed: { loadDemoActivity } } }) });
+  const NOTHING = { created: false, customers: 0, appointments: 0, confirmed: 0, questions: 0, inquiries: 0 };
+  const controllerStarting = (startDemoActivity: () => Promise<unknown>) => demoController({ strapi: fakeStrapi({ services: { seed: { startDemoActivity } } }) });
+  const started = { ok: true, value: { started: true, counts: { appointments: 5, questions: 5, inquiries: 10 }, done: Promise.resolve(ADDED) } };
 
-  it('answers what the seed service added, or that it was there already', async () => {
+  it('answers 202 at once, with the counts it will add, when the writes go on in the background', async () => {
     const ctx = fakeCtx();
-    await controllerLoading(async () => ({ ok: true, value: ADDED })).activity(ctx);
-    expect(ctx.body).toEqual(ADDED);
+    await controllerStarting(async () => started).activity(ctx);
+    expect(ctx.status).toBe(202);
+    expect(ctx.body).toEqual({ started: true, appointments: 5, questions: 5, inquiries: 10 });
+    expectNoError(ctx);
+  });
+
+  it('answers 200 with the "already there" result when there is nothing to add', async () => {
+    const ctx = fakeCtx();
+    await controllerStarting(async () => ({ ok: true, value: { started: false, result: NOTHING } })).activity(ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(NOTHING);
     expectNoError(ctx);
   });
 
   it('loads at the real time: nothing in the request reaches the service', async () => {
-    const loadDemoActivity = vi.fn(async () => ({ ok: true, value: ADDED }));
-    await controllerLoading(loadDemoActivity).activity(fakeCtx({ query: { now: '2020-01-01T00:00:00Z' }, request: { body: { now: '2020-01-01' } } }));
-    expect(loadDemoActivity).toHaveBeenCalledWith();
+    const startDemoActivity = vi.fn(async () => started);
+    await controllerStarting(startDemoActivity).activity(fakeCtx({ query: { now: '2020-01-01T00:00:00Z' }, request: { body: { now: '2020-01-01' } } }));
+    expect(startDemoActivity).toHaveBeenCalledWith();
   });
 
   it("answers 404 with the service's words and hint when the demo catalog isn't loaded", async () => {
     const ctx = fakeCtx();
     const failure = { ok: false, code: 'not_found', message: 'Load demo catalog first.', hint: 'Press Load demo catalog.' };
-    await controllerLoading(async () => failure).activity(ctx);
+    await controllerStarting(async () => failure).activity(ctx);
     expect(ctx.status).toBe(404);
     expect(ctx.body).toEqual({ error: { message: 'Load demo catalog first.', details: { code: 'not_found', hint: 'Press Load demo catalog.' } } });
+  });
+
+  it('answers 409 already_loading while a load is still running, in the words the page shows', async () => {
+    const ctx = fakeCtx();
+    const failure = { ok: false, code: 'already_loading', message: 'Demo activity is still loading.', hint: 'Wait for it.' };
+    await controllerStarting(async () => failure).activity(ctx);
+    expect(ctx.status).toBe(409);
+    expect(ctx.body).toEqual({ error: { message: 'Demo activity is still loading.', details: { code: 'already_loading', hint: 'Wait for it.' } } });
+  });
+
+  it('answers 400 for any other failure', async () => {
+    const ctx = fakeCtx();
+    await controllerStarting(async () => ({ ok: false, code: 'boutique_closed', message: 'Closed.', hint: 'Check the hours.' })).activity(ctx);
+    expect(ctx.status).toBe(400);
+  });
+});
+
+describe('demo controller: Load demo catalog', () => {
+  const NOTHING = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
+  const COUNTS = { collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 16 };
+  const controllerStarting = (startDemoCatalog: () => Promise<unknown>) => demoController({ strapi: fakeStrapi({ services: { seed: { startDemoCatalog } } }) });
+
+  it('answers 202 at once, with what it will add, when the writes go on in the background', async () => {
+    const ctx = fakeCtx();
+    await controllerStarting(async () => ({ ok: true, value: { started: true, counts: COUNTS, done: Promise.resolve(NOTHING) } })).seed(ctx);
+    expect(ctx.status).toBe(202);
+    expect(ctx.body).toEqual({ started: true, ...COUNTS });
+    expectNoError(ctx);
+  });
+
+  it('answers 200 at once when the catalog and its product knowledge are all there', async () => {
+    const ctx = fakeCtx();
+    await controllerStarting(async () => ({ ok: true, value: { started: false, result: NOTHING } })).seed(ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(NOTHING);
+  });
+
+  it('answers 409 already_loading while a load is still running', async () => {
+    const ctx = fakeCtx();
+    const failure = { ok: false, code: 'already_loading', message: 'The demo catalog is still loading.', hint: 'Wait for it.' };
+    await controllerStarting(async () => failure).seed(ctx);
+    expect(ctx.status).toBe(409);
+    expect(ctx.body.error.details.code).toBe('already_loading');
+  });
+});
+
+describe('demo customers: the actions answer 200, as for a message LINE took', () => {
+  it("Send again answers 200 with the demo outcome", async () => {
+    const outcome = { reference: 'APT-4821', status: 'demo', message: 'Demo customer: no LINE confirmation for APT-4821.' };
+    const ctx = fakeCtx({ params: { reference: 'APT-4821' } });
+    await controllerSending(async () => outcome).notify(ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(outcome);
+    expectNoError(ctx);
+  });
+
+  it.each(['notify', 'answer'] as const)('questions %s answers 200 with the demo outcome', async (action) => {
+    const outcome = { reference: 'Q-4821', status: 'demo', message: 'Marked Q-4821 taken. Demo customer: no LINE message.' };
+    const service = vi.fn(async () => outcome);
+    const controller = questionsController({ strapi: fakeStrapi({ services: { questions: { notify: service, answer: service } } }) });
+    const ctx = fakeCtx({ params: { reference: 'Q-4821' }, request: { body: { text: 'Yes.', addToKnowledge: false } }, state: { user: { firstname: 'Jane' } } });
+    await controller[action](ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(outcome);
+    expectNoError(ctx);
+  });
+
+  it('inquiries reply answers 200 with the demo outcome', async () => {
+    const outcome = { documentId: 'inq4abc', status: 'demo', message: 'Marked it replied. Demo customer: no LINE message.' };
+    const controller = inquiriesController({ strapi: fakeStrapi({ services: { inquiries: { reply: vi.fn(async () => outcome) } } }) });
+    const ctx = fakeCtx({ params: { documentId: 'inq4abc' }, request: { body: { text: 'Thank you.' } }, state: { user: { firstname: 'Jane' } } });
+    await controller.reply(ctx);
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toEqual(outcome);
+    expectNoError(ctx);
   });
 });

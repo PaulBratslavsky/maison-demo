@@ -11,12 +11,12 @@ import {
   handOffText,
   kindLabel,
   labelNote,
-  lineFailure,
   sentimentText,
   statusLabel,
   type CloseReason,
   type StaffInquiry,
 } from '../inquiries';
+import { LINE_NOTE_COLORS, lineNote } from '../line-note';
 import { askedAt } from '../questions';
 import type { Acting, Action } from '../useInquiryActions';
 import { CLAMPED_TEXT_STYLE } from './clampedText';
@@ -48,7 +48,8 @@ export const InquiryRow = ({ inquiry, canReply, acting, onReply, onCloseInquiry,
   const busy = acting !== null;
   const isActing = (action: Action) => acting?.documentId === inquiry.documentId && acting.action === action;
   const note = labelNote(inquiry);
-  const failure = lineFailure(inquiry.line);
+  /** The last LINE message: a failure in red, in LINE's words, or a made-up demo customer, who gets none, in grey. */
+  const line = lineNote(inquiry.line);
 
   return (
     <Tr>
@@ -125,9 +126,9 @@ export const InquiryRow = ({ inquiry, canReply, acting, onReply, onCloseInquiry,
               {handOffText(inquiry.question)}
             </Typography>
           )}
-          {failure && (
-            <Typography variant="pi" textColor="danger600" {...WRAPPED}>
-              {failure}
+          {line && (
+            <Typography variant="pi" textColor={LINE_NOTE_COLORS[line.tone]} {...WRAPPED}>
+              {line.text}
             </Typography>
           )}
         </Flex>

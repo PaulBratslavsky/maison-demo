@@ -26,6 +26,12 @@ export interface MaisonConfig {
   aiApiKey: string | null;
   /** Where an openai-compatible server answers, e.g. http://127.0.0.1:11434/v1 for Ollama. Only that provider uses it. */
   aiBaseUrl: string | null;
+  /**
+   * The LINE user ID (U and 32 lowercase hex characters) of the presenter's own LINE account. When it's set, Load demo
+   * activity gives that account one waiting request, one open question and one open complaint, so confirming and
+   * replying on stage send real LINE messages to it. Never logged or shown in full.
+   */
+  demoLineUserId: string | null;
 }
 
 export const defaultConfig: MaisonConfig = {
@@ -41,6 +47,7 @@ export const defaultConfig: MaisonConfig = {
   aiModel: null,
   aiApiKey: null,
   aiBaseUrl: null,
+  demoLineUserId: null,
 };
 
 const fail = (message: string): never => {
@@ -54,6 +61,9 @@ const LINE_API_URL = /^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1):\d+(\/\S
 
 /** An http or https URL: the model server may be on this machine, or hosted. */
 const AI_BASE_URL = /^https?:\/\/\S+$/;
+
+/** A LINE user ID: U and 32 lowercase hex characters. */
+const LINE_USER_ID = /^U[0-9a-f]{32}$/;
 
 /** null, undefined and '' all mean not set: `NAME=` in an env file gives '', and that must never stop Strapi from starting. */
 const isSet = (value: unknown) => value !== null && value !== undefined && value !== '';
@@ -120,11 +130,17 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
   if (isSet(aiBase) && (typeof aiBase !== 'string' || !AI_BASE_URL.test(aiBase) || aiBase.endsWith('/'))) {
     fail('config.aiBaseUrl must be an http or https URL without a trailing slash, e.g. http://127.0.0.1:11434/v1');
   }
+  // `MAISON_DEMO_LINE_USER_ID=` in an env file gives '', which means not set. The message never repeats the value.
+  const demoUser: unknown = merged.demoLineUserId;
+  if (isSet(demoUser) && (typeof demoUser !== 'string' || !LINE_USER_ID.test(demoUser))) {
+    fail('config.demoLineUserId must be a LINE user ID, U followed by 32 lowercase hex characters, or null to give the demo activity to made-up customers only');
+  }
 }
 
 export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
   const config = { ...defaultConfig, ...(strapi.config.get(`plugin::${PLUGIN_ID}`) as Partial<MaisonConfig>) };
-  // An empty value is the same as none: no liffUrl, no token, LINE's own API, Anthropic as the provider, and no model, key or base URL.
+  // An empty value is the same as none: no liffUrl, no token, LINE's own API, Anthropic as the provider, no model, key or
+  // base URL, and no demo LINE account.
   return {
     ...config,
     liffUrl: config.liffUrl || null,
@@ -134,6 +150,7 @@ export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
     aiModel: config.aiModel || null,
     aiApiKey: config.aiApiKey || null,
     aiBaseUrl: config.aiBaseUrl || null,
+    demoLineUserId: config.demoLineUserId || null,
   };
 };
 

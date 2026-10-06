@@ -152,21 +152,37 @@ describe('loadDemoCatalog and the product knowledge', () => {
 
   const catalogThere = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0 };
 
+  /**
+   * The Japanese versions were written as they should be: one update with the seed's ja fields and then one publish in ja
+   * for each document, in no other order, and nothing else.
+   */
+  const expectJapaneseWrites = (written: Array<[string, any]>, expected: Array<{ documentId: string; data: unknown }>) => {
+    expect(written).toHaveLength(expected.length * 2);
+    for (const { documentId, data } of expected) {
+      const own = written.filter(([, params]) => params.documentId === documentId);
+      expect(own, documentId).toEqual([
+        ['update', { documentId, locale: 'ja', data }],
+        ['publish', { documentId, locale: 'ja' }],
+      ]);
+    }
+  };
+
   it('adds the product knowledge in English and in Japanese to a Strapi without it, and publishes both versions', async () => {
     const { strapi, calls } = strapiHolding();
     expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({ ...catalogThere, knowledge: 16, knowledgeJa: 16 });
-    expect(writes(calls)).toEqual([
-      // Each entry in English, with its English fields only, published.
-      ...seed.flatMap((entry, index) => [
+    const written = writes(calls);
+    // Each entry in English, with its English fields only, published, one after another.
+    expect(written.slice(0, 32)).toEqual(
+      seed.flatMap((entry, index) => [
         ['create', { locale: 'en', data: english(entry) }],
         ['publish', { documentId: `doc-${index + 1}`, locale: 'en' }],
-      ]),
-      // Then each English document's Japanese version, with the seed's ja fields only, published in ja.
-      ...seed.flatMap((entry, index) => [
-        ['update', { documentId: `doc-${index + 1}`, locale: 'ja', data: japanese(entry) }],
-        ['publish', { documentId: `doc-${index + 1}`, locale: 'ja' }],
-      ]),
-    ]);
+      ])
+    );
+    // Then each English document's Japanese version, with the seed's ja fields only, published in ja: a few at a time.
+    expectJapaneseWrites(
+      written.slice(32),
+      seed.map((entry, index) => ({ documentId: `doc-${index + 1}`, data: japanese(entry) }))
+    );
   });
 
   it('adds only the Japanese versions to a Strapi that has the English entries, as Strapi Cloud has them, and leaves the English ones as they are', async () => {
@@ -174,11 +190,9 @@ describe('loadDemoCatalog and the product knowledge', () => {
     const { strapi, calls, store } = strapiHolding(held);
     expect(await seedService({ strapi }).loadDemoCatalog()).toEqual({ ...catalogThere, knowledge: 0, knowledgeJa: 16 });
     expect(calls.find(({ uid }) => uid === KNOWLEDGE)).toEqual({ uid: KNOWLEDGE, method: 'count', params: { locale: 'en' } });
-    expect(writes(calls)).toEqual(
-      seed.flatMap((entry, index) => [
-        ['update', { documentId: `k${index + 1}`, locale: 'ja', data: japanese(entry) }],
-        ['publish', { documentId: `k${index + 1}`, locale: 'ja' }],
-      ])
+    expectJapaneseWrites(
+      writes(calls),
+      seed.map((entry, index) => ({ documentId: `k${index + 1}`, data: japanese(entry) }))
     );
     for (const [documentId, versions] of Object.entries(held)) expect(store.get(documentId)?.en, documentId).toEqual(versions.en);
   });
@@ -229,6 +243,132 @@ describe('loadDemoCatalog and the product knowledge', () => {
     expect([...reads[1].params.filters.documentId.$in].sort()).toEqual([...ids].sort());
     expect(reads[2].uid).toBe(QUESTION);
     expect([...reads[2].params.filters.knowledgeDocumentId.$in].sort()).toEqual([...ids].sort());
+  });
+});
+
+describe('loadDemoCatalog: the Japanese versions, a few at a time', () => {
+  it('writes at most 4 entries at once, and starts each publish after its own update', async () => {
+    const english = knowledge.entries.map((entry, index) => ({ documentId: `k${index + 1}`, title: entry.title }));
+    let running = 0;
+    let most = 0;
+    const order: string[] = [];
+    const slow = async (label: string) => {
+      order.push(label);
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      running -= 1;
+      return {};
+    };
+    const documents = (uid: string) => ({
+      findFirst: async () => ({ documentId: 'the-catalog' }),
+      count: async () => 16,
+      findMany: async (params: any) => (uid === 'plugin::maison.knowledge' && params.locale === 'en' ? english : []),
+      update: async ({ documentId }: { documentId: string }) => slow(`update ${documentId}`),
+      publish: async ({ documentId }: { documentId: string }) => slow(`publish ${documentId}`),
+    });
+    const strapi = {
+      plugin: () => ({ service: () => ({ findByCode: async () => ({}), create: async () => ({}) }) }),
+      documents,
+    } as any;
+
+    expect((await seedService({ strapi }).loadDemoCatalog()).knowledgeJa).toBe(16);
+
+    // Each entry's update and publish run in turn, so 4 entries at once are at most 4 writes at once.
+    expect(most).toBe(4);
+    for (const { documentId } of english) {
+      expect(order.indexOf(`update ${documentId}`), documentId).toBeLessThan(order.indexOf(`publish ${documentId}`));
+    }
+  });
+});
+
+describe('startDemoCatalog: Load demo catalog answers at once', () => {
+  const NOTHING = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
+
+  /** A Strapi with the catalog there, whose English entries are k1 to k16, with Japanese versions for `translated` of them. */
+  const strapiWith = ({ translated = 16, gate }: { translated?: number; gate?: Promise<void> } = {}) => {
+    const english = knowledge.entries.map((entry, index) => ({ documentId: `k${index + 1}`, title: entry.title }));
+    const japanese = english.slice(0, translated).map(({ documentId }) => ({ documentId }));
+    const written: string[] = [];
+    const documents = (uid: string) => ({
+      findFirst: async () => ({ documentId: 'the-catalog' }),
+      count: async () => 16,
+      findMany: async (params: any) => {
+        if (uid !== 'plugin::maison.knowledge') return [];
+        return params.locale === 'en' ? english : japanese;
+      },
+      update: async ({ documentId }: { documentId: string }) => {
+        if (gate) await gate;
+        written.push(`update ${documentId}`);
+        return {};
+      },
+      publish: async ({ documentId }: { documentId: string }) => {
+        written.push(`publish ${documentId}`);
+        return {};
+      },
+    });
+    const strapi = {
+      plugin: () => ({ service: () => ({ findByCode: async () => ({}), create: async () => ({}) }) }),
+      documents,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as any;
+    return { strapi, written, service: seedService({ strapi }) };
+  };
+
+  it('answers 200 at once, with nothing added, when the catalog and every Japanese version are there', async () => {
+    const { service, written } = strapiWith();
+    expect(await service.startDemoCatalog()).toEqual({ ok: true, value: { started: false, result: NOTHING } });
+    expect(written).toEqual([]);
+  });
+
+  it('answers started, with what it will add, and adds it in the background', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const { service, written, strapi } = strapiWith({ translated: 13, gate });
+
+    const started = await service.startDemoCatalog();
+
+    expect(started).toMatchObject({
+      ok: true,
+      value: { started: true, counts: { collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 3 } },
+    });
+    expect(written).toEqual([]);
+    open();
+    expect(await (started as any).value.done).toEqual({ ...NOTHING, knowledgeJa: 3 });
+    expect(written.filter((write) => write.startsWith('publish'))).toHaveLength(3);
+    expect(strapi.log.info).toHaveBeenCalledWith(expect.stringMatching(/^\[maison\] Loaded the demo catalog: /));
+  });
+
+  it('answers already_loading to a press while it loads, and starts nothing', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const { service, written } = strapiWith({ translated: 0, gate });
+    const first = await service.startDemoCatalog();
+
+    expect(await service.startDemoCatalog()).toMatchObject({ ok: false, code: 'already_loading' });
+
+    open();
+    await (first as any).value.done;
+    expect(written.filter((write) => write.startsWith('publish'))).toHaveLength(16);
+    // Once it ended, the next press may load again. This fake never keeps what was written, so it finds the same work.
+    const next = await service.startDemoCatalog();
+    expect(next).toMatchObject({ ok: true, value: { started: true } });
+    await (next as any).value.done;
+  });
+
+  it('logs a failure in the background as an error, and lets the next press load', async () => {
+    const { strapi, service } = strapiWith({ translated: 15 });
+    const documents = strapi.documents;
+    strapi.documents = (uid: string) => ({ ...documents(uid), publish: async () => Promise.reject(new Error('database is locked')) });
+    const started = await service.startDemoCatalog();
+    await expect((started as any).value.done).rejects.toThrow('database is locked');
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      '[maison] Loading the demo catalog stopped partway: database is locked. Press Load demo catalog again: it adds only what is missing.'
+    );
+    strapi.documents = documents;
+    const next = await service.startDemoCatalog();
+    expect(next).toMatchObject({ ok: true, value: { started: true } });
+    await (next as any).value.done;
   });
 });
 

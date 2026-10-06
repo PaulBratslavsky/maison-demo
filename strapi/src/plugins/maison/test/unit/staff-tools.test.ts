@@ -17,6 +17,7 @@ const staffView = {
   note: 'A gift for a friend who travels',
   createdVia: 'concierge',
   confirmationSent: false,
+  demoCustomer: false,
   createdAt: '2026-10-01T09:00:00+09:00',
 };
 

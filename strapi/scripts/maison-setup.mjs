@@ -166,6 +166,41 @@ export const seedLines = (seeded) => {
   ];
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Load demo catalog (POST /maison/demo/seed), waiting for it. When it has anything to add it answers 202, with
+ * `started: true` and what it will add, and adds it in the background, so setup presses again every second until the
+ * answer says everything is there (a 409 `already_loading` means it is still running). Answers what was added, as
+ * seedLines reads it: from the first press when that one started the load, or the answer that found it all there.
+ * `pause`, `now` and `timeoutMs` are only for tests.
+ */
+export const seedCatalog = async (api, { pause = () => sleep(1000), now = Date.now, timeoutMs = 120_000, onStarted = (line) => console.log(line) } = {}) => {
+  const deadline = now() + timeoutMs;
+  let started = null;
+  for (;;) {
+    let answer = null;
+    try {
+      answer = await api('POST', '/maison/demo/seed', {});
+    } catch (error) {
+      if (!String(error?.message).includes('already_loading')) throw error;
+    }
+    if (answer && answer.started !== true) {
+      if (!started) return answer;
+      const { started: _started, ...added } = started;
+      return { created: added.collections > 0, ...added };
+    }
+    if (answer && !started) {
+      started = answer;
+      onStarted('Loading the demo catalog in the background: setup waits until it is all there.');
+    }
+    if (now() >= deadline) {
+      throw new Error(`Load demo catalog is still running after ${Math.round(timeoutMs / 1000)} seconds. Check Strapi's log, then run setup again.`);
+    }
+    await pause();
+  }
+};
+
 const main = async () => {
   if (!email || !password) {
     throw new Error('Set DEMO_ADMIN_EMAIL and DEMO_ADMIN_PASSWORD in strapi/.env. `npm install` at the repo root creates them.');
@@ -193,7 +228,7 @@ const main = async () => {
   console.log(lineMode ? 'LINE sign-in: your LINE Login channel (LINE mode).' : 'LINE sign-in: the LIFF mock (local mode).');
 
   // 2. The catalog, and reading it and the Home page over REST without credentials.
-  const seeded = await api('POST', '/maison/demo/seed', {});
+  const seeded = await seedCatalog(api);
   for (const line of seedLines(seeded)) console.log(line);
   const actions = PUBLIC_ACTIONS.join(', ');
   console.log(

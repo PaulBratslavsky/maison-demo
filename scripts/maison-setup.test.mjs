@@ -41,7 +41,7 @@ const fakeStrapi = async () => {
 // The script reads STRAPI_URL when it loads, so the fake Strapi comes first.
 const strapi = await fakeStrapi();
 process.env.STRAPI_URL = strapi.url;
-const { call, grantPublicReads, outputPaths, seedLines, writeEnv } = await import(SETUP);
+const { call, grantPublicReads, outputPaths, seedCatalog, seedLines, writeEnv } = await import(SETUP);
 
 const node = promisify(execFile);
 
@@ -234,6 +234,60 @@ test("writes the app's settings to liff/.env and the ops token to strapi/.tmp, u
     opsTokenFile: join(ROOT, '.tmp', 'maison-ops-token.cloud'),
   });
   assert.equal(outputPaths({ MAISON_SETUP_LIFF_ENV: '/elsewhere/.env.cloud' }).liffEnv, '/elsewhere/.env.cloud');
+});
+
+test('waits for Load demo catalog, which answers 202 and loads in the background: it presses again until it is all there', async () => {
+  const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
+  const started = { started: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 16, knowledgeJa: 16 };
+  const busy = new Error('POST /maison/demo/seed failed with 409: {"status":409,"name":"ConflictError","message":"The demo catalog is still loading from the last press.","details":{"code":"already_loading"}}');
+  const answers = [started, busy, busy, nothing];
+  const presses = [];
+  const api = async (method, path, body) => {
+    presses.push(`${method} ${path} ${JSON.stringify(body)}`);
+    const answer = answers.shift();
+    if (answer instanceof Error) throw answer;
+    return answer;
+  };
+  let pauses = 0;
+  const waiting = [];
+  const result = await seedCatalog(api, { pause: async () => void (pauses += 1), onStarted: (line) => waiting.push(line) });
+  assert.deepEqual(result, { created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36, knowledge: 16, knowledgeJa: 16 });
+  assert.deepEqual(presses, Array(4).fill('POST /maison/demo/seed {}'));
+  assert.equal(pauses, 3);
+  assert.deepEqual(waiting, ['Loading the demo catalog in the background: setup waits until it is all there.']);
+  assert.deepEqual(seedLines(result), ['Loaded the demo catalog.', 'Added 16 product knowledge entries in English and 16 in Japanese.']);
+});
+
+test('answers a 200 from Load demo catalog at once, as before', async () => {
+  const found = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 16 };
+  let presses = 0;
+  const result = await seedCatalog(async () => ((presses += 1), found), { pause: async () => assert.fail('no pause') });
+  assert.deepEqual(result, found);
+  assert.equal(presses, 1);
+});
+
+test('waits when a load from the admin is already running, and fails on any other error', async () => {
+  const busy = new Error('POST /maison/demo/seed failed with 409: {"details":{"code":"already_loading"}}');
+  const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
+  const answers = [busy, nothing];
+  const result = await seedCatalog(async () => { const answer = answers.shift(); if (answer instanceof Error) throw answer; return answer; }, { pause: async () => {} });
+  assert.deepEqual(result, nothing);
+  await assert.rejects(
+    seedCatalog(async () => { throw new Error('POST /maison/demo/seed failed with 404: Not Found'); }, { pause: async () => {} }),
+    /404/
+  );
+});
+
+test('gives up, saying so, when Load demo catalog is still running after the time it allows', async () => {
+  let clock = 0;
+  const started = { started: true, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 16 };
+  const busy = new Error('POST /maison/demo/seed failed with 409: {"details":{"code":"already_loading"}}');
+  let first = true;
+  const api = async () => { if (first) { first = false; return started; } throw busy; };
+  await assert.rejects(
+    seedCatalog(api, { pause: async () => void (clock += 1000), now: () => clock, timeoutMs: 5000 }),
+    /Load demo catalog is still running after 5 seconds/
+  );
 });
 
 test('says what the seed did: the catalog it loaded or found, and the product knowledge it added in each language', () => {

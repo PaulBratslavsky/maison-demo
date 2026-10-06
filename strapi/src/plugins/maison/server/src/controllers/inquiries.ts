@@ -13,8 +13,8 @@ const REPLY_HINT = 'Write a reply of up to 2,000 characters.';
 const CLOSE_HINT = `Use one of ${CLOSE_REASONS.join(', ')}.`;
 const LABEL_HINT = `Give a kind (${INQUIRY_KINDS.join(', ')}), a sentiment (${SENTIMENT_LABELS.join(', ')}), or both.`;
 
-/** Strapi's error helper for each outcome of Reply on LINE that isn't sent. */
-const REPLY_ERRORS: Record<Exclude<InquiryReplyStatus, 'sent'>, string> = {
+/** Strapi's error helper for each outcome of Reply on LINE that isn't sent, or demo. */
+const REPLY_ERRORS: Record<Exclude<InquiryReplyStatus, 'sent' | 'demo'>, string> = {
   not_found: 'notFound',
   already_closed: 'conflict',
   already_replied: 'conflict',
@@ -54,12 +54,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   /**
-   * A 200 with the outcome when LINE took the reply. Otherwise the error that says why not: 404, 409 when the inquiry is
-   * closed or replied to already, or is a hand-off answered under Questions, 502 when LINE refused the message or couldn't
-   * be reached, and 503 when Strapi has no token to send with. The message goes to staff as it is.
+   * A 200 with the outcome when LINE took the reply, or when the customer is a made-up demo customer, who gets none.
+   * Otherwise the error that says why not: 404, 409 when the inquiry is closed or replied to already, or is a hand-off
+   * answered under Questions, 502 when LINE refused the message or couldn't be reached, and 503 when Strapi has no token
+   * to send with. The message goes to staff as it is.
    */
   const replyWith = (ctx, outcome: InquiryReplyOutcome) => {
-    if (outcome.status === 'sent') {
+    if (outcome.status === 'sent' || outcome.status === 'demo') {
       ctx.body = outcome;
       return;
     }

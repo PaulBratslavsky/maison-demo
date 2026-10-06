@@ -135,4 +135,87 @@ describe('product knowledge in Japanese', () => {
     const answer = await strapi.documents(KNOWLEDGE).findOne({ documentId: answered, locale: 'en' });
     assert.equal(answer.answer, 'Yes, in a Maison box.');
   });
+
+  describe('POST /maison/demo/seed, over the admin route', () => {
+    let baseUrl;
+    let staff;
+    const nothing = { ...catalogThere, knowledge: 0, knowledgeJa: 0 };
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** One request to an admin route. The token is sent, never logged. */
+    const call = async (method, path, token) => {
+      const response = await fetch(new URL(path, baseUrl), { method, headers: { Authorization: `Bearer ${token}` } });
+      const text = await response.text();
+      return { status: response.status, text, body: JSON.parse(text || 'null') };
+    };
+
+    /** While true, each update of a knowledge entry in ja waits SLOW_MS before it runs. */
+    let slowJapanese = false;
+    const SLOW_MS = 150;
+
+    before(async () => {
+      strapi.documents.use(async (context, next) => {
+        if (slowJapanese && context.uid === KNOWLEDGE && context.action === 'update' && context.params?.locale === 'ja') await sleep(SLOW_MS);
+        return next();
+      });
+      const roles = strapi.service('admin::role');
+      const role = await roles.create({ name: 'Maison test: catalog', description: 'Created by the Maison integration tests' });
+      await roles.assignPermissions(role.id, [{ action: 'plugin::maison.demo.manage', subject: null, properties: {}, conditions: [] }]);
+      const user = await strapi.service('admin::user').create({ email: 'catalog@maison.test', firstname: 'catalog', lastname: 'Test', isActive: true, roles: [role.id] });
+      const sessions = strapi.sessionManager('admin');
+      const { token: refreshToken } = await sessions.generateRefreshToken(String(user.id), 'maison-test-catalog', { type: 'session' });
+      staff = (await sessions.generateAccessToken(refreshToken)).token;
+      await new Promise((resolve, reject) => {
+        strapi.server.listen(0, '127.0.0.1', resolve).once('error', reject);
+      });
+      baseUrl = `http://127.0.0.1:${strapi.server.httpServer.address().port}`;
+    });
+
+    it('answers 200 at once when the catalog and its product knowledge are all there', async () => {
+      // The earlier tests left the leather care entry renamed: start over with the seeded entries, loaded through the service.
+      for (const { documentId } of await versions(strapi, 'en')) await strapi.documents(KNOWLEDGE).delete({ documentId, locale: '*' });
+      assert.deepEqual(await seedService.loadDemoCatalog(), { ...catalogThere, knowledge: 16, knowledgeJa: 16 });
+      const again = await call('POST', '/maison/demo/seed', staff);
+      assert.equal(again.status, 200, again.text);
+      assert.deepEqual(again.body, nothing);
+    });
+
+    it('answers 202 at once with what it will add, a second press while it loads starts nothing, and the entries appear within a few seconds', async () => {
+      // Start from a Strapi with no product knowledge at all: 16 English entries, then their 16 Japanese versions, to add.
+      for (const { documentId } of await versions(strapi, 'en')) await strapi.documents(KNOWLEDGE).delete({ documentId, locale: '*' });
+
+      // Locally the writes take a fraction of a second, so each Japanese version waits a little first, as a remote database
+      // makes it wait: the second press then comes while the first is still loading.
+      slowJapanese = true;
+      const first = await call('POST', '/maison/demo/seed', staff);
+      assert.equal(first.status, 202, first.text);
+      assert.deepEqual(first.body, { started: true, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 16, knowledgeJa: 16 });
+      const second = await call('POST', '/maison/demo/seed', staff);
+      assert.equal(second.status, 409, second.text);
+      assert.equal(second.body.error.details.code, 'already_loading');
+      assert.equal(second.body.error.message, 'The demo catalog is still loading from the last press.');
+
+      const deadline = Date.now() + 10_000;
+      while ((await strapi.documents(KNOWLEDGE).count({ locale: 'ja', status: 'published' })) < 16) {
+        assert.ok(Date.now() < deadline, 'the Japanese versions appear within 10 seconds');
+        await sleep(100);
+      }
+      assert.equal(await strapi.documents(KNOWLEDGE).count({ locale: 'en', status: 'published' }), 16);
+      for (const entry of seed) {
+        const [english] = await strapi.documents(KNOWLEDGE).findMany({ locale: 'en', status: 'published', filters: { title: entry.title } });
+        const japanese = await strapi.documents(KNOWLEDGE).findOne({ documentId: english.documentId, locale: 'ja', status: 'published' });
+        assert.deepEqual({ title: japanese.title, answer: japanese.answer, keywords: japanese.keywords }, entry.ja, entry.title);
+      }
+      slowJapanese = false;
+      // Once it has finished, a press answers that everything is there.
+      let last;
+      while (Date.now() < deadline + 5_000) {
+        last = await call('POST', '/maison/demo/seed', staff);
+        if (last.status === 200) break;
+        await sleep(100);
+      }
+      assert.equal(last.status, 200, last.text);
+      assert.deepEqual(last.body, nothing);
+    });
+  });
 });

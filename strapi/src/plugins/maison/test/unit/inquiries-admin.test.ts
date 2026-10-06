@@ -23,7 +23,6 @@ import {
   labelBody,
   labelForm,
   labelNote,
-  lineFailure,
   noTokenNotice,
   quotaText,
   replyBody,
@@ -33,6 +32,7 @@ import {
   suggestedReply,
   type StaffInquiry,
 } from '../../admin/src/inquiries';
+import { lineNote } from '../../admin/src/line-note';
 import { CLOSE_REASONS, INQUIRY_FILTERS, INQUIRY_KINDS, INQUIRY_QUEUES, LOCALES, SENTIMENT_LABELS } from '../../server/src/constants';
 import { suggestedReply as serverSuggestedReply } from '../../server/src/domain/inquiry-replies';
 import { NO_TOKEN } from '../../server/src/domain/line-outcome';
@@ -339,21 +339,22 @@ describe('handOffText', () => {
   });
 });
 
-describe('lineFailure', () => {
+describe("lineNote, on an inquiry's row", () => {
   it('says nothing when there is no LINE message, or LINE took it', () => {
-    expect(lineFailure(null)).toBeNull();
-    expect(lineFailure({ outcome: 'sent', detail: null })).toBeNull();
+    expect(lineNote(null)).toBeNull();
+    expect(lineNote({ outcome: 'sent', detail: null })).toBeNull();
   });
 
-  it("gives LINE's own words when the message failed", () => {
-    expect(lineFailure({ outcome: 'failed', detail: 'LINE answered 400: The request body has 1 error(s)' })).toBe(
-      'LINE message failed: LINE answered 400: The request body has 1 error(s)'
-    );
+  it("gives LINE's own words, in red, when the message failed", () => {
+    expect(lineNote({ outcome: 'failed', detail: 'LINE answered 400: The request body has 1 error(s)' })).toEqual({
+      text: 'LINE message failed: LINE answered 400: The request body has 1 error(s)',
+      tone: 'danger',
+    });
   });
 
   it('still says it failed when LINE gave no words', () => {
-    expect(lineFailure({ outcome: 'failed', detail: null })).toBe('LINE message failed.');
-    expect(lineFailure({ outcome: 'failed', detail: '' })).toBe('LINE message failed.');
+    expect(lineNote({ outcome: 'failed', detail: null })?.text).toBe('LINE message failed.');
+    expect(lineNote({ outcome: 'failed', detail: '' })?.text).toBe('LINE message failed.');
   });
 });
 

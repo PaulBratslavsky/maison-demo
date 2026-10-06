@@ -18,6 +18,7 @@ import {
 } from '@strapi/design-system';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
+import { LINE_NOTE_COLORS, lineNote } from '../line-note';
 import { startPolling } from '../poll';
 import {
   REASON_LABELS,
@@ -45,6 +46,17 @@ const STATUS_BADGES: Record<QuestionStatus, 'warning' | 'secondary' | 'success'>
 };
 /** The table keeps its cells on one line, so the customer's words and LINE's reasons wrap instead, within about 20rem. */
 const WRAPPED = { display: 'block', maxWidth: '20rem', style: { whiteSpace: 'normal', overflowWrap: 'break-word' } } as const;
+
+/** The question's last LINE message: a failure in red, in LINE's words, or a made-up demo customer, who gets none, in grey. */
+const LineNoteText = ({ line }: { line: StaffQuestion['line'] }) => {
+  const note = lineNote(line);
+  if (!note) return null;
+  return (
+    <Typography variant="pi" textColor={LINE_NOTE_COLORS[note.tone]} {...WRAPPED}>
+      {note.text}
+    </Typography>
+  );
+};
 
 /** What is on its way to the customer's LINE chat: Let them know, or an Answer, for one question. */
 type Sending = { reference: string; action: 'notify' | 'answer' };
@@ -211,11 +223,7 @@ export const QuestionsList = ({
                         Added to product knowledge
                       </Typography>
                     )}
-                    {question.line?.outcome === 'failed' && (
-                      <Typography variant="pi" textColor="danger600" {...WRAPPED}>
-                        LINE message failed: {question.line.detail}
-                      </Typography>
-                    )}
+                    <LineNoteText line={question.line} />
                   </Flex>
                 </Td>
                 {canAnswer && (

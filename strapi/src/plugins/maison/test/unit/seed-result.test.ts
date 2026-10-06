@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { describeActivity, describeReset, describeSeed } from '../../admin/src/seed-result';
+import {
+  ACTIVITY_LOADING,
+  TOO_SLOW,
+  demoErrorNotice,
+  demoNotice,
+  describeActivity,
+  describeReset,
+  describeSeed,
+  isStarted,
+} from '../../admin/src/seed-result';
 
 const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0, knowledgeJa: 0 };
 const firstLoad = { created: true, collections: 3, products: 12, boutiques: 3, stockLevels: 36 };
@@ -83,5 +92,106 @@ describe('describeActivity', () => {
     expect(describeActivity({ created: false, customers: 0, appointments: 0, confirmed: 0, questions: 0, inquiries: 0 })).toBe(
       'The demo activity is already loaded. Reset demo activity first to load it again.'
     );
+  });
+});
+
+describe('the plain messages', () => {
+  it('say what is happening, in the words the brief gives', () => {
+    expect(ACTIVITY_LOADING).toBe('Loading demo activity: the lists fill in over the next few seconds.');
+    expect(TOO_SLOW).toBe('Strapi took too long to answer. Wait a few seconds: the lists refresh by themselves.');
+  });
+});
+
+describe('demoNotice: what a demo button shows for an answer', () => {
+  const ADDED = { created: true, customers: 5, appointments: 5, confirmed: 2, questions: 5, inquiries: 10 };
+  const ALREADY = { created: false, customers: 0, appointments: 0, confirmed: 0, questions: 0, inquiries: 0 };
+
+  it('says Load demo activity is loading when it answers 202, started', () => {
+    expect(demoNotice('activity', { started: true, appointments: 5, questions: 5, inquiries: 10 })).toEqual({ type: 'info', message: ACTIVITY_LOADING });
+  });
+
+  it('says what Load demo activity added, or that it was there already, for a 200', () => {
+    expect(demoNotice('activity', ADDED)).toEqual({ type: 'success', message: describeActivity(ADDED) });
+    expect(demoNotice('activity', ALREADY)).toEqual({ type: 'success', message: describeActivity(ALREADY) });
+  });
+
+  it('says what Load demo catalog is adding in the background when it answers 202, started', () => {
+    expect(demoNotice('seed', { started: true, ...nothing, knowledgeJa: 16 })).toEqual({
+      type: 'info',
+      message: 'Loading demo catalog in the background: 16 product knowledge entries in Japanese. It takes up to a minute.',
+    });
+    expect(demoNotice('seed', { started: true, ...firstLoad, created: undefined, knowledge: 16, knowledgeJa: 16 })).toEqual({
+      type: 'info',
+      message:
+        'Loading demo catalog in the background: 12 products, 3 collections, 3 boutiques, 36 stock levels, 16 product knowledge entries in English and 16 in Japanese. It takes up to a minute.',
+    });
+  });
+
+  it('says what Load demo catalog added, or that it was there already, for a 200', () => {
+    expect(demoNotice('seed', nothing)).toEqual({ type: 'success', message: describeSeed(nothing) });
+  });
+
+  it('says what Reset deleted', () => {
+    const result = { appointments: 3, notifications: 2, questions: 1, inquiries: 2, knowledge: 1 };
+    expect(demoNotice('reset', result)).toEqual({ type: 'success', message: describeReset(result) });
+  });
+
+  // The admin's fetch client answers {} for a 200 whose body isn't JSON, such as a proxy's HTML page.
+  it.each([
+    ['an empty object', {}],
+    ['nothing', undefined],
+    ['null', null],
+    ['a string', '<!DOCTYPE html>'],
+    ['counts that are not numbers', { created: true, customers: '5' }],
+  ])('shows the plain message, never a raw error, for an answer that is %s', (_label, answer) => {
+    for (const action of ['seed', 'activity', 'reset'] as const) {
+      expect(demoNotice(action, answer)).toEqual({ type: 'warning', message: TOO_SLOW });
+    }
+  });
+});
+
+describe('isStarted', () => {
+  it('is true only for a 202 that says the work goes on in the background', () => {
+    expect(isStarted({ started: true, appointments: 5, questions: 5, inquiries: 10 })).toBe(true);
+    expect(isStarted({ created: true })).toBe(false);
+    expect(isStarted({ started: 'yes' })).toBe(false);
+    expect(isStarted({})).toBe(false);
+    expect(isStarted(null)).toBe(false);
+    expect(isStarted(undefined)).toBe(false);
+  });
+});
+
+describe('demoErrorNotice: what a demo button shows when the press failed', () => {
+  it("shows the plain message for an answer that isn't JSON, as when Strapi Cloud's proxy gives up and answers an HTML page", () => {
+    let parseError: unknown;
+    try {
+      JSON.parse('<!DOCTYPE html><html></html>');
+    } catch (error) {
+      parseError = error;
+    }
+    expect(demoErrorNotice(parseError)).toEqual({ type: 'warning', message: TOO_SLOW });
+  });
+
+  it('knows the parse error by its name, which holds across realms, and by its words', () => {
+    expect(demoErrorNotice({ name: 'SyntaxError', message: 'Unexpected end of JSON input' })).toEqual({ type: 'warning', message: TOO_SLOW });
+    expect(demoErrorNotice(new Error(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`))).toEqual({ type: 'warning', message: TOO_SLOW });
+  });
+
+  it("shows the server's words as an info notice when a load is still running from the last press", () => {
+    const busy = Object.assign(new Error('Demo activity is still loading from the last press: the lists fill in over the next few seconds.'), {
+      name: 'FetchError',
+      status: 409,
+      response: { data: { error: { status: 409, details: { code: 'already_loading' } } } },
+    });
+    expect(demoErrorNotice(busy)).toEqual({ type: 'info', message: busy.message });
+  });
+
+  it("shows any other failure in the server's words, as before", () => {
+    const failed = Object.assign(new Error("Load demo catalog first: there's no published boutique \"ginza\"."), {
+      name: 'FetchError',
+      response: { data: { error: { status: 404, details: { code: 'not_found' } } } },
+    });
+    expect(demoErrorNotice(failed)).toEqual({ type: 'danger', message: `That didn't work: ${failed.message}` });
+    expect(demoErrorNotice('a string')).toEqual({ type: 'danger', message: "That didn't work: a string" });
   });
 });

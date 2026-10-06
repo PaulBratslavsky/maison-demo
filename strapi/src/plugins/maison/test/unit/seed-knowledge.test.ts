@@ -105,6 +105,13 @@ describe('the Japanese version of each product knowledge entry', () => {
     }
   });
 
+  it('lists each keyword once', () => {
+    for (const entry of knowledge.entries) {
+      const keywords = String(japanese(entry)?.keywords).split(',').map((keyword) => keyword.trim());
+      expect(keywords.filter((keyword, index) => keywords.indexOf(keyword) !== index), entry.title).toEqual([]);
+    }
+  });
+
   it('gives the same measurements as the English answer, in the same order', () => {
     for (const entry of knowledge.entries) {
       expect(measurements(String(japanese(entry)?.answer)), entry.title).toEqual(measurements(entry.answer));
