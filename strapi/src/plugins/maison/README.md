@@ -55,7 +55,7 @@ export default ({ env }) => ({
 });
 ```
 
-Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog** under **Demo data**.
+Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog** under **Demo data**, then **Load demo activity** for requests, questions and inquiries to show ([Load demo activity](#load-demo-activity)).
 
 ## Configuration
 
@@ -215,7 +215,18 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 - **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)).
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
-- **Demo data:** **Load demo catalog** and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
+- **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
+
+### Load demo activity
+
+**Load demo activity**, under Demo data, adds five made-up customers, each with one visit request, one question and two inquiries, received over the last three days. It needs the demo catalog: without it, nothing is added, and the page says to press **Load demo catalog** first.
+
+- **The customers** are Aiko T., Kenji M., Sophie L., Daniel R. and Mei W., with fixed LINE user IDs that belong to nobody: `line:Udec0de`, zeros, then a digit. Staff see them masked, as `line:Udec…01`.
+- **Requests:** five visits at Ginza, Omotesando and Osaka, 2 to 13 days ahead, on a half-hour inside the boutique's opening hours (never Osaka on a Tuesday), for pieces the boutique has in stock when the button is pressed. They are requested through the same service as a customer's, so each gets an `APT-` reference and passes the board's rules. They mix English and Japanese, the app and the concierge, and two carry a note. Three wait for staff. Two are confirmed, which sends their LINE confirmations as any confirmation does: no phone receives them, and the board shows what LINE answered.
+- **Questions:** five that product knowledge doesn't answer, with `Q-` references: three open (one of them asking for a person), one taken and one answered. Nothing was sent to the customers, so none of them has a LINE outcome, and the answer isn't product knowledge.
+- **Inquiries:** each question's hand-off turn, in Needs an answer (the answered question's is replied, with the answer), and five more: two complaints, one praise, one question the concierge answered from product knowledge, and one left unlabelled, which the labelling sweep labels within a minute when AI is on. Their labels are recorded with `modelVersion` `demo-seed` and no `promptVersion`, and each queue comes from the same rule as a model's labels.
+
+It adds them only when none of the five customers has an appointment, a question or an inquiry, so pressing it again changes nothing, and nobody else's activity counts or is touched. A press while one is loading waits for it. **Reset demo activity** deletes the demo activity with everything else. `POST /maison/demo/activity` answers `{ created, customers, appointments, confirmed, questions, inquiries }`, all zeros with `created: false` when it was there already, or a 404 when the catalog isn't loaded. What it adds is in `server/seed/activity.json`.
 
 ## The Homepage widgets
 

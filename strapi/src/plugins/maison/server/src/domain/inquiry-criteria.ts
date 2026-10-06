@@ -1,6 +1,6 @@
 import { z } from '@strapi/utils';
 
-import { INQUIRY_KINDS, SENTIMENT_LABELS } from '../constants';
+import { INQUIRY_KINDS, SENTIMENT_LABELS, type SentimentLabel } from '../constants';
 
 /** Bump when the prompt or the criteria change: each labelled row records the version that labelled it. */
 export const PROMPT_VERSION = 'inquiry-labels-1';
@@ -12,8 +12,14 @@ const KINDS: Record<(typeof INQUIRY_KINDS)[number], string> = {
   other: 'Anything else: small talk, a booking request with no question, a test message.',
 };
 
-const SENTIMENT =
-  'sentimentScore runs from -1 (very negative) to 1 (very positive), 0 is neutral. sentimentLabel is negative below -0.2, positive above 0.2, neutral between.';
+/** Where a sentiment score stops being neutral, on either side of 0. */
+const SENTIMENT_THRESHOLD = 0.2;
+
+const SENTIMENT = `sentimentScore runs from -1 (very negative) to 1 (very positive), 0 is neutral. sentimentLabel is negative below -${SENTIMENT_THRESHOLD}, positive above ${SENTIMENT_THRESHOLD}, neutral between.`;
+
+/** The label the prompt gives a score: negative below -0.2, positive above 0.2, and neutral from -0.2 to 0.2. */
+export const sentimentLabelOf = (score: number): SentimentLabel =>
+  score < -SENTIMENT_THRESHOLD ? 'negative' : score > SENTIMENT_THRESHOLD ? 'positive' : 'neutral';
 
 export const labelSystemPrompt = (): string =>
   [

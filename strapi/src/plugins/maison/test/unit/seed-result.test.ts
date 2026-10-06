@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeReset, describeSeed } from '../../admin/src/seed-result';
+import { describeActivity, describeReset, describeSeed } from '../../admin/src/seed-result';
 
 const nothing = { created: false, collections: 0, products: 0, boutiques: 0, stockLevels: 0, knowledge: 0 };
 
@@ -53,5 +53,19 @@ describe('describeReset', () => {
 
   it('names inquiries, which the reset deletes with the questions', () => {
     expect(describeReset({ ...none, inquiries: 14 })).toContain('14 inquiries');
+  });
+});
+
+describe('describeActivity', () => {
+  it('names what Load demo activity added, and who it came from', () => {
+    expect(describeActivity({ created: true, customers: 5, appointments: 5, confirmed: 2, questions: 5, inquiries: 10 })).toBe(
+      'Loaded 5 requests (2 confirmed), 5 questions and 10 inquiries from 5 made-up customers.'
+    );
+  });
+
+  it('says when the demo activity was there already, and how to load it again', () => {
+    expect(describeActivity({ created: false, customers: 0, appointments: 0, confirmed: 0, questions: 0, inquiries: 0 })).toBe(
+      'The demo activity is already loaded. Reset demo activity first to load it again.'
+    );
   });
 });
