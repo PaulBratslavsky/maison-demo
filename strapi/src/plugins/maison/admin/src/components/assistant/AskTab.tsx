@@ -1,13 +1,23 @@
 import * as React from 'react';
 
 import { Box, Button, Flex, Textarea, Typography } from '@strapi/design-system';
+import styled from 'styled-components';
 
-import { STARTERS, askTabState, canSend, composerButtons, followsNewest, shouldSendOnKey, showsWorking, type MessageSource } from '../../assistant';
+import { askTabState, canSend, composerButtons, followsNewest, shouldSendOnKey, showsWorking, type MessageSource } from '../../assistant';
+import { ChatArea } from './ChatArea';
 import { ChatMessages } from './ChatMessages';
+import { EmptyState } from './EmptyState';
 import { useAssistant } from './AssistantProvider';
 
-/** The messages scroll in their own box, so the text box, Send, Stop and New chat stay on the screen however long the chat gets. */
-const MESSAGE_BOX = { maxHeight: '55vh', overflowY: 'auto' } as const;
+/** The messages scroll in their own box, which takes the height between the top bar and the text box. */
+const MessageBox = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+`;
 
 /**
  * The Ask tab: a chat for staff about requests, questions and inquiries. The chat itself, and the text staff have typed and not
@@ -59,59 +69,42 @@ export const AskTab = () => {
   };
 
   return (
-    <Flex direction="column" alignItems="stretch" gap={4}>
-      <Flex direction="column" alignItems="flex-start" gap={1}>
-        <Typography variant="delta" tag="h2">
-          Ask
-        </Typography>
-        <Typography variant="pi" textColor="neutral600">
-          Ask about requests, questions and inquiries. The assistant looks things up and never sends, confirms or changes anything. Model: {state.model}.
-        </Typography>
-      </Flex>
+    <ChatArea
+      model={state.model}
+      tools={state.tools}
+      canStartOver={assistant.messages.length > 0 || notice !== null || note !== null}
+      newChatOffered={notice?.newChat === true}
+      onNewChat={assistant.newChat}
+    >
+      <MessageBox
+        ref={list}
+        role="region"
+        aria-label="Chat messages"
+        // Keyboard users scroll the box with the arrow keys once it has the focus.
+        tabIndex={0}
+        onScroll={(event: React.UIEvent<HTMLDivElement>) => {
+          following.current = followsNewest(event.currentTarget);
+        }}
+      >
+        {assistant.messages.length === 0 ? <EmptyState onStarter={(starter) => submit(starter, 'starter')} canStart={(starter) => canSend({ text: starter, busy, ready })} /> : <ChatMessages messages={assistant.messages} />}
+      </MessageBox>
 
-      {assistant.messages.length === 0 && (
-        <Flex role="group" aria-label="Suggestions" gap={2} wrap="wrap">
-          {STARTERS.map((starter) => (
-            <Button key={starter} size="S" variant="secondary" disabled={!canSend({ text: starter, busy, ready })} onClick={() => submit(starter, 'starter')}>
-              {starter}
-            </Button>
-          ))}
-        </Flex>
-      )}
-
-      {assistant.messages.length > 0 && (
-        <Box
-          ref={list}
-          role="region"
-          aria-label="Chat messages"
-          // Keyboard users scroll the box with the arrow keys once it has the focus.
-          tabIndex={0}
-          style={MESSAGE_BOX}
-          onScroll={(event: React.UIEvent<HTMLDivElement>) => {
-            following.current = followsNewest(event.currentTarget);
-          }}
-        >
-          <ChatMessages messages={assistant.messages} />
-        </Box>
-      )}
-      {showsWorking(busy, assistant.messages) && (
-        <Typography role="status" textColor="neutral600">
-          The assistant is working…
-        </Typography>
-      )}
-
-      {notice && (
-        <Typography role="alert" textColor="danger600">
-          {notice.text}
-        </Typography>
-      )}
-      {note && (
-        <Typography role="status" textColor="neutral600">
-          {note}
-        </Typography>
-      )}
-
-      <Flex direction="column" alignItems="stretch" gap={2}>
+      <Flex direction="column" alignItems="stretch" gap={3} padding={4}>
+        {showsWorking(busy, assistant.messages) && (
+          <Typography role="status" textColor="neutral600">
+            The assistant is working…
+          </Typography>
+        )}
+        {notice && (
+          <Typography role="alert" textColor="danger600">
+            {notice.text}
+          </Typography>
+        )}
+        {note && (
+          <Typography role="status" textColor="neutral600">
+            {note}
+          </Typography>
+        )}
         <Textarea
           ref={box}
           aria-label="Your message"
@@ -127,25 +120,18 @@ export const AskTab = () => {
             }
           }}
         />
-        <Flex gap={2} justifyContent="space-between">
+        <Flex gap={2}>
           {/* Send and Stop are two buttons side by side, each with its own key: a second click on Send, as in a double click, lands on a switched-off Send and never on Stop. */}
-          <Flex gap={2}>
-            <Button key="send" disabled={buttons.sendDisabled} onClick={() => submit(draft, 'box')}>
-              Send
-            </Button>
-            {buttons.showStop && (
-              <Button key="stop" variant="secondary" onClick={assistant.stop}>
-                Stop
-              </Button>
-            )}
-          </Flex>
-          {(assistant.messages.length > 0 || notice) && (
-            <Button variant={notice?.newChat ? 'default' : 'tertiary'} onClick={assistant.newChat}>
-              New chat
+          <Button key="send" disabled={buttons.sendDisabled} onClick={() => submit(draft, 'box')}>
+            Send
+          </Button>
+          {buttons.showStop && (
+            <Button key="stop" variant="secondary" onClick={assistant.stop}>
+              Stop
             </Button>
           )}
         </Flex>
       </Flex>
-    </Flex>
+    </ChatArea>
   );
 };

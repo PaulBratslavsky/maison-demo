@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LIST_TABS, PAGE_SUBTITLE, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
+import { LIST_TABS, PAGE_SUBTITLE, TAB_LABELS, fillsPage, selectTab, showsDemoData, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
 import { COUNTS } from '../../admin/src/inquiries';
 import { isSummary } from '../../admin/src/inquiries';
 import { world } from './fake-inquiries';
@@ -158,5 +158,26 @@ describe('selectTab', () => {
     expect(selectTab(ALL, new URLSearchParams('tab=inquiries').get('tab'))).toBe('inquiries');
     expect(selectTab(ALL, new URLSearchParams('tab=questions&x=1').get('tab'))).toBe('questions');
     expect(selectTab(ALL, new URLSearchParams('').get('tab'))).toBe('requests');
+  });
+});
+
+describe('the page while Ask is open', () => {
+  it('fills the height under its header on the Ask tab, and on no other: the lists scroll the page', () => {
+    expect(fillsPage('ask')).toBe(true);
+    for (const tab of LIST_TABS) expect(fillsPage(tab), tab).toBe(false);
+    expect(fillsPage(undefined)).toBe(false);
+  });
+
+  it('hides the Demo data block on the Ask tab, where the chat takes the height, and shows it on every other tab for an admin who may manage it', () => {
+    expect(showsDemoData({ canManage: true, activeTab: 'ask' })).toBe(false);
+    for (const tab of LIST_TABS) expect(showsDemoData({ canManage: true, activeTab: tab }), tab).toBe(true);
+  });
+
+  it('shows the Demo data block alone for an admin who can only manage it: they have no tab', () => {
+    expect(showsDemoData({ canManage: true, activeTab: undefined })).toBe(true);
+  });
+
+  it('never shows it to an admin who may not manage the demo data', () => {
+    for (const activeTab of [...LIST_TABS, 'ask', undefined] as const) expect(showsDemoData({ canManage: false, activeTab }), String(activeTab)).toBe(false);
   });
 });

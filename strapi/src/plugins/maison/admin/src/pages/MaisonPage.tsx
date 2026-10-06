@@ -12,10 +12,17 @@ import { QuestionsList } from '../components/QuestionsList';
 import { RequestCounts } from '../components/RequestCounts';
 import { RequestsBoard } from '../components/RequestsBoard';
 import { PERMISSIONS } from '../permissions';
-import { PAGE_SUBTITLE, selectTab, tabCounts, tabLabel, visibleTabs } from '../tabs';
+import { PAGE_SUBTITLE, fillsPage, selectTab, showsDemoData, tabCounts, tabLabel, visibleTabs } from '../tabs';
 import { useInquiriesSummary } from '../useInquiriesSummary';
 import { useOpenQuestions } from '../useOpenQuestions';
 import { useRequestsSummary } from '../useRequestsSummary';
+
+/**
+ * While Ask is open, each box from the page down to the chat area is a flex column that takes the height left under the one above it, and
+ * may shrink below its content (`min-height: 0`). The admin's content area is a flex column with a height of its own, so the page fills it
+ * and only the message list scrolls. No height is worked out from the header's: that is what drifts.
+ */
+const FILL = { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } as const;
 
 const MaisonPage = () => {
   const { allowedActions, isLoading } = useRBAC(PERMISSIONS.sections);
@@ -46,6 +53,7 @@ const MaisonPage = () => {
     canUse: allowedActions.canUse,
   });
   const activeTab = selectTab(tabs, searchParams.get('tab'));
+  const fill = fillsPage(activeTab);
   const waiting = tabCounts({ requests: requests.summary, questions: questions.count, inquiries: inquiries.summary });
 
   const tabsRoot = activeTab && (
@@ -54,6 +62,7 @@ const MaisonPage = () => {
       value={activeTab}
       // The address is replaced, not added to: switching tabs isn't a place to go back to.
       onValueChange={(tab) => setSearchParams({ tab }, { replace: true })}
+      style={fill ? FILL : undefined}
     >
       <Tabs.List aria-label="Maison">
         {tabs.map((tab) => (
@@ -94,8 +103,8 @@ const MaisonPage = () => {
         </Tabs.Content>
       )}
       {tabs.includes('ask') && (
-        <Tabs.Content value="ask">
-          <Box paddingTop={6}>
+        <Tabs.Content value="ask" style={FILL}>
+          <Box paddingTop={6} style={FILL}>
             <AskTab />
           </Box>
         </Tabs.Content>
@@ -104,16 +113,21 @@ const MaisonPage = () => {
   );
 
   return (
-    <Page.Main>
+    <Page.Main style={fill ? FILL : undefined}>
       <Page.Title>Maison</Page.Title>
       <Layouts.Header title="Maison" subtitle={PAGE_SUBTITLE} />
-      <Layouts.Content>
-        <Flex direction="column" alignItems="stretch" gap={8}>
+      {/*
+        What Layouts.Content is (the same side padding, and the top padding on a small screen), as a Box that can fill the height while Ask
+        is open. It is always this Box, never Layouts.Content for one tab and this for another: a different element would unmount the
+        chat's provider, which sits inside it, on every change of tab.
+      */}
+      <Box paddingLeft={{ initial: 4, medium: 6, large: 10 }} paddingRight={{ initial: 4, medium: 6, large: 10 }} paddingTop={{ initial: 4, medium: 0 }} paddingBottom={fill ? 6 : 0} style={fill ? FILL : undefined}>
+        <Flex direction="column" alignItems="stretch" gap={8} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
           {/* The chat lives above the tabs, so it stays when staff look at a list and come back. Only admins who may use it have one. */}
           {allowedActions.canUse === true ? <AssistantProvider>{tabsRoot}</AssistantProvider> : tabsRoot}
-          {allowedActions.canManage && <DemoData onChange={refresh} />}
+          {showsDemoData({ canManage: allowedActions.canManage === true, activeTab }) && <DemoData onChange={refresh} />}
         </Flex>
-      </Layouts.Content>
+      </Box>
     </Page.Main>
   );
 };

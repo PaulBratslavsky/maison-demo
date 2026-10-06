@@ -62,3 +62,12 @@ export const tabCounts = ({ requests, questions, inquiries }: TabSources): Recor
  */
 export const selectTab = (tabs: readonly MaisonTab[], requested: string | null | undefined): MaisonTab | undefined =>
   tabs.find((tab) => tab === requested) ?? tabs[0];
+
+/**
+ * Whether the page fills the height under its header: while Ask is open, so the chat area can take what is left and only its message
+ * list scrolls. The other tabs are lists, and the page scrolls for them.
+ */
+export const fillsPage = (activeTab: MaisonTab | undefined): boolean => activeTab === 'ask';
+
+/** Whether the Demo data block shows: for an admin who may manage it, on every tab but Ask, where the chat takes the height. */
+export const showsDemoData = ({ canManage, activeTab }: { canManage: boolean; activeTab: MaisonTab | undefined }): boolean => canManage && activeTab !== 'ask';
