@@ -37,6 +37,27 @@ describe('the actions bootstrap registers', () => {
   });
 });
 
+describe('the assistant action', () => {
+  it('is the thirteenth action bootstrap registers, with its own sub category and the name staff see in the role editor', async () => {
+    const registerMany = vi.fn();
+    const strapi = { ...fakeStrapi(), service: () => ({ actionProvider: { registerMany } }), server: { use: vi.fn() } };
+    await bootstrap({ strapi } as any);
+    const actions = registerMany.mock.calls.flatMap(([registered]) => registered);
+    expect(actions).toHaveLength(13);
+    expect(actions.find(({ uid }) => uid === 'assistant.use')).toEqual({
+      section: 'plugins',
+      pluginName: 'maison',
+      uid: 'assistant.use',
+      displayName: 'Use the Maison assistant',
+      subCategory: 'assistant',
+    });
+  });
+
+  it('is registered under the full name the routes and the page check', async () => {
+    expect(await registeredActions()).toContain(ACTION.assistantUse);
+  });
+});
+
 describe("the admin panel's permissions for customer questions", () => {
   const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
 

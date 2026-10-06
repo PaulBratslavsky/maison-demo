@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTION,
   ANALYSIS_STATUSES,
+  ASSISTANT_LIMITS,
   CLOSE_REASONS,
   INQUIRY_FILTERS,
   INQUIRY_KINDS,
@@ -72,5 +73,18 @@ describe('constants', () => {
 
   it('declares the filters the Inquiries tab shows, in the order of its pills', () => {
     expect(INQUIRY_FILTERS).toEqual(['needs-answer', 'complaint', 'praise', 'not-labelled', 'all']);
+  });
+
+  it('declares the assistant: its permission, and its limits in one place', () => {
+    expect(ACTION.assistantUse).toBe('plugin::maison.assistant.use');
+    expect(ASSISTANT_LIMITS).toEqual({
+      staffMessages: 20,
+      modelTurns: 6,
+      deadlineMs: 90_000,
+      maxTokens: 16_000,
+      listRows: 50,
+      listTextChars: 300,
+      draftChars: 2000,
+    });
   });
 });

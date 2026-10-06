@@ -17,6 +17,7 @@ const ACTIONS = [
   { uid: 'inquiries.view', displayName: 'Review customer inquiries', subCategory: 'inquiries' },
   { uid: 'inquiries.reply', displayName: 'Reply to customer inquiries on LINE', subCategory: 'inquiries' },
   { uid: 'demo.manage', displayName: 'Load and reset demo data', subCategory: 'demo' },
+  { uid: 'assistant.use', displayName: 'Use the Maison assistant', subCategory: 'assistant' },
 ];
 
 /** Actions must be registered in bootstrap (registerMany throws once Strapi is loaded). */

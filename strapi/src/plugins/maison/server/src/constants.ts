@@ -26,6 +26,25 @@ export const ACTION = {
   inquiriesView: 'plugin::maison.inquiries.view',
   inquiriesReply: 'plugin::maison.inquiries.reply',
   demoManage: 'plugin::maison.demo.manage',
+  assistantUse: 'plugin::maison.assistant.use',
+} as const;
+
+/** The Ask tab's limits, in one place. The chat, its tools and the page's tests read them from here. */
+export const ASSISTANT_LIMITS = {
+  /** Staff messages in one chat. The next one is refused. */
+  staffMessages: 20,
+  /** Model turns in one request. Each request starts at 0. */
+  modelTurns: 6,
+  /** How long one request may take, in milliseconds. */
+  deadlineMs: 90_000,
+  /** Output tokens in one model turn, thinking included. */
+  maxTokens: 16_000,
+  /** Rows in one list answer. */
+  listRows: 50,
+  /** Characters of each customer text in a list row. A single item keeps its full text. */
+  listTextChars: 300,
+  /** The longest draft, in characters. The dialogs and the server take the same. */
+  draftChars: 2000,
 } as const;
 
 export const TOOL_NAMES = [

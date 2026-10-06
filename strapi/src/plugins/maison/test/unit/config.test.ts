@@ -151,6 +151,50 @@ describe('the AI settings', () => {
   });
 });
 
+describe("the Ask tab's model (aiChatModel)", () => {
+  it('is Claude Sonnet 5.5 unless one is set, and is never null', () => {
+    expect(defaultConfig.aiChatModel).toBe('claude-sonnet-5-5');
+    expect(getConfig(fakeStrapi({ config: {} })).aiChatModel).toBe('claude-sonnet-5-5');
+  });
+
+  it('is not the labelling model: setting one leaves the other alone', () => {
+    expect(getConfig(fakeStrapi({ config: { aiModel: 'claude-haiku-4-5-20251001' } })).aiChatModel).toBe('claude-sonnet-5-5');
+    const config = getConfig(fakeStrapi({ config: { aiChatModel: 'claude-sonnet-5' } }));
+    expect(config).toMatchObject({ aiChatModel: 'claude-sonnet-5', aiModel: null });
+  });
+
+  it('keeps the model it is given', () => {
+    expect(() => validateConfig({ ...defaultConfig, aiChatModel: 'claude-sonnet-5' })).not.toThrow();
+    expect(getConfig(fakeStrapi({ config: { aiChatModel: 'claude-sonnet-5' } })).aiChatModel).toBe('claude-sonnet-5');
+  });
+
+  it('treats empty and null (AI_CHAT_MODEL= in an env file) as not set, so Strapi still starts and the default stands', () => {
+    for (const aiChatModel of ['', null, undefined]) {
+      expect(() => validateConfig({ ...defaultConfig, aiChatModel: aiChatModel as never })).not.toThrow();
+      expect(getConfig(fakeStrapi({ config: { aiChatModel } })).aiChatModel).toBe('claude-sonnet-5-5');
+    }
+  });
+
+  it.each([
+    ['a model that is not a string', { aiChatModel: 42 }],
+    ['a model with a space in it', { aiChatModel: 'claude sonnet' }],
+    ['a model with a line break in it', { aiChatModel: 'claude-sonnet-5-5\n' }],
+  ])('rejects %s', (_what, override) => {
+    expect(() => validateConfig({ ...defaultConfig, ...(override as object) })).toThrow(/config\.aiChatModel must be a model ID/);
+  });
+
+  it('never repeats the value in an error', () => {
+    let message = '';
+    try {
+      validateConfig({ ...defaultConfig, aiChatModel: 'secret value' });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/aiChatModel/);
+    expect(message).not.toContain('secret');
+  });
+});
+
 describe('the demo LINE account (demoLineUserId)', () => {
   const USER_ID = `U${'0123456789abcdef'.repeat(2)}`;
 

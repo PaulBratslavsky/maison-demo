@@ -89,6 +89,10 @@
     "@ai-sdk/anthropic": "^4.0.71",
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/openai-compatible": "^3.0.62",
+    "@tanstack/ai": "0.52.3",
+    "@tanstack/ai-anthropic": "0.18.3",
+    "@tanstack/ai-client": "0.29.2",
+    "@tanstack/ai-react": "0.22.4",
     "ai": "^7.0.127"
   }
 }
