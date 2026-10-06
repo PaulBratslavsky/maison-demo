@@ -28,6 +28,8 @@ export interface StaffQuestion {
   addedToKnowledge: boolean;
   /** How the last LINE message to the customer went, or null before there was one. `demo`: a made-up demo customer, who gets none. */
   line: { outcome: 'sent' | 'failed' | 'demo'; detail: string } | null;
+  /** The presenter's own LINE account (the plugin's demoLineUserId): shown with a "Your LINE" label. */
+  yourLine: boolean;
   /** When the concierge handed the question over, as an ISO string in UTC. */
   createdAt: string;
 }

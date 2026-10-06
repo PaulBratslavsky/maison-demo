@@ -231,6 +231,14 @@ const DEMO_SUBJECTS: ReadonlySet<string> = new Set((seed as ActivitySeed).custom
  */
 export const isDemoCustomer = (subject: unknown): boolean => typeof subject === 'string' && DEMO_SUBJECTS.has(subject);
 
+/**
+ * Whether `subject` is the presenter's own LINE account: `demoLineUserId` is set, and `subject` is `line:` followed by
+ * exactly that ID. Replying, answering or confirming for it sends real LINE messages, so staff see a "Your LINE" label
+ * on its rows. It is never a made-up customer's subject. It does not accept an ID alone, another case or spacing.
+ */
+export const isYourLine = (subject: unknown, demoLineUserId: string | null): boolean =>
+  typeof demoLineUserId === 'string' && demoLineUserId !== '' && subject === `line:${demoLineUserId}`;
+
 /** Who gets the items marked `"owner": "you"`. */
 export interface ActivityOwners {
   /** The presenter's own LINE account as a subject (`line:U…`), from demoLineUserId, or null when that isn't set. */

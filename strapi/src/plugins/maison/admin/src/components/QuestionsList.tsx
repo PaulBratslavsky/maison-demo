@@ -33,6 +33,7 @@ import {
   type StaffQuestion,
 } from '../questions';
 import { AnswerDialog } from './AnswerDialog';
+import { YourLineBadge } from './YourLineBadge';
 
 type Filter = 'open' | 'answered' | 'all';
 
@@ -198,11 +199,12 @@ export const QuestionsList = ({
                   <Typography>{askedAt(question.createdAt)}</Typography>
                 </Td>
                 <Td>
-                  <Flex direction="column" alignItems="flex-start">
+                  <Flex direction="column" alignItems="flex-start" gap={1}>
                     <Typography>{question.customerName || '—'}</Typography>
                     <Typography variant="pi" textColor="neutral600">
                       {question.customer}
                     </Typography>
+                    <YourLineBadge yourLine={question.yourLine} />
                   </Flex>
                 </Td>
                 <Td>

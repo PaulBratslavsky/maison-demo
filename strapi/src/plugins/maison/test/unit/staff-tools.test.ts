@@ -18,6 +18,7 @@ const staffView = {
   createdVia: 'concierge',
   confirmationSent: false,
   demoCustomer: false,
+  yourLine: false,
   createdAt: '2026-10-01T09:00:00+09:00',
 };
 
@@ -31,6 +32,16 @@ describe('appointment_requests', () => {
     expect(appointmentRequestsTool.resolveOutputSchema(context).parse(result.structuredContent)).toEqual({
       appointments: [staffView, { ...staffView, reference: 'APT-4822', boutique: null }],
     });
+  });
+
+  it("passes yourLine through, true for the presenter's own LINE account and false for everyone else", async () => {
+    const listRequests = vi.fn(async () => ({ ok: true, value: [{ ...staffView, yourLine: true }, { ...staffView, reference: 'APT-4822' }] }));
+    const result = await appointmentRequestsTool.createHandler(withAppointments({ listRequests }), context)({ args: {}, extra: {} });
+    const { appointments } = appointmentRequestsTool.resolveOutputSchema(context).parse(result.structuredContent);
+    expect(appointments.map((appointment: { reference: string; yourLine: boolean }) => [appointment.reference, appointment.yourLine])).toEqual([
+      ['APT-4821', true],
+      ['APT-4822', false],
+    ]);
   });
 
   it('turns an unknown boutique into not_found', async () => {
@@ -83,6 +94,13 @@ describe('confirm_appointment', () => {
     const confirm = vi.fn(async () => ({ ok: true, value }));
     const result = await confirmAppointmentTool.createHandler(withAppointments({ confirm }), context)({ args: { reference: 'APT-4821' }, extra: {} });
     expect(confirm).toHaveBeenCalledWith('APT-4821');
+    expect(confirmAppointmentTool.resolveOutputSchema(context).parse(result.structuredContent)).toEqual(value);
+  });
+
+  it("returns yourLine in the confirmed appointment, so a staff agent can tell the presenter's own request from a customer's", async () => {
+    const value = { appointment: { ...staffView, status: 'confirmed', yourLine: true }, alreadyConfirmed: false };
+    const confirm = vi.fn(async () => ({ ok: true, value }));
+    const result = await confirmAppointmentTool.createHandler(withAppointments({ confirm }), context)({ args: { reference: 'APT-4821' }, extra: {} });
     expect(confirmAppointmentTool.resolveOutputSchema(context).parse(result.structuredContent)).toEqual(value);
   });
 

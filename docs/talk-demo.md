@@ -7,7 +7,7 @@ The runbook for the 3-minute demo in "Building the AI-Powered Connected Experien
 1. **The quick start:** `npm install`, `npm run dev`, `npm run setup`, and restart (see the [Quick start](../README.md#quick-start)).
 2. **The concierge's model:** `ANTHROPIC_API_KEY` in `liff/.env` for Claude, then restart the app. Without it, start Ollama.
 3. **The LINE confirmation on your phone:** [option A](line-setup.md#option-a-a-real-line-message-on-your-phone). Without it, the board shows each confirmed visit as "not sent".
-4. **Optional, demo items on your own LINE account:** set `MAISON_DEMO_LINE_USER_ID` in `strapi/.env` to your LINE user ID (`U` and 32 lowercase hex characters, the same ID as option A's), and restart Strapi. **Load demo activity** then gives your account one waiting request, one open question and one open complaint, so confirming, **Let them know**, **Answer** and **Reply on LINE** reach your phone. The made-up customers get no LINE message: their rows say "demo customer", in grey.
+4. **Optional, demo items on your own LINE account:** set `MAISON_DEMO_LINE_USER_ID` in `strapi/.env` to your LINE user ID (`U` and 32 lowercase hex characters, the same ID as option A's), and restart Strapi. **Load demo activity** then gives your account one waiting request, one open question and one open complaint, so confirming, **Let them know**, **Answer** and **Reply on LINE** reach your phone. Your three items carry a "Your LINE" label next to the customer: the request on the board, the question under **Questions**, and the complaint and the question's hand-off under **Inquiries**. The made-up customers get no LINE message: their rows say "demo customer", in grey.
 
 ## Before going on stage
 

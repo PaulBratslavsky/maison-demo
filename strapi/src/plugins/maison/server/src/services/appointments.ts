@@ -2,7 +2,7 @@ import type { Core } from '@strapi/strapi';
 
 import { getConfig } from '../config';
 import { CREATED_VIA, UID, type CreatedVia, type Locale } from '../constants';
-import { isDemoCustomer } from '../domain/demo-activity';
+import { isDemoCustomer, isYourLine } from '../domain/demo-activity';
 import { checkOpenAt, validateOpeningHours, type Weekday } from '../domain/hours';
 import { generateReference } from '../domain/reference';
 import { failure, type ServiceResult } from '../domain/service-result';
@@ -50,6 +50,11 @@ export interface StaffAppointmentView {
   confirmationSent: boolean;
   /** One of Load demo activity's made-up customers, who gets no LINE message: the board shows "demo customer", never "not sent". */
   demoCustomer: boolean;
+  /**
+   * The presenter's own LINE account (the plugin's demoLineUserId): confirming it sends a real LINE message to the
+   * presenter. The board shows a "Your LINE" label. Never the ID itself.
+   */
+  yourLine: boolean;
   createdAt: string;
 }
 
@@ -88,7 +93,7 @@ export interface RequestsSummary {
   recent: Array<
     Pick<
       StaffAppointmentView,
-      'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'note' | 'confirmationSent' | 'demoCustomer' | 'createdAt'
+      'reference' | 'status' | 'customer' | 'boutique' | 'requestedFor' | 'note' | 'confirmationSent' | 'demoCustomer' | 'yourLine' | 'createdAt'
     >
   >;
 }
@@ -217,7 +222,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       labels(UID.boutique, docs.map((doc) => doc.boutique?.documentId).filter(Boolean), locale),
       labels(UID.product, docs.flatMap((doc) => (doc.products ?? []).map((product: Doc) => product.documentId)), locale),
     ]);
-    const { timezone } = getConfig(strapi);
+    const { timezone, demoLineUserId } = getConfig(strapi);
     return docs.map((doc) => ({
       reference: doc.reference,
       status: confirmed.has(doc.documentId) ? 'confirmed' : 'requested',
@@ -229,6 +234,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       createdVia: (CREATED_VIA as readonly string[]).includes(doc.createdVia) ? (doc.createdVia as CreatedVia) : 'app',
       confirmationSent: sent.has(doc.reference),
       demoCustomer: isDemoCustomer(doc.customer),
+      yourLine: isYourLine(doc.customer, demoLineUserId),
       createdAt: toZonedIso(new Date(doc.createdAt), timezone),
     }));
   };
@@ -441,8 +447,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
       return {
         counts: { waitingForStaff, confirmedUpcoming: upcoming.length, confirmationsSent: sent.size },
-        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt }) => ({
-          reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, createdAt,
+        recent: newest.value.map(({ reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, yourLine, createdAt }) => ({
+          reference, status, customer, boutique, requestedFor, note, confirmationSent, demoCustomer, yourLine, createdAt,
         })),
       };
     },

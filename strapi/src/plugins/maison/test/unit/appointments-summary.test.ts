@@ -55,6 +55,7 @@ describe('appointments.summarizeRequests: the newest requests', () => {
         note: 'Window seat, please',
         confirmationSent: false,
         demoCustomer: false,
+        yourLine: false,
         createdAt: '2030-01-01T00:00:07+09:00',
       },
       {
@@ -66,6 +67,7 @@ describe('appointments.summarizeRequests: the newest requests', () => {
         note: '',
         confirmationSent: false,
         demoCustomer: false,
+        yourLine: false,
         createdAt: '2029-12-30T12:30:00+09:00',
       },
     ]);
@@ -86,7 +88,7 @@ describe('appointments.summarizeRequests: the newest requests', () => {
   it('leaves the products and the way the request was made out of the rows', async () => {
     const { recent } = await summarize();
     for (const row of recent) {
-      expect(Object.keys(row).sort()).toEqual(['boutique', 'confirmationSent', 'createdAt', 'customer', 'demoCustomer', 'note', 'reference', 'requestedFor', 'status']);
+      expect(Object.keys(row).sort()).toEqual(['boutique', 'confirmationSent', 'createdAt', 'customer', 'demoCustomer', 'note', 'reference', 'requestedFor', 'status', 'yourLine']);
     }
   });
 
@@ -99,6 +101,19 @@ describe('appointments.summarizeRequests: the newest requests', () => {
       ['APT-3333', 'line:Udec…03', true],
       ['APT-1111', 'line:Uaaa…aa', false],
     ]);
+  });
+
+  it("says which row is the presenter's own LINE account's, from the plugin's demoLineUserId, and never shows the ID", async () => {
+    const YOU_ID = `U${'5ca1ab1e'.repeat(4)}`;
+    appointmentFindMany.mockImplementationOnce(async () => [{ documentId: 'doc-oldest' }]);
+    appointmentFindMany.mockImplementationOnce(async () => []);
+    appointmentFindMany.mockImplementationOnce(async () => [{ ...drafts[0], customer: `line:${YOU_ID}` }, drafts[1]]);
+    const { recent } = await appointments({ strapi: fakeStrapi({ documents, config: { demoLineUserId: YOU_ID } }) }).summarizeRequests(NOW);
+    expect(recent.map((row) => [row.reference, row.customer, row.yourLine, row.demoCustomer])).toEqual([
+      ['APT-3333', 'line:U5ca…1e', true, false],
+      ['APT-1111', 'line:Uaaa…aa', false, false],
+    ]);
+    expect(JSON.stringify(recent)).not.toContain(YOU_ID);
   });
 
   it('keeps the counts as they were', async () => {
