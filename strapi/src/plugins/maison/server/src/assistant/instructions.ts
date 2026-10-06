@@ -33,8 +33,15 @@ const TOOL_LINES: Record<string, string> = {
   inquiry_counts: 'How many open inquiries are in each queue.',
   search_knowledge: 'What Maison has written for customers about care, materials, sizing, delivery, returns and the like. Use it to check what the concierge could have answered.',
   search_products: 'Finds products, with prices and stock.',
-  view_product: "One product's details, by its slug from search_products.",
+  view_product: "One product's details, by its slug.",
 };
+
+/** The tools that give lists of rows, and look one item up by a reference or a documentId. */
+const LIST_TOOLS = ['list_requests', 'list_questions', 'list_inquiries'];
+
+/** The line for an offered tool: view_product names search_products only when that tool is offered too. */
+const toolLine = (name: string, offered: (tool: string) => boolean): string | undefined =>
+  name === 'view_product' && offered('search_products') ? "One product's details, by its slug from search_products." : TOOL_LINES[name];
 
 /** The system prompt for one turn. */
 export const instructions = ({ today, timezone, tools }: InstructionsInput): string => {
@@ -64,7 +71,10 @@ export const instructions = ({ today, timezone, tools }: InstructionsInput): str
   }
 
   lines.push('Tools:');
-  for (const name of tools) if (TOOL_LINES[name]) lines.push(`- ${name}: ${TOOL_LINES[name]}`);
+  for (const name of tools) {
+    const line = toolLine(name, offered);
+    if (line) lines.push(`- ${name}: ${line}`);
+  }
 
   const starters: string[] = [];
   if (offered('list_inquiries')) {
@@ -77,11 +87,16 @@ export const instructions = ({ today, timezone, tools }: InstructionsInput): str
   lines.push(
     '',
     'Using the tools:',
-    `- You have at most ${ASSISTANT_LIMITS.modelTurns} steps for one answer, and each tool call is a step. Prefer one precise call to several broad ones.`,
-    "- When staff name one item, such as a reference like APT-4821 or Q-4821, or an inquiry's documentId, look that item up by it, so you read its full text.",
-    `- capped: true means there were more rows than were returned, ${ASSISTANT_LIMITS.listRows} at most. Say so, and offer a narrower filter.`,
-    `- truncated: true means the customer text is cut to ${ASSISTANT_LIMITS.listTextChars} characters. Look the item up by its reference or documentId to read it all.`,
-    '- When a tool answers with an error, tell staff what it said. not_found means there is no such item: check the reference or the documentId with staff. Never read a failed lookup as an empty list, and never say nothing exists because a lookup failed.'
+    `- You have at most ${ASSISTANT_LIMITS.modelTurns} steps for one answer. A step is one turn of yours. Several tool calls in the same turn are one step, and each time you answer after reading tool results is the next step. Prefer one precise call to several broad ones.`
   );
+  if (tools.some((name) => LIST_TOOLS.includes(name))) {
+    lines.push(
+      "- When staff name one item, such as a reference like APT-4821 or Q-4821, or an inquiry's documentId, look that item up by it, so you read its full text.",
+      `- capped: true means there were more rows than were returned, ${ASSISTANT_LIMITS.listRows} at most. Say so, and offer a narrower filter.`,
+      `- truncated: true means the customer text is cut to ${ASSISTANT_LIMITS.listTextChars} characters. Look the item up by its reference or documentId to read it all.`,
+      '- not_found means there is no such item: check the reference or the documentId with staff.'
+    );
+  }
+  lines.push('- When a tool answers with an error, tell staff what it said. Never read a failed lookup as an empty list, and never say nothing exists because a lookup failed.');
   return lines.join('\n');
 };

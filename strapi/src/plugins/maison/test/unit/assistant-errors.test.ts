@@ -81,7 +81,7 @@ describe('staffErrorOf', () => {
   it('answers staff text in plain words: no em dash, and nothing that looks like a stack trace', () => {
     for (const code of [401, 404, 429, 'timeout', 'max_tokens', 'chat_too_long', 'not_ready', 400, 'unknown']) {
       const { message } = staff(code);
-      expect(message).not.toMatch(/—|–|\n|\bat \S+\(/);
+      expect(message).not.toMatch(/\u2014|\u2013|\n|\bat \S+\(/);
     }
   });
 });

@@ -95,6 +95,14 @@ describe('what the assistant does and never does', () => {
     expect(text()).toContain('at most 6 steps');
   });
 
+  it('says a step is one turn of the model: several tool calls in one turn are one step', () => {
+    const prompt = text();
+    expect(prompt).toContain('A step is one turn of yours.');
+    expect(prompt).toContain('Several tool calls in the same turn are one step');
+    expect(prompt).toContain('each time you answer after reading tool results is the next step');
+    expect(prompt).not.toContain('each tool call is a step');
+  });
+
   it('treats a failed lookup as no such item, never as an empty list', () => {
     const prompt = text();
     expect(prompt).toContain('not_found means there is no such item');
@@ -110,7 +118,7 @@ describe('what the assistant does and never does', () => {
 
   it('has no Markdown, no em dash and no en dash of its own', () => {
     const prompt = text();
-    expect(prompt).not.toMatch(/\*\*|^#|—|–/m);
+    expect(prompt).not.toMatch(/\*\*|^#|\u2014|\u2013/m);
   });
 });
 
@@ -140,6 +148,41 @@ describe('the tools', () => {
     expect(prompt).not.toContain('What are customers asking about today?');
     expect(prompt).not.toContain('Any complaints this week?');
     expect(text({ tools: ['list_inquiries'] })).not.toContain('Which visits are waiting for staff?');
+  });
+});
+
+describe('the view_product line', () => {
+  it('names search_products only when search_products is offered', () => {
+    expect(text({ tools: ['search_products', 'view_product'] })).toContain("- view_product: One product's details, by its slug from search_products.");
+    const alone = text({ tools: ['view_product'] });
+    expect(alone).toContain("- view_product: One product's details, by its slug.");
+    expect(alone).not.toContain('search_products');
+  });
+});
+
+describe('the lines about lists', () => {
+  const lines = ['look that item up by it', 'APT-4821', 'Q-4821', 'documentId', 'capped: true', 'truncated: true', 'not_found', 'narrower filter'];
+
+  it.each([['list_requests'], ['list_questions'], ['list_inquiries']])('are there when %s is offered', (name) => {
+    const prompt = text({ tools: [name] });
+    for (const line of lines) expect(prompt, line).toContain(line);
+  });
+
+  it.each([[['search_products', 'view_product']], [['search_knowledge']], [['inquiry_counts']]])('are not there when only %j is offered', (tools) => {
+    const prompt = text({ tools });
+    for (const line of lines) expect(prompt, line).not.toContain(line);
+  });
+
+  it('keep what applies to every tool: say what an error said, and never read a failed lookup as nothing', () => {
+    for (const tools of [['search_products', 'view_product'], ['inquiry_counts'], ['list_requests']]) {
+      const prompt = text({ tools });
+      expect(prompt, tools.join()).toContain('When a tool answers with an error, tell staff what it said.');
+      expect(prompt, tools.join()).toContain('Never read a failed lookup as an empty list');
+    }
+  });
+
+  it('keep the steps line for every tool', () => {
+    expect(text({ tools: ['search_products'] })).toContain('at most 6 steps');
   });
 });
 
