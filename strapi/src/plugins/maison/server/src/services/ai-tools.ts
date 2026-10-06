@@ -14,7 +14,7 @@ import { viewProductTool } from '../mcp/tools/view-product';
 type HandlerContext = Modules.MCP.McpHandlerContext;
 
 /** The parts of a Maison MCP tool definition that the chat uses. */
-interface McpTool {
+export interface McpTool {
   name: string;
   description: string;
   auth: { policies: ReadonlyArray<{ action: string }> };
@@ -68,7 +68,7 @@ const invalidInput = (tool: McpTool, error: z.ZodError): ChatToolError => ({
 });
 
 /** One MCP tool as a chat tool: the same schema, permission and handler, with the MCP result unwrapped. */
-const toChatTool = (strapi: Core.Strapi, tool: McpTool): ChatTool => {
+export const toChatTool = (strapi: Core.Strapi, tool: McpTool): ChatTool => {
   const schema = tool.resolveInputSchema?.(NO_CONTEXT) ?? z.object({});
   return {
     name: tool.name,

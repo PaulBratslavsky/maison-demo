@@ -32,6 +32,38 @@ describe("the test stand-in's $gte", () => {
   });
 });
 
+describe("the test stand-in with more than one operator in a condition", () => {
+  const INSIDE = '2026-10-10T05:00:00.000Z';
+  const START = '2026-10-10T00:00:00.000Z';
+  const END = '2026-10-11T00:00:00.000Z';
+  const AFTER = '2026-10-11T05:00:00.000Z';
+  const BEFORE = '2026-10-09T05:00:00.000Z';
+
+  it('needs every operator to hold: $gte and $lt keep a row from the start up to, not including, the end', () => {
+    const day = { requestedFor: { $gte: START, $lt: END } };
+    expect(matches({ requestedFor: INSIDE }, day)).toBe(true);
+    expect(matches({ requestedFor: START }, day)).toBe(true);
+    expect(matches({ requestedFor: END }, day)).toBe(false);
+    expect(matches({ requestedFor: AFTER }, day)).toBe(false);
+    expect(matches({ requestedFor: BEFORE }, day)).toBe(false);
+    expect(matches({ requestedFor: null }, day)).toBe(false);
+  });
+
+  it('needs every operator to hold: $gte and $lte keep a row from the start up to and including the end', () => {
+    const day = { requestedFor: { $gte: START, $lte: END } };
+    expect(matches({ requestedFor: INSIDE }, day)).toBe(true);
+    expect(matches({ requestedFor: START }, day)).toBe(true);
+    expect(matches({ requestedFor: END }, day)).toBe(true);
+    expect(matches({ requestedFor: AFTER }, day)).toBe(false);
+    expect(matches({ requestedFor: BEFORE }, day)).toBe(false);
+    expect(matches({ requestedFor: undefined }, day)).toBe(false);
+  });
+
+  it('still refuses an operator it does not know, wherever it is in the condition', () => {
+    expect(() => matches({ requestedFor: INSIDE }, { requestedFor: { $gte: START, $startsWith: 'x' } })).toThrow(/\$startsWith/);
+  });
+});
+
 describe('inquiries.list, since and kind', () => {
   const TABLE: Doc[] = [
     row('complaint-open', { queue: 'complaint', kind: 'complaint', analysisStatus: 'analyzed', createdAt: AFTER_MIDNIGHT }),
