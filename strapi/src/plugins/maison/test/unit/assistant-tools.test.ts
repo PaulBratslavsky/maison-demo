@@ -276,6 +276,16 @@ describe('list_requests', () => {
     expect((await run(tool(listRequests, { timezone: 'UTC' }), {})).requests[0].receivedAt).toBe('2026-10-05T16:30:00+00:00');
   });
 
+  it('leaves the visit day out of the lookup when it is given a reference, so a request on another day is still found', async () => {
+    // As the service answers: the day and the reference both apply, so a visit on the 10th is not on the 11th.
+    const listRequests = vi.fn(async (filters: Doc) => ok(filters.date ? [] : [requestRow('APT-4821')]));
+    const answer = await run(tool(listRequests), { reference: 'APT-4821', date: '2026-10-11' });
+    expect(listRequests).toHaveBeenCalledOnce();
+    expect(listRequests).toHaveBeenCalledWith({ reference: 'APT-4821', limit: 51 });
+    expect(listRequests.mock.calls[0][0].date).toBeUndefined();
+    expect(answer).toEqual({ requests: [expect.objectContaining({ reference: 'APT-4821' })], capped: false });
+  });
+
   it('answers not_found for a reference no request has, never an empty list', async () => {
     const answer = await run(tool(vi.fn(async () => ok([]))), { reference: 'APT-4812' });
     expect(answer).toEqual({ error: { code: 'not_found', message: 'No request APT-4812.', hint: expect.stringContaining('list_requests') } });
@@ -326,6 +336,16 @@ describe('list_questions', () => {
     expect((await run(tool(list), {})).questions[0].truncated).toBe(true);
     const single = await run(tool(list), { reference: 'Q-4821' });
     expect(single.questions[0].question).toBe(`<customer_question>${long}</customer_question>`);
+  });
+
+  it('leaves the day out of the lookup when it is given a reference, so a question from an earlier day is still found', async () => {
+    // As the service answers: since and the reference both apply, so a question from the 5th is not on or after the 6th.
+    const list = vi.fn(async (filters: Doc) => ok(filters.since ? [] : [questionRow('Q-4821')]));
+    const answer = await run(tool(list), { reference: 'Q-4821', since: '2026-10-06' });
+    expect(list).toHaveBeenCalledOnce();
+    expect(list).toHaveBeenCalledWith({ reference: 'Q-4821', limit: 51 });
+    expect(list.mock.calls[0][0].since).toBeUndefined();
+    expect(answer).toEqual({ questions: [expect.objectContaining({ reference: 'Q-4821' })], capped: false });
   });
 
   it('answers not_found for a reference no question has, with the reference in the message, never an empty list', async () => {

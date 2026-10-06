@@ -44,14 +44,14 @@ const requestsInput = z.object({
     .optional()
     .describe('"requested" (default): waiting for staff, with the visit still ahead. "confirmed": confirmed by staff. "all": every request.'),
   date: isoDateInput.optional().describe('Only visits on this day (YYYY-MM-DD), in the boutique time zone.'),
-  reference: referenceInput.optional().describe('One request by its reference, such as APT-4821, with its full note. Any status, any visit day.'),
+  reference: referenceInput.optional().describe('One request by its reference, such as APT-4821, with its full note. Any status, any visit day. The other filters are ignored.'),
   limit: limitInput,
 });
 
 const questionsInput = z.object({
   status: z.enum(['open', 'answered', 'all']).optional().describe('"open" (default): open, or taken by a staff member. "answered". "all".'),
   since: isoDateInput.optional().describe('Only questions that came in on or after this day (YYYY-MM-DD), in the boutique time zone.'),
-  reference: questionReferenceInput.optional().describe('One question by its reference, such as Q-4821, with its full text. Any status.'),
+  reference: questionReferenceInput.optional().describe('One question by its reference, such as Q-4821, with its full text. Any status, any day. The other filters are ignored.'),
   limit: limitInput,
 });
 
@@ -108,7 +108,8 @@ const staffTools = (strapi: Core.Strapi): ReadTool[] => {
       description: `Lists customers' visit requests (boutique appointments) for staff. By default it lists the requests waiting for staff, soonest visit first. Use status "confirmed" or "all" for the others, newest first, or date for one visit day. Use reference to get one request, with its full note, whatever its status or day. ${LISTS} It changes nothing.`,
       inputSchema: requestsInput,
       async run({ status, date, reference, limit = MAX_ROWS }) {
-        const result = await services('appointments').listRequests({ status, date, reference, limit: limit + 1 });
+        // A reference names one request, so the visit day stays out: a request on another day is still the one asked for.
+        const result = await services('appointments').listRequests({ status, date: reference ? undefined : date, reference, limit: limit + 1 });
         if (!result.ok) return failed(result);
         if (reference && result.value.length === 0) return notFound(`No request ${reference}.`, 'Check the reference. Call list_requests with status "all" to see every request.');
         const { rows, capped } = capList(result.value, limit);
@@ -121,7 +122,8 @@ const staffTools = (strapi: Core.Strapi): ReadTool[] => {
       description: `Lists the questions the concierge handed to staff, newest first. By default it lists the open ones: open, or taken by a staff member. Use status "answered" or "all", since for the questions from one day on, or reference to get one question, with its full text, whatever its status. ${LISTS} It changes nothing.`,
       inputSchema: questionsInput,
       async run({ status, since, reference, limit = MAX_ROWS }) {
-        const result = await services('questions').list({ status, since, reference, limit: limit + 1 });
+        // A reference names one question, so `since` stays out: a question from an earlier day is still the one asked for.
+        const result = await services('questions').list({ status, since: reference ? undefined : since, reference, limit: limit + 1 });
         if (!result.ok) return failed(result);
         if (reference && result.value.length === 0) return notFound(`No question ${reference}.`, 'Check the reference. Call list_questions with status "all" to see every question.');
         const { rows, capped } = capList(result.value, limit);
