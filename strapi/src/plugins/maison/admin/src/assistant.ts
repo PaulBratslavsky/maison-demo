@@ -57,7 +57,7 @@ export interface ErrorNotice {
 const SOMETHING_WRONG = 'Something went wrong. Try again.';
 const CHAT_TOO_LONG = 'This chat is long. Start a new chat.';
 
-/** What a browser says when a request never reached the server: Chrome, Firefox and Safari, and Node's "terminated". */
+/** What a browser says when a request never reached the server: Chrome ("Failed to fetch"), Firefox ("NetworkError…") and Safari ("Load failed"). */
 const NETWORK = /failed to fetch|load failed|network ?error|networkerror/i;
 
 /**
@@ -67,7 +67,8 @@ const NETWORK = /failed to fetch|load failed|network ?error|networkerror/i;
  * - ai-client throws `HTTP error! status: <n>` for a failed request and never reads its body, so the status decides. The
  *   server sends a real HTTP error only for a bad body (400), a role that lost the permission (403), and a body over
  *   Strapi's limit (413).
- * - A request that never arrived is a lost connection.
+ * - A request that never arrived is a lost connection. Only the messages browsers give for that decide it: a TypeError thrown by
+ *   the page's own code is not one.
  */
 export const errorNotice = (error: unknown): ErrorNotice => {
   const { code, message } = (typeof error === 'object' && error !== null ? error : {}) as { code?: unknown; message?: unknown };
@@ -82,7 +83,7 @@ export const errorNotice = (error: unknown): ErrorNotice => {
   if (status === '413') return { text: CHAT_TOO_LONG, newChat: true };
   if (status) return { text: SOMETHING_WRONG, newChat: false };
 
-  if (error instanceof TypeError || NETWORK.test(text)) return { text: 'The connection to Strapi was lost. Try again.', newChat: false };
+  if (NETWORK.test(text)) return { text: 'The connection to Strapi was lost. Try again.', newChat: false };
   return { text: SOMETHING_WRONG, newChat: false };
 };
 

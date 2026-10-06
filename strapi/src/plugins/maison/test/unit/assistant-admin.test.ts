@@ -15,11 +15,18 @@ import {
   type PartLike,
 } from '../../admin/src/assistant';
 import { READ_TOOL_NAMES } from '../../server/src/assistant/tools';
+import routes from '../../server/src/routes';
 import { CUSTOM_EVENTS } from '../../server/src/services/assistant';
 
 describe('the assistant paths', () => {
+  // Admin routes are served at /maison<path>, so the page's paths are the server's own with that prefix.
   it("are the routes the server has, under the plugin's admin prefix", () => {
-    expect(ASSISTANT_PATHS).toEqual({ status: '/maison/assistant/status', chat: '/maison/assistant/chat' });
+    const served = (method: string, handler: string) => {
+      const found = routes.admin.routes.filter((route) => route.method === method && route.handler === handler);
+      expect(found, `${method} ${handler}`).toHaveLength(1);
+      return `/maison${found[0].path}`;
+    };
+    expect(ASSISTANT_PATHS).toEqual({ status: served('GET', 'assistant.status'), chat: served('POST', 'assistant.chat') });
   });
 });
 
@@ -131,9 +138,15 @@ describe('errorNotice', () => {
     new Error('Failed to fetch'),
     new Error('Network error'),
     new Error('load failed'),
-    new TypeError('terminated'),
   ])('says the connection was lost for %s', (error) => {
     expect(errorNotice(error)).toEqual({ text: 'The connection to Strapi was lost. Try again.', newChat: false });
+  });
+
+  // A bug in the page throws a TypeError too. Only the messages browsers give for a failed request mean a lost connection.
+  it('does not take a TypeError from the page itself for a lost connection', () => {
+    for (const message of ['Cannot read properties of undefined', "undefined is not an object (evaluating 'x.y')", 'x is not a function', 'terminated']) {
+      expect(errorNotice(new TypeError(message)), message).toEqual({ text: 'Something went wrong. Try again.', newChat: false });
+    }
   });
 
   it('gives the general text for anything else, undefined and things that are not errors included', () => {

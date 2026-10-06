@@ -21,6 +21,18 @@ describe('the texts the admin repeats from the server', () => {
     expect(fromStatus.text).toBe(serverText);
   });
 
+  // The two errors that offer New chat are told apart by their code. If the server renamed one, the page would stop offering it.
+  it('offers a new chat for the two server errors that call for one: the chat that is too long, and a history Anthropic rejected', () => {
+    const context = { model: 'claude-sonnet-5-5' };
+    const tooLong = staffErrorOf({ code: 'chat_too_long' }, context);
+    const rejected = staffErrorOf({ code: '400', message: 'messages.1.content.0: Invalid `signature` in `thinking` block' }, context);
+
+    for (const staff of [tooLong, rejected]) {
+      const error = Object.assign(new Error(staff.message), { code: staff.code });
+      expect(errorNotice(error), staff.code).toEqual({ text: staff.message, newChat: true });
+    }
+  });
+
   it("says the general error as the server does, for every error it can't name", () => {
     const serverText = staffErrorOf({ code: 'unknown' }, { model: 'claude-sonnet-5-5' }).message;
     expect(serverText).toBe(SOMETHING_WRONG_TEXT);

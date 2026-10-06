@@ -47,7 +47,7 @@ describe("the plugin's registration with the admin", () => {
     const address = new URL(href, 'https://admin.test');
 
     expect(address.pathname).toBe('/plugins/maison');
-    expect(selectTab(visibleTabs({ canReview: true, canRead: true, canView: true }), address.searchParams.get('tab'))).toBe('inquiries');
+    expect(selectTab(visibleTabs({ canReview: true, canRead: true, canView: true, canUse: false }), address.searchParams.get('tab'))).toBe('inquiries');
   });
 
   it("links the requests widget to the Maison page, which opens on the first tab the admin may see", () => {
