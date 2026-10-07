@@ -26,8 +26,15 @@ describe('the saved chat content type', () => {
     expect(schema.options.draftAndPublish).toBe(false);
   });
 
-  it('is hidden from the Content Manager and the Content-Type Builder: only its admin reads a chat, on the Ask tab', () => {
+  it('is hidden from the screens of the Content Manager and the Content-Type Builder', () => {
     expect(schema.pluginOptions['content-manager'].visible).toBe(false);
     expect(schema.pluginOptions['content-type-builder'].visible).toBe(false);
+  });
+
+  // `visible: false` hides the type in the admin screens only. A Super Admin can still reach the stored rows through Strapi's Content Manager
+  // API, so the description says where an admin can open a chat, and never that nobody else can read it.
+  it('says where its admin opens a chat, and does not say that nobody else can read it', () => {
+    expect(schema.info.description).toContain('Only that admin can open it in the assistant.');
+    expect(schema.info.description).not.toMatch(/\bread\b/i);
   });
 });
