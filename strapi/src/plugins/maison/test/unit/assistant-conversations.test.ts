@@ -175,6 +175,42 @@ describe('the saved chats service', () => {
       expect(rows.get('c1')?.title).toBe('Which visits are waiting?');
     });
 
+    // "New chat" is the title of a chat saved the first time, with no title to go by. A save of a chat that is already there never makes one up: a
+    // body with nothing to save, or a title that is not text, is a mistake of the page, and it must not move the chat to the top or rename it.
+    describe('a body with nothing to save, or a title that is not text', () => {
+      const REFUSED = { ok: false, code: 'invalid_input', message: NOT_SAVED, hint: 'Start a new chat and try again.' };
+
+      it.each([
+        ['no title and no messages', {}],
+        ['a title that is null', { title: null }],
+        ['a title that is a number', { title: 42 }],
+        ['a title that is an object', { title: {} }],
+        ['a title that is a list', { title: ['x'] }],
+        ['a title with no words', { title: '' }],
+        ['a title of only spaces and line breaks', { title: ' \n\t ' }],
+      ])('refuses %s, and writes nothing', async (_what, input) => {
+        const { service, called, rows } = chatsWorld([savedRow('c1', 7)]);
+        expect(await service.update(7, 'c1', input as never)).toEqual(REFUSED);
+        expect(called('update')).toEqual([]);
+        expect(rows.get('c1')).toEqual(savedRow('c1', 7));
+      });
+
+      it('refuses a title that is not text even when the messages are good, and saves neither', async () => {
+        const { service, called, rows } = chatsWorld([savedRow('c1', 7)]);
+        expect(await service.update(7, 'c1', { title: null, messages: [...CHAT, staffMessage('u2', 'More')] } as never)).toEqual(REFUSED);
+        expect(called('update')).toEqual([]);
+        expect(rows.get('c1')).toEqual(savedRow('c1', 7));
+      });
+
+      it("is still a 404 for another admin's chat or an ID nobody has: nothing but the owner learns anything about a chat", async () => {
+        const { service, called } = chatsWorld([savedRow('c1', 8)]);
+        const theirs = await service.update(7, 'c1', {});
+        expect(theirs).toMatchObject({ ok: false, code: 'not_found', message: NO_CHAT });
+        expect(await service.update(7, 'nobody', {})).toEqual(theirs);
+        expect(called('update')).toEqual([]);
+      });
+    });
+
     it('takes no admin from the input', async () => {
       const { service, rows } = chatsWorld([savedRow('c1', 7)]);
       await service.update(7, 'c1', { title: 'x', adminUserId: 99 } as never);
@@ -340,6 +376,19 @@ describe('the saved chats controller', () => {
       expect(ctx.status).toBe(400);
       expect(called('update')).toEqual([]);
     });
+
+    it.each([['undefined', undefined], ['text', 'hello'], ['a list', []], ['an empty object', {}], ['a title that is null', { title: null }], ['a title that is a number', { title: 42 }]])(
+      'is a 400 for update with nothing to save or a title that is not text: %s, and the chat is not changed',
+      async (_what, body) => {
+        const { controller, called, rows } = chatsWorld([savedRow('c1', 7)]);
+        const ctx = fakeCtx({ admin: 7, params: { documentId: 'c1' }, body });
+        await controller.update(ctx);
+        expect(ctx.status).toBe(400);
+        expect(ctx.body).toEqual({ error: { message: NOT_SAVED, details: { code: 'invalid_input', hint: 'Start a new chat and try again.' } } });
+        expect(called('update')).toEqual([]);
+        expect(rows.get('c1')).toEqual(savedRow('c1', 7));
+      }
+    );
   });
 
   describe('a request with no signed-in admin', () => {

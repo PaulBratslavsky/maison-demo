@@ -28,9 +28,15 @@ const NO_CHAT_HINT = 'Reload the page: it may have been deleted.';
 const NOT_SAVED = 'This chat could not be saved.';
 const NOT_SAVED_HINT = 'Start a new chat and try again.';
 
-/** The title staff see in the sidebar: the words on one line, cut to its limit by characters, so an emoji or a Japanese character is never split. */
+/** A title's words on one line, or an empty string when it is not text or has no words. */
+const wordsOf = (title: unknown): string => (typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '');
+
+/**
+ * The title staff see in the sidebar: the words on one line, cut to its limit by characters, so an emoji or a Japanese character is never
+ * split. A title with no words is "New chat": only a chat that is saved the first time is given that, and `update` refuses such a title.
+ */
 export const cutTitle = (title: unknown): string => {
-  const text = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '';
+  const text = wordsOf(title);
   return text === '' ? 'New chat' : Array.from(text).slice(0, SAVED_CHATS.titleChars).join('');
 };
 
@@ -81,16 +87,24 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       return { ok: true, value: summary(row) };
     },
 
-    /** Saves a chat the admin owns again: the title, the messages, or both. Nothing is written when the body is not valid. */
+    /**
+     * Saves a chat the admin owns again: the title, the messages, or both. A body with neither, a title that is not text or has no words,
+     * or messages that are not a chat is refused (`invalid_input`), and nothing is written. Whether the chat is theirs is decided first, so
+     * a chat that is not theirs is a 404 whatever the body holds.
+     */
     async update(adminId: number, documentId: string, input: SaveInput): Promise<ServiceResult<SavedChatRow>> {
       if (!(await owned(adminId, documentId, ['documentId']))) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
       const data: Record<string, unknown> = {};
-      if (input.title !== undefined) data.title = cutTitle(input.title);
+      if (input.title !== undefined) {
+        if (wordsOf(input.title) === '') return failure('invalid_input', NOT_SAVED, NOT_SAVED_HINT);
+        data.title = cutTitle(input.title);
+      }
       if (input.messages !== undefined) {
         const stored = toStoredMessages(input.messages);
         if (!stored.ok) return failure('invalid_input', NOT_SAVED, NOT_SAVED_HINT);
         data.messages = stored.value;
       }
+      if (Object.keys(data).length === 0) return failure('invalid_input', NOT_SAVED, NOT_SAVED_HINT);
       const row = await documents().update({ documentId, data: data as never });
       // The chat can be deleted after the check and before this write (another tab, or Reset demo activity). Strapi's update answers null then.
       if (!row) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
