@@ -61,7 +61,10 @@ export const fakeTable = (initial: Doc[] = []) => {
         return record('create', { data }, { ...row });
       },
       update: async ({ documentId, data }: Doc) => {
-        const row = { ...rows.get(documentId), ...data, updatedAt: stamp() };
+        // Strapi's update answers null for a document that is not there, and creates nothing.
+        const found = rows.get(documentId);
+        if (!found) return record('update', { documentId, data }, null);
+        const row = { ...found, ...data, updatedAt: stamp() };
         rows.set(documentId, row);
         return record('update', { documentId, data }, { ...row });
       },

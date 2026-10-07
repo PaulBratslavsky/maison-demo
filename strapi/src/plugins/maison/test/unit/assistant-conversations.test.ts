@@ -180,6 +180,28 @@ describe('the saved chats service', () => {
       await service.update(7, 'c1', { title: 'x', adminUserId: 99 } as never);
       expect(rows.get('c1')?.adminUserId).toBe(7);
     });
+
+    // Another tab, or Reset demo activity, can delete the chat after the check read it and before the save. Strapi's update answers null then,
+    // and the page saves the chat again as a new one when it is told there is no such chat.
+    it('says there is no such chat, in the same words as for an ID nobody has, when the chat is deleted between the check and the save', async () => {
+      const { service, rows, strapi } = chatsWorld([savedRow('c1', 7)]);
+      const documents = strapi.documents;
+      strapi.documents = (uid: string) => {
+        const real = documents(uid);
+        return {
+          ...real,
+          findFirst: async (params: Doc) => {
+            const found = await real.findFirst(params);
+            rows.delete('c1');
+            return found;
+          },
+        };
+      };
+      const answer = await service.update(7, 'c1', { title: 'Late' });
+      expect(answer).toMatchObject({ ok: false, code: 'not_found', message: NO_CHAT });
+      expect(answer).toEqual(await service.update(7, 'nobody', { title: 'Late' }));
+      expect(rows.has('c1')).toBe(false);
+    });
   });
 
   describe('remove', () => {

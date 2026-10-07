@@ -92,6 +92,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         data.messages = stored.value;
       }
       const row = await documents().update({ documentId, data: data as never });
+      // The chat can be deleted after the check and before this write (another tab, or Reset demo activity). Strapi's update answers null then.
+      if (!row) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
       return { ok: true, value: summary(row) };
     },
 
