@@ -142,14 +142,49 @@ describe('MarkdownBody', () => {
     const header = (body: HTMLElement) => within(body).getAllByRole('columnheader')[0];
     const cell = (body: HTMLElement) => within(body).getAllByRole('cell')[0];
 
-    it('is a block of its own that scrolls sideways when it is wider than the bubble, so only the table moves: the answer, the list and the drawer stay where they are', () => {
+    // A real browser lays a table out so that it fits the room it has: it makes the columns narrower, down to the longest piece of text each can break
+    // at, and a date such as 2026-10-05 is broken after its second hyphen. That was in the first build, at 600px, in Chrome, and jsdom cannot see it.
+    // So the table is as wide as its columns want to be (`max-content`) and never made to fit: it is the table's box, not its columns, that gives way.
+    it('is as wide as its columns want to be and not as wide as the bubble, so the browser does not squeeze its columns until a date breaks in two', () => {
       const { body } = draw(TABLE);
-      expect(declarationsOf(body, ' table')).toMatchObject({ display: 'block', 'overflow-x': 'auto', width: '100%' });
+      const declarations = declarationsOf(body, ' table');
+      expect(declarations.width).toBe('max-content');
+      // A table that is `display: block` is made to fit the room it has, and `width: 100%` or a maximum width does the same.
+      expect(declarations.display).toBeUndefined();
+      expect(declarations['max-width']).toBeUndefined();
+      expect(declarations['table-layout']).toBeUndefined();
+    });
+
+    it('is in a box of its own that scrolls sideways when the table is wider than the bubble, so only the table moves: the answer, the list and the drawer stay where they are', () => {
+      const { body } = draw(TABLE);
+      const table = within(body).getByRole('table');
+      const scroller = table.parentElement as HTMLElement;
+      expect(scroller.tagName).toBe('DIV');
+      expect(scroller.parentElement).toBe(body);
+      expect(scroller.children).toHaveLength(1);
+      expect(declarationsOf(scroller)['overflow-x']).toBe('auto');
+      // The table itself does not scroll: its box is the scroller's content.
+      expect(declarationsOf(body, ' table')['overflow-x']).toBeUndefined();
+    });
+
+    it('gives each table its own box, so one wide table does not move another', () => {
+      const { body } = draw(`${TABLE}\n\nBetween the tables.\n\n${TABLE}`);
+      const scrollers = within(body).getAllByRole('table').map((table) => table.parentElement);
+      expect(scrollers).toHaveLength(2);
+      expect(scrollers[0]).not.toBe(scrollers[1]);
     });
 
     it('does not pass its sideways scroll on, to the page or to the browser\'s swipe back, when it reaches its end', () => {
       const { body } = draw(TABLE);
-      expect(declarationsOf(body, ' table')['overscroll-behavior-x']).toBe('contain');
+      const scroller = within(body).getByRole('table').parentElement as HTMLElement;
+      expect(declarationsOf(scroller)['overscroll-behavior-x']).toBe('contain');
+    });
+
+    it('keeps the space round a table that a paragraph has, on the box and not on the table', () => {
+      const { body } = draw(TABLE);
+      const scroller = within(body).getByRole('table').parentElement as HTMLElement;
+      expect(declarationsOf(scroller).margin).toBe('8px 0');
+      expect(declarationsOf(body, ' table').margin).toBeUndefined();
     });
 
     it('keeps the text of a header cell on one line', () => {

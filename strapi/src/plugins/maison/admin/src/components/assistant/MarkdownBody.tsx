@@ -15,8 +15,12 @@ import { safeLink } from '../../assistant';
  *   on one line, and a body cell wraps its text between words, in a column between 7rem and 22rem wide: a short value (a date, a reference, a masked
  *   customer) keeps its line, and a long text wraps inside its column. A word is broken only when it is longer than the column can be (`overflow-wrap:
  *   break-word`). Never `anywhere` or `break-all`: those shrink every column to a letter or two. The bubble's own `word-break: break-word` is inherited by
- *   the cells, so a body cell sets `word-break: normal` back. When the table is still wider than the bubble, it scrolls sideways (it is a block with
- *   `overflow-x: auto`), and nothing else moves: not the message list, not the drawer, and not the browser's swipe back (`overscroll-behavior-x`).
+ *   the cells, so a body cell sets `word-break: normal` back.
+ *   The table is as wide as its columns want to be (`width: max-content`) and is never made to fit the bubble. A browser that makes a table fit
+ *   squeezes the columns down to the shortest piece each can break at: it broke `2026-10-05` after its second hyphen and `line:Udec…02` before its last
+ *   two characters, in a real browser at 600px. So a table that is wider than the bubble scrolls sideways instead, in a box of its own (`TableScroll`),
+ *   and nothing else moves: not the message list, not the drawer, and not the browser's swipe back (`overscroll-behavior-x`). The 7rem and 22rem of the
+ *   cells are in the admin's rem, which is 10px because the design system sets the root font size to 62.5%, so a column is 70px to 220px wide.
  * - Images are not drawn, and only an `http:` or `https:` link is a link (see `MarkdownLink`). The model reads customer text, and an image
  *   address or a link could carry other customers' words out of the page.
  * Raw HTML in an answer is shown as text: react-markdown does not render it.
@@ -53,12 +57,8 @@ const Body = styled.div`
   a { color: ${({ theme }) => theme.colors.primary600}; }
   table {
     border-collapse: collapse;
-    margin: 8px 0;
     font-size: 0.9em;
-    width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    display: block;
+    width: max-content;
   }
   th, td {
     border: 1px solid ${({ theme }) => theme.colors.neutral300};
@@ -82,6 +82,23 @@ const Body = styled.div`
 `;
 
 /**
+ * The box a table scrolls sideways in. It is as wide as the answer, and the table in it is as wide as its columns want to be, so a table that does not
+ * fit scrolls here and moves nothing else. It keeps the space above and below the table.
+ */
+const TableScroll = styled.div`
+  margin: 8px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+`;
+
+/** A table in an answer, in its own scroll box. react-markdown hands its own `node` to a custom component, which is left out so it does not land on the element. */
+const MarkdownTable = ({ node: _node, ...props }: ComponentProps<'table'> & { node?: unknown }) => (
+  <TableScroll>
+    <table {...props} />
+  </TableScroll>
+);
+
+/**
  * A link in an answer. Only an `http:` or `https:` address is a link: it opens in a new tab and gives the page no way back to its window.
  * Anything else is its text, as plain text. react-markdown hands its own `node` to a custom component, which is left out here so it does not
  * land on the element as an attribute.
@@ -96,7 +113,7 @@ const MarkdownLink = ({ href, children, node: _node, ...props }: ComponentProps<
   );
 };
 
-const components = { a: MarkdownLink } as ComponentProps<typeof Markdown>['components'];
+const components = { a: MarkdownLink, table: MarkdownTable } as ComponentProps<typeof Markdown>['components'];
 
 export const MarkdownBody = ({ text }: { text: string }) => (
   // `data-message-part` is a hook for tests: it lets a check read the rendered answer and nothing else in the message.
