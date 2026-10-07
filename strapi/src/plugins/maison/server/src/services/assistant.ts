@@ -206,7 +206,7 @@ export type AssistantStatus = { ready: true; model: string } | { ready: false; r
 
 /**
  * A tool as the Ask tab lists it: its name, and what staff call it. It is exported although no other file imports it: the type of this
- * service, which the plugin's declaration files spell out, includes it, and the build fails to write them when it cannot be named.
+ * service, which the plugin's declaration files spell out, includes it, and the build reports an error (TS4082) when it cannot be named.
  */
 export interface ToolInfo {
   name: string;
