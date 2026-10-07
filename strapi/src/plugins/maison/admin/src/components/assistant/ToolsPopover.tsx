@@ -11,7 +11,8 @@ import { ToolsIcon, TopBarIcon } from './TopBarIcon';
  * saved choice and what goes to the server with each request: Maison's tools are fixed. They are the tools this admin's chat really gets, as
  * the status lists them, so a role that may read less sees less.
  *
- * Each row has the tool's label, one line about it, and its name in a code chip. The popover closes on a click outside it and on Escape.
+ * Each row has the tool's label, one line about it, and its name in a code chip. The popover closes on a click outside it and on Escape. The
+ * Escape that closes it goes no further: in the drawer, Escape closes the drawer too, and the first one is for the list.
  */
 
 const Wrapper = styled.div`
@@ -79,7 +80,17 @@ export const ToolsPopover = ({ tools }: { tools: readonly ToolInfo[] }) => {
   }, [open]);
 
   return (
-    <Wrapper ref={wrapper}>
+    <Wrapper
+      ref={wrapper}
+      onKeyDown={(event) => {
+        // The document's listener above closes the list for an Escape from anywhere. This one is for an Escape from the list or its button:
+        // it also stops what is around the list from acting on that Escape.
+        if (open && event.key === 'Escape') {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
       <TopBarIcon label={`Tools (${tools.length})`} active={open} expanded={open} onClick={() => setOpen((value) => !value)}>
         <ToolsIcon />
       </TopBarIcon>

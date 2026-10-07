@@ -73,10 +73,8 @@ describe("the admin panel's permissions for customer questions", () => {
     expect(actionsOf(PERMISSIONS.sections)).toEqual(expect.arrayContaining([ACTION.questionsRead, ACTION.questionsAnswer]));
   });
 
-  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView, canReply and canUse', () => {
-    expect(PERMISSIONS.sections.map(flagOf)).toEqual(
-      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply', 'canUse'])
-    );
+  it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView and canReply', () => {
+    expect(PERMISSIONS.sections.map(flagOf)).toEqual(expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply']));
   });
 
   it('make a different flag for each action: actions that end in the same word would share one flag', () => {
@@ -87,21 +85,26 @@ describe("the admin panel's permissions for customer questions", () => {
   });
 
   // The page checks every action of `sections` at once, so two that end in one word would give one flag for both.
-  it('make eight flags for the eight actions the page checks, none of them shared', () => {
-    expect(PERMISSIONS.sections).toHaveLength(8);
-    expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(8);
+  it('make seven flags for the seven actions the page checks, none of them shared', () => {
+    expect(PERMISSIONS.sections).toHaveLength(7);
+    expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(7);
   });
 });
 
 describe("the admin panel's permission for the assistant", () => {
   const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
 
-  it('is checked with useRBAC, for the page to read as canUse', () => {
-    expect(PERMISSIONS.sections).toContainEqual({ action: ACTION.assistantUse, subject: null });
+  // The assistant is a drawer on every admin page, drawn by Maison's menu icon, which checks this one permission and reads canUse.
+  it("is one entry of its own, checked with useRBAC by the menu icon, for the icon to read as canUse", () => {
+    expect(PERMISSIONS.assistant).toEqual([{ action: ACTION.assistantUse, subject: null }]);
     expect(ACTION.assistantUse.split('.').slice(-1)[0]).toBe('use');
   });
 
-  it("doesn't open the page on its own: it adds the Ask tab, and the page is for staff who read something", () => {
+  it("is not one of the permissions the Maison page checks: the page has no assistant of its own any more", () => {
+    expect(actionsOf(PERMISSIONS.sections)).not.toContain(ACTION.assistantUse);
+  });
+
+  it("doesn't open the page on its own: the page is for staff who read something, and the assistant is on every page", () => {
     expect(actionsOf(PERMISSIONS.page)).not.toContain(ACTION.assistantUse);
   });
 

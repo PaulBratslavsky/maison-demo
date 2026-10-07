@@ -3,6 +3,7 @@ import { Plus, Trash } from '@strapi/icons';
 import styled from 'styled-components';
 
 import type { SavedChatRow } from '../../conversations';
+import { HISTORY_WIDTH } from './drawerWidth';
 
 /**
  * The history sidebar, copied from strapi-plugin-tanstack-ai 1.6.0 (`ConversationSidebar.tsx`): 260px wide when open, and closed it
@@ -11,6 +12,9 @@ import type { SavedChatRow } from '../../conversations';
  * Without "Manage history": Maison has no page for it.
  *
  * What differs from the reference, on purpose:
+ * - Its width includes its border (`box-sizing: border-box`), so the column is exactly 260px (`HISTORY_WIDTH`). The assistant's drawer is as wide as
+ *   the chat and this column together, so a border outside the 260px would take a pixel from the chat. Opening the column makes the drawer wider and
+ *   never takes width from the chat (drawerWidth.ts).
  * - While an answer comes, the rows, New chat and the trash buttons are off. Opening another chat then would swap the messages under an
  *   answer that is still being written.
  * - A closed sidebar is `inert`, so its buttons leave the tab order. The reference sets only `aria-hidden`, which leaves them focusable.
@@ -18,8 +22,9 @@ import type { SavedChatRow } from '../../conversations';
  */
 
 const SidebarRoot = styled.div<{ $open: boolean }>`
-  width: ${({ $open }) => ($open ? '260px' : '0px')};
-  min-width: ${({ $open }) => ($open ? '260px' : '0px')};
+  box-sizing: border-box;
+  width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};
+  min-width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};
   display: flex;
   flex-direction: column;
   border-right: ${({ $open, theme }) => ($open ? `1px solid ${theme.colors.neutral200}` : 'none')};

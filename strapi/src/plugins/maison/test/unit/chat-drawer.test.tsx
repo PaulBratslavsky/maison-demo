@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
-import { screen, waitFor, within } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { darkTheme, lightTheme } from '@strapi/design-system';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useState, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AskTab } from '../../admin/src/components/assistant/AskTab';
 import { AssistantProvider, useAssistant } from '../../admin/src/components/assistant/AssistantProvider';
+import { ChatDrawer } from '../../admin/src/components/assistant/ChatDrawer';
+import { declarationsOf, keyframesCss, mediaDeclarationsOf } from './css';
 import { renderInTheme } from './render';
 
 /*
- * The Ask tab as staff meet it: the real provider, with `useChat` and the real connection adapter, over a stand-in for Strapi's fetch client
- * (the status call) and for `fetch` (the chat stream). Nothing here reaches a server or a model.
+ * The assistant's drawer as staff meet it: the real provider, with `useChat` and the real connection adapter, over a stand-in for Strapi's
+ * fetch client (the status call and the saved chats) and for `fetch` (the chat stream). Nothing here reaches a server or a model. Before the
+ * drawer, the same chat was a tab of the Maison page, and these tests moved here with it: what they hold is the chat's behaviour, which is the same.
  */
 const client = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() }));
 vi.mock('@strapi/strapi/admin', () => ({ useFetchClient: () => client }));
@@ -67,7 +70,16 @@ const savedChat = (documentId: string, title: string, messages: unknown[] = [sta
 const notFound = () => Object.assign(new Error('There is no saved chat with that ID.'), { status: 404 });
 
 /**
- * The page over stand-ins: Strapi's fetch client, which answers the status and holds the admin's saved chats (newest first, as the server
+ * The drawer as GlobalAssistant draws it. Whether it is open, and its width, belong to its parent, so the parent's part is played here: the width is
+ * in state, and `open` is a prop a test changes with `rerender`. The drawer stays in the page while it is closed, and is hidden.
+ */
+const Drawer = ({ open = true, onClose = () => {} }: { open?: boolean; onClose?: () => void }) => {
+  const [expanded, setExpanded] = useState(false);
+  return <ChatDrawer open={open} expanded={expanded} onToggleExpanded={() => setExpanded((value) => !value)} onClose={onClose} />;
+};
+
+/**
+ * The drawer over stand-ins: Strapi's fetch client, which answers the status and holds the admin's saved chats (newest first, as the server
  * lists them), and `fetch`, which answers each chat request with the next stream scripted for it. `server.rows` is what is saved.
  */
 const world = ({ status = READY as unknown, chat = [] as Array<() => Response | Promise<Response>>, saved = [] as SavedChat[], mount = true } = {}) => {
@@ -122,10 +134,10 @@ const world = ({ status = READY as unknown, chat = [] as Array<() => Response | 
     return next();
   });
   vi.stubGlobal('fetch', fetchMock);
-  /** Puts the Ask tab, or another tree, inside the provider. A test that changes the stand-ins first passes `mount: false` and calls this itself. */
-  const show = (ui: ReactElement = <AskTab />) =>
+  /** Puts the drawer, or another tree, inside the provider, which has started: the drawer is open. A test that changes the stand-ins first passes `mount: false` and calls this itself. */
+  const show = (ui: ReactElement = <Drawer />) =>
     renderInTheme(
-      <AssistantProvider>
+      <AssistantProvider started>
         {ui}
       </AssistantProvider>
     );
@@ -153,8 +165,8 @@ describe('before the chat', () => {
     client.get.mockReset();
     client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
     renderInTheme(
-      <AssistantProvider>
-        <AskTab />
+      <AssistantProvider started>
+        <Drawer />
       </AssistantProvider>
     );
     expect(screen.getByText('Checking the assistant…')).toBeTruthy();
@@ -187,10 +199,6 @@ describe('before the chat', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  it('says so, with no chat, for an admin who has no assistant at all', () => {
-    renderInTheme(<AskTab />);
-    expect(screen.getByText('The assistant is not available for your role.')).toBeTruthy();
-  });
 });
 
 describe('the chat area', () => {
@@ -257,27 +265,30 @@ describe('a turn', () => {
     expect(document.activeElement).toBe(box());
   });
 
-  // Radix unmounts the content of a tab that is not open, so the page keeps the chat in the provider, above the tabs.
-  it('keeps the chat and what staff typed while they look at another tab, and shows both when they come back', async () => {
+  // The drawer is closed and opened as staff please. The chat and the draft are in the provider, above the drawer, and the drawer itself stays in the page
+  // while it is closed, hidden, so what staff see when it opens again is what they left: the same chat, the same text box, and what they typed.
+  it('keeps the chat and what staff typed while the drawer is closed, and shows both when it opens again', async () => {
     const { show } = world({ chat: [() => stream(answer('Two visits wait.'))], mount: false });
-    const view = show();
+    const view = show(<Drawer open />);
     await screen.findByRole('textbox', { name: 'Chat message' });
     await userEvent.type(box(), 'Which visits are waiting?{Enter}');
     await within(region()).findByText('Two visits wait.');
     await userEvent.type(box(), 'And the questions');
+    const textBox = box();
 
     view.rerender(
-      <AssistantProvider>
-        <p>Another tab</p>
+      <AssistantProvider started>
+        <Drawer open={false} />
       </AssistantProvider>
     );
     expect(screen.queryByRole('textbox')).toBeNull();
     view.rerender(
-      <AssistantProvider>
-        <AskTab />
+      <AssistantProvider started>
+        <Drawer open />
       </AssistantProvider>
     );
 
+    expect(box()).toBe(textBox);
     expect(box().value).toBe('And the questions');
     expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
   });
@@ -920,7 +931,7 @@ describe('saved chats', () => {
     const { rows, show } = world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [slow], mount: false });
     show(
       <>
-        <AskTab />
+        <Drawer />
         <Probe />
       </>
     );
@@ -934,7 +945,7 @@ describe('saved chats', () => {
     expect(within(region()).getByText('Looking into it')).toBeTruthy();
     expect(client.del).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
-    // The chat was opened once, when Ask opened, and not again for the probe.
+    // The chat was opened once, when the drawer opened, and not again for the probe.
     expect(client.get.mock.calls.filter(([url]) => url === '/maison/conversations/c1')).toHaveLength(1);
   });
 
@@ -978,6 +989,634 @@ describe('saved chats', () => {
 
       expect(await screen.findByText('Anthropic is busy. Try again in a minute.')).toBeTruthy();
       expect(screen.queryByText("Couldn't save this chat.")).toBeNull();
+    });
+  });
+});
+
+/*
+ * What the drawer adds to the chat: its frame, its widths, its focus, Escape and Close, History beside the chat, and staying in the page while it is closed.
+ * The widths are held as the declarations the component asked for, since jsdom has no layout: a declaration is read by its name, on its own.
+ */
+
+const drawer = () => screen.getByRole('complementary', { name: 'Maison assistant' });
+const savedList = () => screen.getByLabelText('Saved chats');
+/** The chat column: the box of the top bar, the messages and the composer, which has the width of the chat. */
+const chatColumn = () => region().parentElement as HTMLElement;
+
+describe('the drawer', () => {
+  describe('its frame', () => {
+    it('is a complementary region named "Maison assistant", fixed to the right edge and the full height of the window, 600px wide and at most 90vw', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const declarations = declarationsOf(drawer());
+      expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': '90vw' });
+    });
+
+    it('is white, with a border on its left and the popup shadow, all from the theme', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const declarations = declarationsOf(drawer());
+      expect(declarations.background).toBe(lightTheme.colors.neutral0);
+      expect(declarations['border-left']).toBe(`1px solid ${lightTheme.colors.neutral200}`);
+      expect(declarations['box-shadow']).toBe(lightTheme.shadows.popupShadow);
+    });
+
+    it('takes its colours from the dark theme in the dark theme', async () => {
+      world({ mount: false });
+      renderInTheme(
+        <AssistantProvider started>
+          <Drawer />
+        </AssistantProvider>,
+        { dark: true }
+      );
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const declarations = declarationsOf(drawer());
+      expect(declarations.background).toBe(darkTheme.colors.neutral0);
+      expect(declarations['border-left']).toBe(`1px solid ${darkTheme.colors.neutral200}`);
+    });
+
+    it('sits above the page and the left menu and below the dialogs, so Reply on LINE and Answer open above it', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(drawer())['z-index']).toBe('299');
+    });
+
+    it('slides in from the right, and changes its width over 0.2 seconds', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const declarations = declarationsOf(drawer());
+      expect(declarations.transition).toBe('width 0.2s ease');
+      expect(declarations.animation).toMatch(/\b0\.2s\b/);
+      expect(keyframesCss()).toMatch(/@keyframes [^{]+\{from\{transform:translateX\(100%\);\}to\{transform:translateX\(0\);\}\}/);
+    });
+
+    it('has no animation and no transition for staff who prefer less motion', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const reduced = mediaDeclarationsOf(drawer(), '(prefers-reduced-motion: reduce)');
+      expect(reduced.transition).toBe('none');
+      expect(reduced.animation).toBe('none');
+    });
+
+    it('is in the page whichever state the assistant is in: while it is checked, when it is not set up, and when the check failed', async () => {
+      let answerStatus: (value: unknown) => void = () => {};
+      client.get.mockReset();
+      client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
+      renderInTheme(
+        <AssistantProvider started>
+          <Drawer />
+        </AssistantProvider>
+      );
+      expect(drawer()).toBeTruthy();
+      expect(screen.getByText('Checking the assistant…')).toBeTruthy();
+      answerStatus({ data: NOT_SET_UP });
+      expect(await screen.findByRole('heading', { name: "The assistant isn't set up" })).toBeTruthy();
+      expect(drawer()).toBeTruthy();
+      expect(declarationsOf(drawer()).width).toBe('600px');
+    });
+  });
+
+  describe('focus', () => {
+    it('moves the focus to the text box when it opens', async () => {
+      world();
+      const textarea = await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it('puts the focus on the drawer while the assistant is being checked, and moves it to the text box when the chat comes, so Escape works at once', async () => {
+      let answerStatus: (value: unknown) => void = () => {};
+      client.get.mockReset();
+      client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
+      renderInTheme(
+        <AssistantProvider started>
+          <Drawer />
+        </AssistantProvider>
+      );
+      expect(document.activeElement).toBe(drawer());
+
+      answerStatus({ data: READY });
+
+      const textarea = await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    // Opening the drawer from a button on the page, for example, leaves the focus on that button, and the drawer still takes it.
+    it('moves the focus to the text box when it opens, wherever the focus was on the page, when the assistant is already known to be ready', async () => {
+      const Ready = () => <span>{useAssistant()?.ready ? 'the assistant is ready' : 'the assistant is not ready'}</span>;
+      const { show } = world({ mount: false });
+      const view = show(
+        <>
+          <button type="button">A button on the page</button>
+          <Ready />
+        </>
+      );
+      await screen.findByText('the assistant is ready');
+      screen.getByRole('button', { name: 'A button on the page' }).focus();
+
+      view.rerender(
+        <AssistantProvider started>
+          <button type="button">A button on the page</button>
+          <Ready />
+          <Drawer />
+        </AssistantProvider>
+      );
+
+      expect(document.activeElement).toBe(box());
+    });
+
+    it('moves the focus to the text box when "Check again" has brought the chat, though the button that had the focus is gone', async () => {
+      world({ status: NOT_SET_UP, mount: false }).show();
+      const again = await screen.findByRole('button', { name: 'Check again' });
+      again.focus();
+      client.get.mockImplementation(async () => ({ data: READY }));
+      await userEvent.click(again);
+      const textarea = await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it('does not take the focus from where staff put it while the assistant was being checked', async () => {
+      let answerStatus: (value: unknown) => void = () => {};
+      client.get.mockReset();
+      client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
+      renderInTheme(
+        <AssistantProvider started>
+          <button type="button">A button on the page</button>
+          <Drawer />
+        </AssistantProvider>
+      );
+      const page = screen.getByRole('button', { name: 'A button on the page' });
+      page.focus();
+
+      answerStatus({ data: READY });
+      await screen.findByRole('textbox', { name: 'Chat message' });
+
+      expect(document.activeElement).toBe(page);
+    });
+
+    it('does not trap the focus: Tab goes on to the page, which stays usable beside the drawer', async () => {
+      world({ mount: false }).show(
+        <>
+          <Drawer />
+          <button type="button">A button on the page</button>
+        </>
+      );
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      // The focus starts in the text box, which is the last control of the drawer that can take it (Send is off with nothing typed, and the
+      // saved chats are put away). The next stop is the page's button, which is after the drawer in the document, so nothing held the focus.
+      await userEvent.tab();
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'A button on the page' }));
+      // And back: Shift+Tab returns to the text box, so the drawer is as reachable from the page as the page is from the drawer.
+      await userEvent.tab({ shift: true });
+      expect(document.activeElement).toBe(box());
+    });
+  });
+
+  describe('Escape', () => {
+    const open = async (onClose = vi.fn()) => {
+      world({ mount: false }).show(
+        <>
+          <Drawer onClose={onClose} />
+          <button type="button">A button on the page</button>
+        </>
+      );
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      return onClose;
+    };
+
+    it('closes the drawer when it is pressed with the focus in the drawer', async () => {
+      const onClose = await open();
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('closes the drawer from any control in it, not only from the text box', async () => {
+      const onClose = await open();
+      screen.getByRole('button', { name: 'History' }).focus();
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('does nothing when the focus is on the page, outside the drawer', async () => {
+      const onClose = await open();
+      screen.getByRole('button', { name: 'A button on the page' }).focus();
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for any other key', async () => {
+      const onClose = await open();
+      await userEvent.keyboard('a{Enter}{Tab}');
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    // Staff typing Japanese press Escape to cancel a conversion, and that must not close the drawer.
+    it('does nothing for the Escape that cancels a conversion of Japanese: the input method is still composing', async () => {
+      const onClose = await open();
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Chat message' }), { key: 'Escape', isComposing: true });
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Chat message' }), { key: 'Escape', keyCode: 229 });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    // A tooltip or a menu of the design system closes on Escape and says so by cancelling the event, and that one Escape is theirs.
+    it('does nothing for an Escape that something else has used already, such as a tooltip of the design system closing', async () => {
+      const onClose = await open();
+      const use = (event: KeyboardEvent) => event.preventDefault();
+      document.addEventListener('keydown', use, true);
+      try {
+        await userEvent.keyboard('{Escape}');
+      } finally {
+        document.removeEventListener('keydown', use, true);
+      }
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('closes the list of tools first, and the drawer with the next Escape', async () => {
+      const onClose = await open();
+      await userEvent.click(screen.getByRole('button', { name: /^Tools \(/ }));
+      expect(screen.getByRole('dialog', { name: 'Tools' })).toBeTruthy();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'Tools' })).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('works while the assistant is being checked, and when it is not set up: the focus is on the drawer then', async () => {
+      const onClose = vi.fn();
+      world({ status: NOT_SET_UP, mount: false }).show(<Drawer onClose={onClose} />);
+      await screen.findByRole('heading', { name: "The assistant isn't set up" });
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Close', () => {
+    it('is in the top bar, after Expand, and closes the drawer', async () => {
+      const onClose = vi.fn();
+      world({ mount: false }).show(<Drawer onClose={onClose} />);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const expand = screen.getByRole('button', { name: 'Expand the assistant' });
+      const close = screen.getByRole('button', { name: 'Close the assistant' });
+      expect(expand.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      await userEvent.click(close);
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('is there too while the assistant is being checked, when it is not set up, and when the check failed, so staff can always close the drawer', async () => {
+      const onClose = vi.fn();
+      let answerStatus: (value: unknown) => void = () => {};
+      client.get.mockReset();
+      client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
+      renderInTheme(
+        <AssistantProvider started>
+          <Drawer onClose={onClose} />
+        </AssistantProvider>
+      );
+      expect(screen.getByText('Checking the assistant…')).toBeTruthy();
+      await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      answerStatus({ data: NOT_SET_UP });
+      await screen.findByRole('heading', { name: "The assistant isn't set up" });
+      await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }));
+      expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it('is there when the check failed, with Check again', async () => {
+      const onClose = vi.fn();
+      world({ status: new Error('Forbidden'), mount: false }).show(<Drawer onClose={onClose} />);
+      await screen.findByText("Couldn't check the assistant: Forbidden");
+      await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }));
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Expand and Collapse', () => {
+    it('makes the chat wider, 600px to 960px, and narrower again with Collapse, and does nothing else: the list of saved chats stays as it was', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(drawer()).width).toBe('600px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 600px');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      expect(declarationsOf(drawer()).width).toBe('960px');
+      expect(declarationsOf(drawer())['max-width']).toBe('90vw');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
+      // Expand does not open the list of saved chats, and no list shows.
+      expect(savedList().hasAttribute('inert')).toBe(true);
+      expect(declarationsOf(savedList()).width).toBe('0px');
+      expect(screen.getByRole('button', { name: 'History' }).getAttribute('aria-expanded')).toBe('false');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Collapse the assistant' }));
+      expect(declarationsOf(drawer()).width).toBe('600px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 600px');
+    });
+
+    it('leaves the list of saved chats open when it was open, and shut when it was shut: only History decides', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      expect(savedList().hasAttribute('inert')).toBe(false);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      expect(savedList().hasAttribute('inert')).toBe(false);
+      await userEvent.click(screen.getByRole('button', { name: 'Hide history' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Collapse the assistant' }));
+      expect(savedList().hasAttribute('inert')).toBe(true);
+    });
+
+    it('keeps the chat, the draft and the text box as it changes its width: nothing is drawn again', async () => {
+      world({ chat: [() => stream(answer('Two visits wait.'))] });
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByText('Two visits wait.');
+      await userEvent.type(box(), 'And the questions');
+      const textBox = box();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Collapse the assistant' }));
+
+      expect(box()).toBe(textBox);
+      expect(box().value).toBe('And the questions');
+      expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
+    });
+  });
+
+  // Paul, 7 October: "history should not interfere with the width, it should just open wider to preserve the chat".
+  describe('History', () => {
+    const chats = () => [savedChat('c2', 'Any complaints this week?'), savedChat('c1', 'Which visits are waiting?')];
+
+    it('is shut at first, and opens a list of saved chats as a column of 260px beside the chat, to its left, which makes the drawer 860px wide and leaves the chat 600px', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      expect(savedList().hasAttribute('inert')).toBe(true);
+      expect(declarationsOf(drawer()).width).toBe('600px');
+
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+
+      expect(savedList().hasAttribute('inert')).toBe(false);
+      expect(declarationsOf(savedList())).toMatchObject({ width: '260px', 'min-width': '260px', 'box-sizing': 'border-box' });
+      expect(declarationsOf(savedList()).position).toBeUndefined();
+      expect(declarationsOf(drawer()).width).toBe('860px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 600px');
+      // The list comes before the chat in the page, so it is to its left, and it is not inside the chat column.
+      expect(savedList().compareDocumentPosition(chatColumn()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chatColumn().contains(savedList())).toBe(false);
+      expect(within(savedList()).getByRole('button', { name: 'Which visits are waiting?' })).toBeTruthy();
+    });
+
+    it('opens expanded as a column of 260px too, which makes the drawer 1220px wide and leaves the chat 960px', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+
+      expect(declarationsOf(drawer()).width).toBe('1220px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
+      expect(declarationsOf(savedList()).width).toBe('260px');
+    });
+
+    it('shrinks the drawer back when it is shut again, at either width, and the chat is as wide as it was', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Hide history' }));
+      expect(declarationsOf(drawer()).width).toBe('600px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 600px');
+      expect(savedList().hasAttribute('inert')).toBe(true);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      expect(declarationsOf(drawer()).width).toBe('1220px');
+      await userEvent.click(screen.getByRole('button', { name: 'Hide history' }));
+      expect(declarationsOf(drawer()).width).toBe('960px');
+      expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
+    });
+
+    // jsdom has no layout, so the limit is held as what the browser is asked for: the drawer is at most 90vw wide however wide it asks to be, the list is
+    // 260px and cannot shrink, and the chat column may shrink, so it gives up the difference and the list keeps its width.
+    it('is held at 90vw when the width it asks for would pass that, and the chat column is what gives up the difference', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+
+      expect(declarationsOf(drawer())).toMatchObject({ width: '1220px', 'max-width': '90vw' });
+      const column = declarationsOf(chatColumn());
+      expect(column.flex).toMatch(/^1 1 960px$/);
+      expect(column['min-width']).toBe('0');
+      // The list does not shrink: its minimum width is its width.
+      expect(declarationsOf(savedList())['min-width']).toBe('260px');
+    });
+
+    it('is the only thing that shows or hides the list: picking a chat, starting a new one and deleting one leave it as it is', async () => {
+      world({ saved: chats(), chat: [() => stream(answer('Fine.'))] });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+
+      await userEvent.click(within(savedList()).getByRole('button', { name: 'Which visits are waiting?' }));
+      await shows('The answer to Which visits are waiting?');
+      expect(savedList().hasAttribute('inert')).toBe(false);
+
+      await userEvent.click(within(savedList()).getByRole('button', { name: 'New chat' }));
+      expect(screen.getByText('Ask Maison')).toBeTruthy();
+      expect(savedList().hasAttribute('inert')).toBe(false);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Which visits are waiting?' }));
+      await waitFor(() => expect(within(savedList()).queryByRole('button', { name: 'Which visits are waiting?' })).toBeNull());
+      expect(savedList().hasAttribute('inert')).toBe(false);
+      expect(declarationsOf(drawer()).width).toBe('860px');
+    });
+
+    it('is not drawn as an overlay, and the error of a chat that could not be opened shows beside it, in the chat', async () => {
+      const { rows } = world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      rows.splice(1, 1);
+
+      await userEvent.click(within(savedList()).getByRole('button', { name: 'Which visits are waiting?' }));
+
+      const error = await screen.findByText("Couldn't open that chat.");
+      expect(error.closest('[role="alert"]')).not.toBeNull();
+      expect(chatColumn().contains(error)).toBe(true);
+    });
+
+    it('stays as staff left it when the drawer is closed and opened again, and the drawer is as wide as the list makes it', async () => {
+      const { show } = world({ saved: chats(), mount: false });
+      const view = show(<Drawer open />);
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open={false} />
+        </AssistantProvider>
+      );
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open />
+        </AssistantProvider>
+      );
+
+      expect(savedList().hasAttribute('inert')).toBe(false);
+      expect(declarationsOf(drawer()).width).toBe('860px');
+    });
+  });
+
+  // The drawer is not taken out of the page when it is closed: it is hidden. Taking it out and putting it back would draw the chat's screen again,
+  // and what staff see after opening it must be what they left: the same chat, the same messages, the draft, and where they had scrolled to.
+  describe('while it is closed', () => {
+    it('is in the page and hidden: out of sight, out of reach of the pointer and the keyboard, and out of the accessibility tree', async () => {
+      const { show } = world({ mount: false });
+      const view = show(<Drawer open />);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      const root = drawer();
+
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open={false} />
+        </AssistantProvider>
+      );
+
+      expect(screen.queryByRole('complementary')).toBeNull();
+      expect(document.body.contains(root)).toBe(true);
+      expect(root.getAttribute('aria-hidden')).toBe('true');
+      expect(root.hasAttribute('inert')).toBe(true);
+      expect(declarationsOf(root).visibility).toBe('hidden');
+      expect(declarationsOf(root)['pointer-events']).toBe('none');
+    });
+
+    it('is shown again by opening it: not hidden, not inert, and it is the same drawer, with the same text box', async () => {
+      const { show } = world({ mount: false });
+      const view = show(<Drawer open />);
+      const textBox = await screen.findByRole('textbox', { name: 'Chat message' });
+      const root = drawer();
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open={false} />
+        </AssistantProvider>
+      );
+
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open />
+        </AssistantProvider>
+      );
+
+      expect(drawer()).toBe(root);
+      expect(box()).toBe(textBox);
+      expect(root.hasAttribute('aria-hidden') && root.getAttribute('aria-hidden') === 'true').toBe(false);
+      expect(root.hasAttribute('inert')).toBe(false);
+      expect(declarationsOf(root).visibility).toBeUndefined();
+    });
+
+    it('does not ask for the assistant, start a chat or save one when it is opened again: the messages stay and nothing is sent to the server', async () => {
+      const { show } = world({ chat: [() => stream(answer('Two visits wait.'))], mount: false });
+      const view = show(<Drawer open />);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByText('Two visits wait.');
+      await waitFor(() => expect(client.post).toHaveBeenCalledTimes(1));
+      // A send asks for the status first, to refresh the session (the provider's connection does), so the count is taken after the send.
+      const statusCalls = () => client.get.mock.calls.filter(([url]) => url === '/maison/assistant/status').length;
+      const listCalls = () => client.get.mock.calls.filter(([url]) => url === '/maison/conversations').length;
+      const [statusBefore, listBefore] = [statusCalls(), listCalls()];
+
+      for (let round = 0; round < 3; round += 1) {
+        view.rerender(
+          <AssistantProvider started>
+            <Drawer open={false} />
+          </AssistantProvider>
+        );
+        view.rerender(
+          <AssistantProvider started>
+            <Drawer open />
+          </AssistantProvider>
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(within(region()).getByText('Which visits are waiting?')).toBeTruthy();
+      expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
+      expect(screen.queryByText('Ask Maison')).toBeNull();
+      expect(client.post).toHaveBeenCalledTimes(1);
+      expect(client.put).not.toHaveBeenCalled();
+      expect(statusCalls()).toBe(statusBefore);
+      expect(listCalls()).toBe(listBefore);
+    });
+
+    it('keeps an answer that arrives while it is closed, and shows it when it opens', async () => {
+      let finish: () => void = () => {};
+      const encoder = new TextEncoder();
+      const send = (controller: ReadableStreamDefaultController<Uint8Array>, events: Array<Record<string, unknown>>) => {
+        for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+      };
+      const slow = () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              send(controller, [event('RUN_STARTED'), event('TEXT_MESSAGE_START', { messageId: 'slow', role: 'assistant' }), event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: 'Looking into it' })]);
+              finish = () => {
+                send(controller, [event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: ' and found two visits.' }), event('TEXT_MESSAGE_END', { messageId: 'slow' }), event('RUN_FINISHED', { finishReason: 'stop' })]);
+                controller.close();
+              };
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      const { show } = world({ chat: [slow], mount: false });
+      const view = show(<Drawer open />);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByText('Looking into it');
+
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open={false} />
+        </AssistantProvider>
+      );
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      view.rerender(
+        <AssistantProvider started>
+          <Drawer open />
+        </AssistantProvider>
+      );
+
+      expect(await within(region()).findByText('Looking into it and found two visits.')).toBeTruthy();
+    });
+
+    it('moves the focus to the text box when it is opened again, whichever page control had the focus', async () => {
+      const { show } = world({ mount: false });
+      const view = show(
+        <>
+          <button type="button">A button on the page</button>
+          <Drawer open />
+        </>
+      );
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      view.rerender(
+        <AssistantProvider started>
+          <button type="button">A button on the page</button>
+          <Drawer open={false} />
+        </AssistantProvider>
+      );
+      screen.getByRole('button', { name: 'A button on the page' }).focus();
+
+      view.rerender(
+        <AssistantProvider started>
+          <button type="button">A button on the page</button>
+          <Drawer open />
+        </AssistantProvider>
+      );
+
+      expect(document.activeElement).toBe(box());
     });
   });
 });

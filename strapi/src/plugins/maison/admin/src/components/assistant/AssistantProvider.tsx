@@ -96,7 +96,7 @@ export interface AssistantApi {
 
 const AssistantContext = React.createContext<AssistantApi | null>(null);
 
-/** The chat of the Maison page, or null outside the provider: an admin without the permission to use the assistant has none. */
+/** The assistant's chat, or null outside the provider: an admin without the permission to use the assistant has none. */
 export const useAssistant = (): AssistantApi | null => React.useContext(AssistantContext);
 
 const storedToken = (): string | null => {
@@ -116,14 +116,18 @@ const cookies = (): string => {
 };
 
 /**
- * The chat, kept above the tabs. Radix unmounts a tab's content when the tab isn't selected, so a chat held by the Ask tab
- * would be gone when staff look at a list and come back. Here it lives as long as the Maison page does, and the tab only reads it.
+ * The chat, kept above the drawer. The drawer is closed and opened as staff please, and the chat, its saved chats and the text staff have
+ * typed must be as they left them, so they live here and the drawer only reads them. This provider stays for as long as the assistant's
+ * host is on the screen, which is every admin page (see assistantHost.tsx).
+ *
+ * It asks the server nothing until `started` is true, which is when staff open the drawer for the first time. It is on every admin page, and
+ * the status check and the saved chats are only worth a request to staff who use the assistant.
  *
  * It also keeps the admin's saved chats. Each turn that ends saves the open chat, one save at a time (`createSaveQueue`), with only the
  * messages that were cleaned of cut-off tool calls and failed turns. When the assistant is ready, the list loads and the most recent chat
  * is reopened. A chat is switched with `setMessages`, never by changing the thread: that would build the chat client again.
  */
-export const AssistantProvider = ({ children }: { children: React.ReactNode }) => {
+export const AssistantProvider = ({ children, started }: { children: React.ReactNode; started: boolean }) => {
   const fetchClient = useFetchClient();
   const mounted = useMounted();
   // useChat keeps its connection from the first render, and the save queue is made once, so both read the fetch client through a ref.
@@ -168,9 +172,10 @@ export const AssistantProvider = ({ children }: { children: React.ReactNode }) =
     }
   }, [mounted]);
 
+  // The first check of the assistant waits for the drawer to be opened. Once the status is known, the saved chats load (below).
   React.useEffect(() => {
-    void recheck();
-  }, [recheck]);
+    if (started) void recheck();
+  }, [started, recheck]);
 
   const connection = React.useMemo(
     () =>

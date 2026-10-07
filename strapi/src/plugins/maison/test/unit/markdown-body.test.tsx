@@ -3,6 +3,7 @@ import { darkTheme, lightTheme } from '@strapi/design-system';
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MarkdownBody } from '../../admin/src/components/assistant/MarkdownBody';
+import { declarationsOf } from './css';
 import { renderInTheme } from './render';
 
 /**
@@ -123,41 +124,106 @@ describe('MarkdownBody', () => {
   });
 
   describe('wide content', () => {
-    it('scrolls a wide table sideways inside its bubble: the table is a block with its own overflow, so it never widens the chat', () => {
-      const { body } = draw('| a | b |\n| - | - |\n| 1 | 2 |');
-      expect(cssOf(body)).toMatch(/ table\{[^}]*overflow-x:auto;display:block;\}/);
-    });
-
     it('keeps a long line of code inside the bubble, with a scroll of its own', () => {
       const { body } = draw('```\n' + 'x'.repeat(300) + '\n```');
-      expect(cssOf(body)).toMatch(/ pre\{[^}]*overflow-x:auto;/);
+      expect(declarationsOf(body, ' pre')['overflow-x']).toBe('auto');
+    });
+  });
+
+  // The assistant answers in a drawer 600px wide, with a bubble that takes the whole width beside the avatar, and a table of five columns can still be
+  // wider than that. Paul saw the first drawer build break cells inside words, one or two letters a line: the bubble's own `word-break: break-word` reaches
+  // the cells (`word-break` is inherited), and so did the `overflow-wrap: anywhere` the first build gave them. Each rule below is held on its own.
+  describe('tables', () => {
+    const TABLE = [
+      '| Reference | Customer | Requested | Summary |',
+      '| --- | --- | --- | --- |',
+      '| APT-4821 | line:Udec…02 | 2026-10-05 | The customer asks whether the strap of the watch can be made shorter before the visit on Saturday |',
+    ].join('\n');
+    const header = (body: HTMLElement) => within(body).getAllByRole('columnheader')[0];
+    const cell = (body: HTMLElement) => within(body).getAllByRole('cell')[0];
+
+    it('is a block of its own that scrolls sideways when it is wider than the bubble, so only the table moves: the answer, the list and the drawer stay where they are', () => {
+      const { body } = draw(TABLE);
+      expect(declarationsOf(body, ' table')).toMatchObject({ display: 'block', 'overflow-x': 'auto', width: '100%' });
+    });
+
+    it('does not pass its sideways scroll on, to the page or to the browser\'s swipe back, when it reaches its end', () => {
+      const { body } = draw(TABLE);
+      expect(declarationsOf(body, ' table')['overscroll-behavior-x']).toBe('contain');
+    });
+
+    it('keeps the text of a header cell on one line', () => {
+      const { body } = draw(TABLE);
+      expect(declarationsOf(body, ' th')['white-space']).toBe('nowrap');
+      expect(getComputedStyle(header(body)).whiteSpace).toBe('nowrap');
+    });
+
+    it('breaks the text of a body cell between words only: words stay whole, and a word is broken only when it is longer than its column can be', () => {
+      const { body } = draw(TABLE);
+      const declarations = declarationsOf(body, ' td');
+      expect(declarations['white-space']).toBe('normal');
+      expect(declarations['overflow-wrap']).toBe('break-word');
+      // The bubble gives its text `word-break: break-word`, which `word-break` passes on to the cells and which breaks a word anywhere. A cell sets it back.
+      expect(declarations['word-break']).toBe('normal');
+      expect(getComputedStyle(cell(body)).whiteSpace).toBe('normal');
+    });
+
+    it('never lets a cell, of the header or of the body, break a word anywhere: no `overflow-wrap: anywhere`, no `break-all`, no `break-word` for `word-break`', () => {
+      const { body } = draw(TABLE);
+      for (const part of [' table', ' thead', ' tbody', ' tr', ' th', ' td']) {
+        const declarations = declarationsOf(body, part);
+        expect(declarations['overflow-wrap'], part).not.toBe('anywhere');
+        expect(declarations['word-break'] ?? 'normal', part).toBe('normal');
+        expect(declarations['white-space'] ?? '', part).not.toBe('pre-wrap');
+      }
+    });
+
+    it('gives a body cell a width of at least 7rem and at most 22rem: a date, a reference or a masked customer keeps its line, and long text wraps inside its column', () => {
+      const { body } = draw(TABLE);
+      const declarations = declarationsOf(body, ' td');
+      expect(declarations['min-width']).toBe('7rem');
+      expect(declarations['max-width']).toBe('22rem');
+    });
+
+    it('puts the text of every cell at the top of its row, so a short value sits beside the first line of a long one', () => {
+      const { body } = draw(TABLE);
+      expect(declarationsOf(body, ' td')['vertical-align']).toBe('top');
+      expect(declarationsOf(body, ' th')['vertical-align']).toBe('top');
+    });
+
+    it('draws a short value as one piece of text that has no space to break at: a date, a reference and a masked customer', () => {
+      const { body } = draw(TABLE);
+      const [reference, customer, date] = within(body).getAllByRole('cell');
+      expect(reference.textContent).toBe('APT-4821');
+      expect(customer.textContent).toBe('line:Udec…02');
+      expect(date.textContent).toBe('2026-10-05');
+      for (const short of [reference, customer, date]) expect(short.textContent).not.toMatch(/\s/);
     });
   });
 
   describe('colours', () => {
     it('are the theme, never a black overlay: code, code blocks and table headers show in the dark theme too', () => {
       const { body } = draw('`code`\n\n| a |\n| - |\n| b |', { dark: true });
-      const css = cssOf(body);
-      expect(css).not.toMatch(/rgba\(/);
-      expect(css).toContain(`code{font-size:0.85em;padding:1px 4px;border-radius:3px;background:${darkTheme.colors.neutral150};}`);
-      expect(css).toContain(`th{background:${darkTheme.colors.neutral150};font-weight:600;}`);
-      expect(css).toContain(`border-left:3px solid ${darkTheme.colors.neutral300}`);
-      expect(css).not.toContain(lightTheme.colors.neutral150);
+      expect(cssOf(body)).not.toMatch(/rgba\(/);
+      expect(declarationsOf(body, ' code').background).toBe(darkTheme.colors.neutral150);
+      expect(declarationsOf(body, ' pre').background).toBe(darkTheme.colors.neutral150);
+      expect(declarationsOf(body, ' th').background).toBe(darkTheme.colors.neutral150);
+      expect(declarationsOf(body, ' blockquote')['border-left']).toBe(`3px solid ${darkTheme.colors.neutral300}`);
+      expect(cssOf(body)).not.toContain(lightTheme.colors.neutral150);
     });
 
     it('follow the light theme in the light theme', () => {
       const { body } = draw('`code`\n\n| a |\n| - |\n| b |');
-      const css = cssOf(body);
-      expect(css).toContain(`th{background:${lightTheme.colors.neutral150};font-weight:600;}`);
-      expect(css).not.toContain(darkTheme.colors.neutral150);
+      expect(declarationsOf(body, ' th').background).toBe(lightTheme.colors.neutral150);
+      expect(declarationsOf(body, ' th')['font-weight']).toBe('600');
+      expect(cssOf(body)).not.toContain(darkTheme.colors.neutral150);
     });
 
     it('give lists their markers and headings their weight, which the design system takes away', () => {
       const { body } = draw('# Title\n\n- one');
-      const css = cssOf(body);
-      expect(css).toMatch(/ ul\{list-style:disc;\}/);
-      expect(css).toMatch(/ ol\{list-style:decimal;\}/);
-      expect(css).toMatch(/h1,[^{]*h4\{[^}]*font-weight:600;/);
+      expect(declarationsOf(body, ' ul')['list-style']).toBe('disc');
+      expect(declarationsOf(body, ' ol')['list-style']).toBe('decimal');
+      for (const heading of [' h1', ' h2', ' h3', ' h4']) expect(declarationsOf(body, heading)['font-weight'], heading).toBe('600');
     });
   });
 });

@@ -1,45 +1,44 @@
 import styled from 'styled-components';
 
 /**
- * The chat area and its pieces, copied from strapi-plugin-tanstack-ai 1.6.0 (`ChatPanel.tsx`): a white rectangle with a 4px radius and the
- * table shadow, holding the sidebar and the chat column, and in the column the top bar, the messages and the composer.
+ * The chat area and its pieces, copied from strapi-plugin-tanstack-ai 1.6.0 (`ChatPanel.tsx`): the sidebar and the chat column side by side, and
+ * in the column the top bar, the messages and the composer. The reference puts them in a white rectangle with a 4px radius and the table
+ * shadow, in the middle of a page. Here they fill the assistant's drawer, which has its own white frame, border and shadow (ChatDrawer.tsx).
  */
 
 /**
- * Takes the height the page has left, with no calc() against 100vh: that was a guess at the height of what is above it, and it drifted.
- * The page is a flex column while Ask is open, so this takes what remains. `min-height: 0` is the part that is easy to leave out: a flex
- * child will not shrink below its content, so without it the messages would push the composer off the bottom instead of scrolling.
- *
- * Below the large breakpoint (1080px) the admin's content area has no height of its own, so there is nothing to fill: the chat area is
- * then 70% of the window's height, and never less than 420px.
+ * Fills the drawer under nothing but itself: the drawer is a flex column and this takes what it has. `min-height: 0` is the part that is easy to
+ * leave out: a flex child will not shrink below its content, so without it the messages would push the composer off the bottom instead of
+ * scrolling.
  */
 export const ChatLayout = styled.div`
   display: flex;
   flex-direction: row;
-  flex: 0 0 auto;
-  height: 70vh;
-  min-height: 420px;
-  border-radius: 4px;
-  overflow: hidden;
-  box-shadow: ${({ theme }) => theme.shadows.tableShadow};
+  flex: 1 1 0%;
+  min-height: 0;
   background: ${({ theme }) => theme.colors.neutral0};
-
-  ${({ theme }) => theme.breakpoints.large} {
-    flex: 1 1 0%;
-    height: auto;
-    min-height: 0;
-  }
 `;
 
-export const ChatColumn = styled.div`
+/**
+ * The chat column. It starts from the width of the chat, 600px or 960px when the drawer is expanded (`$width`), and the list of saved chats is
+ * added beside it, so opening the list makes the drawer wider and leaves the chat as wide as it was. The column may shrink (`flex-shrink: 1`,
+ * `min-width: 0`): when the drawer is at its limit of 90vw, the list keeps its 260px and the chat column gives up the difference.
+ */
+export const ChatColumn = styled.div<{ $width: number }>`
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 ${({ $width }) => $width}px;
   min-width: 0;
+  min-height: 0;
 `;
 
+/**
+ * The bar of controls. It wraps when it is too narrow for them, which a long model ID in the badge can cause in a drawer 480px wide: the last
+ * buttons then go to a second line, and none is cut off.
+ */
 export const ChatTopBar = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   padding: 8px 16px;
   border-bottom: 1px solid ${({ theme }) => theme.colors.neutral200};

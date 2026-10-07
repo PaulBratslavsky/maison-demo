@@ -11,6 +11,12 @@ import { safeLink } from '../../assistant';
  * 1.6.0 (`MarkdownBody` in `MessageList.tsx`), with these changes.
  * - The four tints that were literal black overlays are theme colours, so inline code, code blocks and table headers show in the dark theme.
  * - Lists have their markers and headings their weight. The design system's global style takes both away (`list-style: none`, `font: unset`).
+ * - Tables. The reference keeps every cell on one line, which is right for a chat the width of a page and wrong for a drawer. Here a header cell stays
+ *   on one line, and a body cell wraps its text between words, in a column between 7rem and 22rem wide: a short value (a date, a reference, a masked
+ *   customer) keeps its line, and a long text wraps inside its column. A word is broken only when it is longer than the column can be (`overflow-wrap:
+ *   break-word`). Never `anywhere` or `break-all`: those shrink every column to a letter or two. The bubble's own `word-break: break-word` is inherited by
+ *   the cells, so a body cell sets `word-break: normal` back. When the table is still wider than the bubble, it scrolls sideways (it is a block with
+ *   `overflow-x: auto`), and nothing else moves: not the message list, not the drawer, and not the browser's swipe back (`overscroll-behavior-x`).
  * - Images are not drawn, and only an `http:` or `https:` link is a link (see `MarkdownLink`). The model reads customer text, and an image
  *   address or a link could carry other customers' words out of the page.
  * Raw HTML in an answer is shown as text: react-markdown does not render it.
@@ -51,15 +57,28 @@ const Body = styled.div`
     font-size: 0.9em;
     width: 100%;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     display: block;
   }
   th, td {
     border: 1px solid ${({ theme }) => theme.colors.neutral300};
     padding: 4px 8px;
     text-align: left;
-    white-space: nowrap;
+    vertical-align: top;
   }
-  th { background: ${({ theme }) => theme.colors.neutral150}; font-weight: 600; }
+  th {
+    white-space: nowrap;
+    word-break: normal;
+    background: ${({ theme }) => theme.colors.neutral150};
+    font-weight: 600;
+  }
+  td {
+    min-width: 7rem;
+    max-width: 22rem;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
 `;
 
 /**

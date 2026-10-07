@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ToolsPopover } from '../../admin/src/components/assistant/ToolsPopover';
 import { TOOL_NOTES } from '../../admin/src/assistant';
 import { TOOL_LABELS, READ_TOOL_NAMES } from '../../server/src/assistant/tools';
@@ -83,6 +83,37 @@ describe('ToolsPopover', () => {
     await open();
     fireEvent.mouseDown(screen.getByText('Outside'));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  // In the drawer, Escape closes the drawer. With the list of tools open, the first Escape is for the list, and the next is for the drawer.
+  it('keeps the Escape that closes it to itself, so what is around it does not also act on it, and lets the next Escape through', async () => {
+    const onKeyDown = vi.fn();
+    renderInTheme(
+      <div onKeyDown={onKeyDown}>
+        <ToolsPopover tools={ALL} />
+      </div>
+    );
+    await open();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onKeyDown).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onKeyDown).toHaveBeenCalledOnce();
+  });
+
+  it('lets any other key through to what is around it while it is open', async () => {
+    const onKeyDown = vi.fn();
+    renderInTheme(
+      <div onKeyDown={onKeyDown}>
+        <ToolsPopover tools={ALL} />
+      </div>
+    );
+    await open();
+    await userEvent.keyboard('a');
+    expect(onKeyDown).toHaveBeenCalledOnce();
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 
   it('stays open for a press inside it, and for any other key', async () => {

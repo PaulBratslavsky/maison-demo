@@ -7,10 +7,11 @@ import styled, { css } from 'styled-components';
  * hover and open looks, and a label that is both the accessible name and a tooltip, drawn in CSS from `data-tip`. The tooltip shows after
  * half a second on hover or keyboard focus, so it does not flicker as the pointer crosses the bar, and it goes at once on the way out.
  *
- * One addition: `emphasis`. A button that has words to say, such as New chat when the chat is too long to go on, shows them after its icon,
- * in the primary colour, so staff see what to press.
+ * Two additions. `emphasis`: a button that has words to say, such as New chat when the chat is too long to go on, shows them after its icon,
+ * in the primary colour, so staff see what to press. `tipAlign`: a button at the edge of the screen, such as the drawer's Close, has its tooltip
+ * end at the button's right edge, because a tooltip centred under it would be cut off by the edge.
  */
-const Button = styled.button<{ $active?: boolean; $emphasis?: boolean }>`
+const Button = styled.button<{ $active?: boolean; $emphasis?: boolean; $tipEnd?: boolean }>`
   position: relative;
   display: flex;
   align-items: center;
@@ -64,8 +65,7 @@ const Button = styled.button<{ $active?: boolean; $emphasis?: boolean }>`
     content: attr(data-tip);
     position: absolute;
     top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
+    ${({ $tipEnd }) => ($tipEnd ? 'right: 0;' : 'left: 50%; transform: translateX(-50%);')}
     z-index: 40;
     padding: 4px 8px;
     border-radius: 4px;
@@ -104,13 +104,16 @@ interface TopBarIconProps {
   expanded?: boolean;
   /** Words to show after the icon, in the primary colour. The label stays the accessible name. */
   emphasis?: string;
+  /** Where the tooltip sits: centred under the button, or ending at its right edge for a button at the edge of the screen. */
+  tipAlign?: 'center' | 'end';
 }
 
-export const TopBarIcon = ({ label, onClick, children, active, disabled, expanded, emphasis }: TopBarIconProps) => (
+export const TopBarIcon = ({ label, onClick, children, active, disabled, expanded, emphasis, tipAlign = 'center' }: TopBarIconProps) => (
   <Button
     type="button"
     $active={active}
     $emphasis={Boolean(emphasis)}
+    $tipEnd={tipAlign === 'end'}
     onClick={onClick}
     disabled={disabled}
     aria-label={label}
@@ -147,5 +150,28 @@ export const ToolsIcon = () => (
 export const NewChatIcon = () => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
     <path d="M8 3v10M3 8h10" />
+  </svg>
+);
+
+/*
+ * The drawer's own two icons. The reference plugin has no drawer, so these are drawn in the same style as its icons: 16px, a 1.5px line, round ends.
+ */
+
+/** An arrow that points both ways along the width: the drawer gets wider. */
+export const ExpandIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2 8h12" />
+    <path d="M5 5L2 8l3 3" />
+    <path d="M11 5l3 3-3 3" />
+  </svg>
+);
+
+/** Two arrows that point at each other: the drawer gets narrower. */
+export const CollapseIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M1.5 8H6" />
+    <path d="M4 5.5L6.5 8 4 10.5" />
+    <path d="M14.5 8H10" />
+    <path d="M12 5.5L9.5 8l2.5 2.5" />
   </svg>
 );

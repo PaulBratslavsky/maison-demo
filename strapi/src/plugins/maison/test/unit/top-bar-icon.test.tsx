@@ -2,8 +2,21 @@
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { HistoryIcon, NewChatIcon, ToolsIcon, TopBarIcon } from '../../admin/src/components/assistant/TopBarIcon';
+import { CollapseIcon, ExpandIcon, HistoryIcon, NewChatIcon, ToolsIcon, TopBarIcon } from '../../admin/src/components/assistant/TopBarIcon';
 import { renderInTheme } from './render';
+
+/** The CSS styled-components wrote for an element: every rule in the document that starts with one of its classes. */
+const cssOf = (element: Element): string => {
+  const all = Array.from(document.querySelectorAll('style'))
+    .map((style) => style.textContent ?? '')
+    .join('\n');
+  const classes = Array.from(element.classList);
+  return all
+    .split('}')
+    .filter((rule) => classes.some((name) => rule.trimStart().startsWith(`.${name}`)))
+    .map((rule) => `${rule}}`)
+    .join('\n');
+};
 
 describe('TopBarIcon', () => {
   it('is a button named by its label, which is also its tooltip text', () => {
@@ -85,16 +98,44 @@ describe('TopBarIcon', () => {
     expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy();
   });
 
-  it('has three icons, each an SVG that screen readers skip: the button already has its name', () => {
+  it('has five icons, each an SVG that screen readers skip: the button already has its name', () => {
     renderInTheme(
       <>
         <HistoryIcon />
         <ToolsIcon />
         <NewChatIcon />
+        <ExpandIcon />
+        <CollapseIcon />
       </>
     );
     const icons = document.querySelectorAll('svg');
-    expect(icons).toHaveLength(3);
+    expect(icons).toHaveLength(5);
     for (const icon of icons) expect(icon.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  // The drawer's last button, Close, is at the edge of the screen. A label centred under it would be cut off by the edge.
+  describe('the tooltip', () => {
+    it('is centred under the button, as the reference plugin draws it', () => {
+      renderInTheme(
+        <TopBarIcon label="History" onClick={() => {}}>
+          <HistoryIcon />
+        </TopBarIcon>
+      );
+      const css = cssOf(screen.getByRole('button', { name: 'History' }));
+      expect(css).toMatch(/::after\{[^}]*left:50%;/);
+      expect(css).toMatch(/::after\{[^}]*transform:translateX\(-50%\);/);
+    });
+
+    it('ends at the right edge of the button when asked, so a button at the edge of the screen keeps its label on the screen', () => {
+      renderInTheme(
+        <TopBarIcon label="Close the assistant" tipAlign="end" onClick={() => {}}>
+          <HistoryIcon />
+        </TopBarIcon>
+      );
+      const css = cssOf(screen.getByRole('button', { name: 'Close the assistant' }));
+      expect(css).toMatch(/::after\{[^}]*right:0;/);
+      expect(css).not.toMatch(/::after\{[^}]*left:50%;/);
+      expect(css).not.toMatch(/::after\{[^}]*translateX/);
+    });
   });
 });

@@ -3,6 +3,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationSidebar } from '../../admin/src/components/assistant/ConversationSidebar';
+import { declarationsOf } from './css';
 import { renderInTheme } from './render';
 
 const CHATS = [
@@ -140,6 +141,22 @@ describe('ConversationSidebar', () => {
       expect(cssOf(closed)).toMatch(/[{;]width:0px;/);
       expect(cssOf(closed)).toContain('min-width:0px');
       expect(cssOf(closed)).toContain('overflow:hidden');
+    });
+
+    // The drawer is as wide as the chat plus this column, and the chat is exactly 600px or 960px. A border outside the 260px would take 1px from it.
+    it('is 260px wide with its border inside, so the drawer is as wide as the chat and the column together, and not a pixel more', () => {
+      renderInTheme(sidebar({ open: true }));
+      const declarations = declarationsOf(root());
+      expect(declarations['box-sizing']).toBe('border-box');
+      expect(declarations.width).toBe('260px');
+      expect(declarations['min-width']).toBe('260px');
+      expect(declarations['border-right']).toMatch(/^1px solid /);
+    });
+
+    it('has no overlay form: it is a column beside the chat at either width of the drawer', () => {
+      renderInTheme(sidebar({ open: true }));
+      expect(declarationsOf(root()).position).toBeUndefined();
+      expect(declarationsOf(root()).display).toBe('flex');
     });
 
     it('keeps its rows in the document, so opening it is a change of width and not a new list', () => {

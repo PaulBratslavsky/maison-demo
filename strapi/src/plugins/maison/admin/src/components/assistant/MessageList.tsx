@@ -19,12 +19,21 @@ import { ToolBox } from './ToolBox';
  * - A message with nothing to draw is not drawn, so a turn that failed or is still thinking leaves no empty bubble.
  * - The waiting dots come from `showsWorking`, and show once in their own row, which also covers the wait before the first words come.
  * - The list follows the newest message only while the reader is at the bottom: no smooth scrolling and no scrollIntoView.
+ * - The assistant's bubble may take the whole width of the list beside its avatar, because a table needs the room. The reference caps it at 80%.
  */
 
+/**
+ * The one thing in the drawer that scrolls up and down: the top bar and the composer stay where they are. It takes the height that is left
+ * (`flex: 1` with `min-height: 0`, the part that is easy to leave out: a flex child will not shrink below its content, so without it the messages would
+ * push the composer off the bottom). It never scrolls sideways: a table that is too wide scrolls inside its bubble. And it does not pass its scrolling
+ * on (`overscroll-behavior`), so the end of the list does not scroll what is behind the drawer.
+ */
 const Scroller = styled.div`
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -36,7 +45,9 @@ const Row = styled.div<{ $isUser: boolean }>`
   align-items: flex-end;
   gap: 8px;
   align-self: ${({ $isUser }) => ($isUser ? 'flex-end' : 'flex-start')};
-  max-width: 80%;
+  /* Staff messages are short, and stay at most 80% of the list. The assistant's can hold a table, and use the whole width beside the avatar. */
+  max-width: ${({ $isUser }) => ($isUser ? '80%' : '100%')};
+  min-width: 0;
 `;
 
 const Avatar = styled.div`

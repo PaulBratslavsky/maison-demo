@@ -4,6 +4,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageList } from '../../admin/src/components/assistant/MessageList';
+import { declarationsOf } from './css';
 import { renderInTheme } from './render';
 
 type Part = Record<string, any>;
@@ -144,19 +145,56 @@ describe('the messages', () => {
     expect(cssOf(assistantBubble)).toContain(`background-color:${lightTheme.colors.neutral100}`);
   });
 
-  it('wraps a long word in an assistant bubble instead of widening it, and keeps the bubble at most 80% of the list', () => {
+  it('wraps a long word in an assistant bubble instead of widening it', () => {
     const { container } = renderInTheme(list([staff('u1'), assistant('a1', [text('x'.repeat(400))])]));
-    const row = rows(container, 'assistant')[0];
-    const bubble = within(row).getByText('Assistant').parentElement as HTMLElement;
-    expect(cssOf(bubble)).toContain('word-break:break-word');
-    expect(cssOf(bubble)).toContain('min-width:0');
-    expect(cssOf(row)).toContain('max-width:80%');
+    const bubble = within(rows(container, 'assistant')[0]).getByText('Assistant').parentElement as HTMLElement;
+    expect(declarationsOf(bubble)['word-break']).toBe('break-word');
+    expect(declarationsOf(bubble)['min-width']).toBe('0');
+  });
+
+  // A table needs room, and the drawer is not wide: the assistant's bubble takes the whole width of the list beside its avatar, and the reference's
+  // cap of 80% is for staff messages only. The row may still not be wider than the list, so a wide table scrolls in its bubble and never widens the list.
+  it('lets an assistant message use the whole width of the list beside its avatar, and a staff message at most 80% of it', () => {
+    const { container } = renderInTheme(list([staff('u1'), assistant('a1', [text('A table needs room.')])]));
+    const assistantRow = rows(container, 'assistant')[0];
+    const staffRow = rows(container, 'user')[0];
+    expect(declarationsOf(assistantRow)['max-width']).toBe('100%');
+    expect(declarationsOf(staffRow)['max-width']).toBe('80%');
+    // Neither row is made wider than the list by what is in it.
+    expect(declarationsOf(assistantRow)['min-width']).toBe('0');
+    expect(declarationsOf(staffRow)['min-width']).toBe('0');
   });
 
   it('is a region named "Chat messages" that the keyboard can scroll', () => {
     renderInTheme(list([staff('u1')]));
     const region = screen.getByRole('region', { name: 'Chat messages' });
     expect(region.getAttribute('tabindex')).toBe('0');
+  });
+
+  // Only the message list scrolls up and down: the top bar and the composer stay where they are. It takes the height that is left, and may be shorter
+  // than its content, which is what makes it scroll.
+  describe('the list', () => {
+    const scroller = () => screen.getByRole('region', { name: 'Chat messages' });
+
+    it('is what scrolls up and down: it takes the height that is left, may be shorter than its messages, and scrolls when they are taller', () => {
+      renderInTheme(list([staff('u1')]));
+      expect(declarationsOf(scroller())).toMatchObject({ flex: '1', 'min-height': '0', 'overflow-y': 'auto' });
+    });
+
+    it('never scrolls sideways: a table that is too wide scrolls inside its bubble, and the list stays where it is', () => {
+      renderInTheme(list([staff('u1')]));
+      expect(declarationsOf(scroller())['overflow-x']).toBe('hidden');
+    });
+
+    it('does not pass its scrolling on to what is behind the drawer when it reaches its top or its end', () => {
+      renderInTheme(list([staff('u1')]));
+      expect(declarationsOf(scroller())['overscroll-behavior']).toBe('contain');
+    });
+
+    it('is a column of the messages, with a gap between them', () => {
+      renderInTheme(list([staff('u1')]));
+      expect(declarationsOf(scroller())).toMatchObject({ display: 'flex', 'flex-direction': 'column' });
+    });
   });
 });
 
