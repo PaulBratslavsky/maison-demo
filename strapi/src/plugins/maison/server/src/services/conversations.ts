@@ -42,11 +42,13 @@ export const cutTitle = (title: unknown): string => {
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const documents = () => strapi.documents(UID.conversation);
 
-  /** The row, when this admin owns it. */
-  const owned = async (adminId: number, documentId: string) => {
-    const row = (await documents().findOne({ documentId })) as { adminUserId?: number } | null;
-    return row && row.adminUserId === adminId ? row : null;
-  };
+  /**
+   * The chat, when this admin owns it, in one query on the ID and the admin together. A chat that belongs to someone else and an ID nobody
+   * has then take the same path and cost the same work. With `fields`, only those are read: update and remove need the ID, and not the
+   * messages, which can be up to 1 MB.
+   */
+  const owned = (adminId: number, documentId: string, fields?: string[]) =>
+    documents().findFirst({ filters: { documentId: { $eq: documentId }, adminUserId: { $eq: adminId } }, ...(fields ? { fields } : {}) });
 
   const summary = (row: any): SavedChatRow => ({ documentId: row.documentId, title: row.title, updatedAt: row.updatedAt });
 
@@ -81,7 +83,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /** Saves a chat the admin owns again: the title, the messages, or both. Nothing is written when the body is not valid. */
     async update(adminId: number, documentId: string, input: SaveInput): Promise<ServiceResult<SavedChatRow>> {
-      if (!(await owned(adminId, documentId))) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
+      if (!(await owned(adminId, documentId, ['documentId']))) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
       const data: Record<string, unknown> = {};
       if (input.title !== undefined) data.title = cutTitle(input.title);
       if (input.messages !== undefined) {
@@ -95,7 +97,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /** Deletes a chat the admin owns, at once. */
     async remove(adminId: number, documentId: string): Promise<ServiceResult<{ documentId: string }>> {
-      if (!(await owned(adminId, documentId))) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
+      if (!(await owned(adminId, documentId, ['documentId']))) return failure('not_found', NO_CHAT, NO_CHAT_HINT);
       await documents().delete({ documentId });
       return { ok: true, value: { documentId } };
     },

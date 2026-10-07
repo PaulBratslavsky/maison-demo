@@ -198,6 +198,42 @@ describe('the saved chats service', () => {
     });
   });
 
+  // The owner check is one query on the ID and the admin together. A chat of someone else and an ID nobody has then take the same path and
+  // cost the same work, and update and remove never read the stored messages, which can be up to 1 MB.
+  describe('the owner check', () => {
+    const asks: Record<string, { run: (service: Doc) => Promise<unknown>; fields: string[] | undefined }> = {
+      view: { run: (service) => service.view(7, 'c1'), fields: undefined },
+      update: { run: (service) => service.update(7, 'c1', { title: 'New title' }), fields: ['documentId'] },
+      remove: { run: (service) => service.remove(7, 'c1'), fields: ['documentId'] },
+    };
+    const shape = (calls: Doc[]) => calls.map(({ method, params }) => ({ method, fields: params.fields, filters: Object.keys(params.filters ?? {}) }));
+
+    it.each(Object.keys(asks))('%s asks for the chat once, on its ID and its admin together, and reads nothing else first', async (method) => {
+      const { service, calls } = chatsWorld([savedRow('c1', 7)]);
+      await asks[method].run(service);
+      const reads = calls.filter((call) => call.method.startsWith('find'));
+      expect(reads.map((call) => call.method)).toEqual(['findFirst']);
+      expect(reads[0].params.filters).toEqual({ documentId: { $eq: 'c1' }, adminUserId: { $eq: 7 } });
+    });
+
+    it('is a read of the whole chat for view, and of only its ID for update and remove', async () => {
+      for (const [method, { run, fields }] of Object.entries(asks)) {
+        const { service, calls } = chatsWorld([savedRow('c1', 7)]);
+        await run(service);
+        expect(calls.find((call) => call.method === 'findFirst')?.params.fields, method).toEqual(fields);
+      }
+    });
+
+    it.each(Object.keys(asks))("%s takes the same path for another admin's chat as for an ID nobody has", async (method) => {
+      const theirs = chatsWorld([savedRow('c1', 8)]);
+      const nobody = chatsWorld();
+      const answers = [await asks[method].run(theirs.service), await asks[method].run(nobody.service)];
+      expect(answers[0]).toEqual(answers[1]);
+      expect(shape(theirs.calls)).toEqual(shape(nobody.calls));
+      expect(shape(theirs.calls)).toEqual([{ method: 'findFirst', fields: asks[method].fields, filters: ['documentId', 'adminUserId'] }]);
+    });
+  });
+
   it('works on the conversation content type, plugin::maison.conversation', () => {
     expect(UID.conversation).toBe('plugin::maison.conversation');
   });

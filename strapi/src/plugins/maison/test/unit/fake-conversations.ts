@@ -28,6 +28,12 @@ export const fakeTable = (initial: Doc[] = []) => {
   const stamp = () => new Date((clock += 1000)).toISOString();
   const calls: Array<{ method: string; params: Doc }> = [];
 
+  /** The row as a read answers it: with `fields`, those and the ones Strapi always gives. */
+  const pick = (row: Doc, fields?: string[]): Doc => {
+    const keep = fields ? ['id', 'documentId', ...fields] : null;
+    return keep ? Object.fromEntries(Object.entries(row).filter(([key]) => keep.includes(key))) : { ...row };
+  };
+
   const documents = (uid: string) => {
     if (uid !== UID.conversation) throw new Error(`These tests only hold the conversation content type, not ${uid}.`);
     const record = <T>(method: string, params: Doc, answer: T): T => {
@@ -41,11 +47,12 @@ export const fakeTable = (initial: Doc[] = []) => {
         if (JSON.stringify(params.sort) === JSON.stringify({ updatedAt: 'desc' })) found.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         else if (params.sort !== undefined) throw new Error(`These tests don't know the sort ${JSON.stringify(params.sort)}.`);
         const limited = found.slice(0, params.limit ?? found.length);
-        // With `fields`, a row holds those and the ones Strapi always gives.
-        const keep = params.fields ? ['id', 'documentId', ...params.fields] : null;
-        return record('findMany', params, limited.map((row) => (keep ? Object.fromEntries(Object.entries(row).filter(([key]) => keep.includes(key))) : { ...row })));
+        return record('findMany', params, limited.map((row) => pick(row, params.fields)));
       },
-      findOne: async (params: Doc) => record('findOne', params, rows.get(params.documentId) ? { ...rows.get(params.documentId) } : null),
+      findFirst: async (params: Doc) => {
+        const found = [...rows.values()].find((row) => matches(row, params.filters));
+        return record('findFirst', params, found ? pick(found, params.fields) : null);
+      },
       create: async ({ data }: Doc) => {
         const at = stamp();
         const row = { id: nextId, documentId: `chat-${nextId}`, ...data, createdAt: at, updatedAt: at };
