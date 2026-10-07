@@ -688,8 +688,8 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 1. **The drawer is on every admin page:** the Content Manager, the Maison page, settings and the rest. The chat stays open and keeps going as staff move between pages.
 2. **A floating button opens it.** A round Sparkle button sits at the bottom right of every page. It opens the drawer.
 3. **It is a side panel, and the page stays usable.**
-   - It slides in from the right, 480px wide and full height, with no dark backdrop, so staff can read and click the page beside it.
-   - An expand button widens it to 760px, which shows the history sidebar beside the chat.
+   - It slides in from the right, 600px wide and full height, with no dark backdrop, so staff can read and click the page beside it. (Paul first chose 480px. After trying it, he asked for it a bit wider.)
+   - An expand button widens it to 960px, which shows the history sidebar beside the chat. Both widths are capped at 90vw.
 4. **The Ask tab is removed.** The drawer replaces it. "Ask about this" on a row (step 2) opens the drawer and asks about that row.
 
 ### How the drawer is mounted
@@ -712,20 +712,26 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
   - Accessible name "Open the Maison assistant".
   - Hidden while the drawer is open.
 - **The drawer.**
-  - Fixed to the right edge, full height, 480px wide, or 760px when expanded.
+  - Fixed to the right edge, full height, 600px wide, or 960px when expanded, both capped at 90vw.
   - The chat area from the rebuild section, in full: top bar, message list, error box and composer.
   - It sits above the page and the left menu, and below Strapi's dialogs. When Reply on LINE or Answer opens, the dialog is on top.
 - **The top bar** gains two buttons at the right, after New chat:
   - Expand or Collapse, an icon button.
   - Close, the Cross icon, named "Close the assistant".
 - **History.**
-  - At 480px, the History button opens the chat list over the messages, the full width of the drawer. Picking a chat closes the list.
-  - At 760px, the list is the 260px sidebar beside the chat, as in the rebuild section.
+  - At 600px, the History button opens the chat list over the messages, the full width of the drawer. Picking a chat closes the list.
+  - At 960px, the list is the 260px sidebar beside the chat, as in the rebuild section.
 - **Keyboard and focus.**
   - Opening moves the focus to the text box.
   - Escape, with the focus in the drawer, closes it. The focus goes back to the launcher.
   - The drawer is `role="complementary"`, named "Maison assistant". It does not trap the focus, because the page stays usable.
-- **Tables in a narrow drawer.** In the bubbles, table cells wrap their text. The table still scrolls sideways when it can't fit.
+- **Tables.**
+  - Header cells stay on one line.
+  - Body cells wrap only between words (`overflow-wrap: break-word`, never `anywhere`), with a minimum width of about 7rem and a maximum of about 22rem. Short values such as dates, references and masked customers stay on one line, and long text wraps inside its column.
+  - A table wider than the bubble scrolls sideways inside the bubble. The message list doesn't move sideways.
+  - In the drawer, the assistant's bubble uses the full width beside the avatar.
+  - Paul saw cells broken inside words, one or two letters a line, in the first drawer build on 7 October.
+- **Scrolling.** Only the message list scrolls up and down. The top bar and the composer stay where they are.
 - **Loading.**
   - The status (`GET /maison/assistant/status`) and the saved chats load the first time the drawer opens, not on every page.
   - The chat, its saved chats and the draft stay while staff move between admin pages. They end on a reload.
@@ -748,7 +754,7 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **Component tests:**
   - the launcher shows only with the permission, opens the drawer and hides
   - Close and Escape close the drawer, and the focus returns to the launcher
-  - Expand shows the sidebar; at 480px History shows the list over the messages
+  - Expand shows the sidebar; at 600px History shows the list over the messages
   - the chat survives a route change, so the provider is not remounted
   - the Maison page shows three tabs and the compact header
 - **Paul's browser check:**
