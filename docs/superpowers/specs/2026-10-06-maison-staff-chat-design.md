@@ -735,6 +735,11 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **Loading.**
   - The status (`GET /maison/assistant/status`) and the saved chats load the first time the drawer opens, not on every page.
   - The chat, its saved chats and the draft stay while staff move between admin pages. They end on a reload.
+- **Opening never starts a new chat.**
+  - Closing and opening the drawer again shows the same chat, with its messages and the draft.
+  - The first opening in a page load reopens the most recent saved chat, or the chat staff already began.
+  - Only the New chat buttons start a new one.
+  - Paul found the first drawer build starting a new chat on every opening, 7 October.
 
 ### The Maison page
 
