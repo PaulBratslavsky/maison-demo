@@ -689,7 +689,7 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 2. **A floating button opens it.** A round Sparkle button sits at the bottom right of every page. It opens the drawer.
 3. **It is a side panel, and the page stays usable.**
    - It slides in from the right, 600px wide and full height, with no dark backdrop, so staff can read and click the page beside it. (Paul first chose 480px. After trying it, he asked for it a bit wider.)
-   - An expand button widens it to 960px, which shows the history sidebar beside the chat. Both widths are capped at 90vw.
+   - An expand button widens it to 960px, so the chat itself gets wider. Both widths are capped at 90vw. Expand doesn't open the history list. (Paul, after trying it: "it should just make the chat wider".)
 4. **The Ask tab is removed.** The drawer replaces it. "Ask about this" on a row (step 2) opens the drawer and asks about that row.
 
 ### How the drawer is mounted
@@ -718,9 +718,9 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **The top bar** gains two buttons at the right, after New chat:
   - Expand or Collapse, an icon button.
   - Close, the Cross icon, named "Close the assistant".
-- **History.**
-  - At 600px, the History button opens the chat list over the messages, the full width of the drawer. Picking a chat closes the list.
-  - At 960px, the list is the 260px sidebar beside the chat, as in the rebuild section.
+- **History.** Only the History button shows or hides the chat list, at either width.
+  - At 600px, the list opens over the messages, the full width of the drawer. Picking a chat closes it.
+  - At 960px, the list is the 260px sidebar beside the chat, while History is on. With History off, the chat uses the whole width.
 - **Keyboard and focus.**
   - Opening moves the focus to the text box.
   - Escape, with the focus in the drawer, closes it. The focus goes back to the launcher.
@@ -759,7 +759,7 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **Component tests:**
   - the launcher shows only with the permission, opens the drawer and hides
   - Close and Escape close the drawer, and the focus returns to the launcher
-  - Expand shows the sidebar; at 600px History shows the list over the messages
+  - Expand only widens the chat; History shows the list (beside the chat at 960px, over the messages at 600px)
   - the chat survives a route change, so the provider is not remounted
   - the Maison page shows three tabs and the compact header
 - **Paul's browser check:**
