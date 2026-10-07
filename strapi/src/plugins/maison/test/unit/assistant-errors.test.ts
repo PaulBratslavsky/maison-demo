@@ -101,6 +101,15 @@ describe('notReadyReason', () => {
     expect(notReadyReason({ aiProvider: 'openai-compatible', aiApiKey: null })).toBe('The assistant works with Anthropic only. AI_PROVIDER is set to openai-compatible.');
   });
 
+  it('is null for a local model (aiChatBaseUrl), whatever the provider, with or without a key', () => {
+    const local = 'http://127.0.0.1:11434';
+    expect(notReadyReason({ aiProvider: 'openai-compatible', aiApiKey: null, aiChatBaseUrl: local })).toBeNull();
+    expect(notReadyReason({ aiProvider: 'anthropic', aiApiKey: null, aiChatBaseUrl: local })).toBeNull();
+    expect(notReadyReason({ aiProvider: 'openai-compatible', aiApiKey: null, aiChatBaseUrl: null })).toBe(
+      'The assistant works with Anthropic only. AI_PROVIDER is set to openai-compatible.'
+    );
+  });
+
   it('never repeats the key', () => {
     for (const settings of [{ aiProvider: 'anthropic', aiApiKey: null }, { aiProvider: 'openai', aiApiKey: 'sk-secret-123' }]) {
       expect(notReadyReason(settings) ?? '').not.toContain('secret');

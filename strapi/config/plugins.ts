@@ -74,6 +74,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         // The model of the Ask tab, a chat for staff on the Maison page. It is an Anthropic model ID, and the chat uses AI_API_KEY
         // (with AI_PROVIDER unset or anthropic). Unset: claude-sonnet-5-5. It is not AI_MODEL, which labels inquiries.
         aiChatModel: env('AI_CHAT_MODEL', '').trim() || null,
+        // A local model for the assistant, offline: Ollama's Anthropic-compatible API at http://127.0.0.1:11434, with
+        // AI_CHAT_MODEL set to an Ollama model such as qwen3-14b-32k. It needs no Anthropic key.
+        aiChatBaseUrl: env('AI_CHAT_BASE_URL', '').trim() || null,
         aiApiKey: env('AI_API_KEY', '').trim() || null,
         aiBaseUrl: env('AI_BASE_URL', '').trim() || null,
         // Optional: your own LINE user ID (U and 32 lowercase hex characters). With it, Load demo activity gives your

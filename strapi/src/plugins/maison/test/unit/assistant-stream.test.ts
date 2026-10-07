@@ -355,13 +355,24 @@ describe('turn, what the model receives', () => {
     expect(JSON.stringify(world.requests[0].modelOptions)).not.toContain('tool_choice');
   });
 
+  it('with a local model, turns thinking off, passes the base URL to the adapter, and needs no key', async () => {
+    const world = setup({
+      turns: [textTurn('Hi.')],
+      config: { aiApiKey: null, aiProvider: 'openai-compatible', aiChatModel: 'qwen3-14b-32k', aiChatBaseUrl: 'http://127.0.0.1:11434' },
+    });
+    const { events } = await run(world);
+    expect(errorsOf(events)).toEqual([]);
+    expect(world.requests[0].modelOptions).toEqual({ max_tokens: 16_000, output_config: { effort: 'medium' }, thinking: { type: 'disabled' } });
+    expect(world.adapterFor).toHaveBeenCalledWith('qwen3-14b-32k', 'local', 'http://127.0.0.1:11434');
+  });
+
   it('builds the adapter with the chat model and the key, not the labelling model', async () => {
     const world = setup({ turns: [textTurn('Hi.')], config: { aiModel: 'claude-haiku-4-5-20251001' } });
     await run(world);
-    expect(world.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5-5', KEY);
+    expect(world.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5-5', KEY, null);
     const custom = setup({ turns: [textTurn('Hi.')], config: { aiChatModel: 'claude-sonnet-5' } });
     await run(custom);
-    expect(custom.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5', KEY);
+    expect(custom.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5', KEY, null);
   });
 
   it('keeps the whole history: the staff messages, the answers and what the tools returned', async () => {
