@@ -223,7 +223,7 @@ describe('the saved chats service', () => {
         expect(rows.get('c1')).toEqual(savedRow('c1', 7));
       });
 
-      it("is still a 404 for another admin's chat or an ID nobody has: nothing but the owner learns anything about a chat", async () => {
+      it("is still a 404 for another admin's chat and for an ID nobody has, whatever the body holds", async () => {
         const { service, called } = chatsWorld([savedRow('c1', 8)]);
         const theirs = await service.update(7, 'c1', {});
         expect(theirs).toMatchObject({ ok: false, code: 'not_found', message: NO_CHAT });
