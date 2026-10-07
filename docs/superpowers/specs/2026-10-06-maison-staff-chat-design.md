@@ -718,9 +718,12 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **The top bar** gains two buttons at the right, after New chat:
   - Expand or Collapse, an icon button.
   - Close, the Cross icon, named "Close the assistant".
-- **History.** Only the History button shows or hides the chat list, at either width.
-  - At 600px, the list opens over the messages, the full width of the drawer. Picking a chat closes it.
-  - At 960px, the list is the 260px sidebar beside the chat, while History is on. With History off, the chat uses the whole width.
+- **History adds width. It never takes it from the chat.** Only the History button shows or hides the chat list.
+  - The list is the 260px sidebar beside the chat, at either width.
+  - Opening it makes the drawer 260px wider: 860px, or 1220px expanded. So the chat keeps its 600px or 960px.
+  - Closing it shrinks the drawer back.
+  - Only when the total would pass 90vw, the chat column gives up the difference.
+  - (Paul, 7 October: "history should not interfere with the width, it should just open wider to preserve the chat".)
 - **Keyboard and focus.**
   - Opening moves the focus to the text box.
   - Escape, with the focus in the drawer, closes it. The focus goes back to the launcher.
@@ -759,7 +762,7 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **Component tests:**
   - the launcher shows only with the permission, opens the drawer and hides
   - Close and Escape close the drawer, and the focus returns to the launcher
-  - Expand only widens the chat; History shows the list (beside the chat at 960px, over the messages at 600px)
+  - Expand only widens the chat; History adds 260px to the drawer and the chat column keeps its width
   - the chat survives a route change, so the provider is not remounted
   - the Maison page shows three tabs and the compact header
 - **Paul's browser check:**
