@@ -1,3 +1,5 @@
+// Intl.Segmenter is ES2022. Strapi's base tsconfig only declares ES2020, but every Node that Strapi 5 runs on has it.
+/// <reference lib="es2022.intl" />
 import type { Core } from '@strapi/strapi';
 
 import { SAVED_CHATS, UID } from '../constants';
@@ -32,12 +34,28 @@ const NOT_SAVED_HINT = 'Start a new chat and try again.';
 const wordsOf = (title: unknown): string => (typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '');
 
 /**
- * The title staff see in the sidebar: the words on one line, cut to its limit by characters, so an emoji or a Japanese character is never
- * split. A title with no words is "New chat": only a chat that is saved the first time is given that, and `update` refuses such a title.
+ * The first `max` characters of `text` as people see them. One character can be several code points: an emoji with a skin tone, a family
+ * emoji joined by zero-width joiners, a flag, or a Japanese character with a separate voiced mark. Each is kept whole or left out.
+ */
+const firstCharacters = (text: string, max: number): string => {
+  let kept = '';
+  let count = 0;
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+    if (count === max) break;
+    kept += segment;
+    count += 1;
+  }
+  return kept;
+};
+
+/**
+ * The title staff see in the sidebar: the words on one line, cut to its limit by characters as people see them, so an emoji, a flag or a
+ * Japanese character with its mark is never split. A title with no words is "New chat": only a chat that is saved the first time is given
+ * that, and `update` refuses such a title.
  */
 export const cutTitle = (title: unknown): string => {
   const text = wordsOf(title);
-  return text === '' ? 'New chat' : Array.from(text).slice(0, SAVED_CHATS.titleChars).join('');
+  return text === '' ? 'New chat' : firstCharacters(text, SAVED_CHATS.titleChars);
 };
 
 /**

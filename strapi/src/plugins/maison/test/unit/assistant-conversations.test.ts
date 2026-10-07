@@ -31,6 +31,27 @@ describe('cutTitle', () => {
     expect(cutTitle(emoji)).not.toMatch(/[\uD800-\uDBFF]$/);
   });
 
+  // A character as people see it can be several code points: an emoji and its skin tone, a family emoji joined by zero-width joiners, a flag
+  // (two regional indicators), a Japanese character with a separate voiced mark. Counting code points would cut one of them in two.
+  describe('counts characters as people see them', () => {
+    const limit = SAVED_CHATS.titleChars;
+
+    it.each([
+      ['an emoji with a skin tone', '👍🏽'],
+      ['a family emoji joined by zero-width joiners', '👨‍👩‍👧‍👦'],
+      ['a flag', '🇯🇵'],
+      ['a Japanese character with a separate voiced mark', 'か\u3099'],
+    ])('and never splits %s', (_what, character) => {
+      // The 80th character is the whole one, and what follows it is cut off.
+      expect(cutTitle(`${'a'.repeat(limit - 1)}${character}tail`)).toBe(`${'a'.repeat(limit - 1)}${character}`);
+      // One that does not fit is left out whole.
+      expect(cutTitle(`${'a'.repeat(limit)}${character}`)).toBe('a'.repeat(limit));
+      // A title made of them is 80 of them, not 80 code points, and one of 80 is not cut.
+      expect(cutTitle(character.repeat(limit + 20))).toBe(character.repeat(limit));
+      expect(cutTitle(character.repeat(limit))).toBe(character.repeat(limit));
+    });
+  });
+
   it('is "New chat" for a title that is empty, only spaces, or not text', () => {
     for (const title of ['', '   \n\t ', undefined, null, 42, {}, ['x']]) expect(cutTitle(title), String(title)).toBe('New chat');
   });
