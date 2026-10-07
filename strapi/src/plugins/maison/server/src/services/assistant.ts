@@ -204,8 +204,11 @@ export interface TurnRequest {
 
 export type AssistantStatus = { ready: true; model: string } | { ready: false; reason: string };
 
-/** A tool as the Ask tab lists it: its name, and what staff call it. */
-interface ToolInfo {
+/**
+ * A tool as the Ask tab lists it: its name, and what staff call it. It is exported although no other file imports it: the type of this
+ * service, which the plugin's declaration files spell out, includes it, and the build fails to write them when it cannot be named.
+ */
+export interface ToolInfo {
   name: string;
   label: string;
 }
