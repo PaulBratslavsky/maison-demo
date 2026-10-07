@@ -16,7 +16,7 @@ const CHAT = [
     createdAt: '2026-10-07T01:02:03.000Z',
     parts: [
       { type: 'thinking', content: 'Let me look.', signature: 'EqQBCkYIBRgCIkD+/=', providerMetadata: { anthropic: { index: 0 } } },
-      { type: 'text', content: 'Looking.\n\n| a | b |\n| - | - |\n| 1 | 2 |' },
+      { type: 'text', content: 'Looking.\n\n| a | b |\n| - | - |\n| 1 | 2 |', metadata: { anthropic: { citations: [] } } },
       { type: 'tool-call', id: 'c1', name: 'list_inquiries', arguments: '{}', state: 'complete', input: {}, output: { inquiries: [{ documentId: 'k1', customer: 'line:U4af…88', message: '<customer_message>Hello</customer_message>' }], capped: false } },
       { type: 'tool-result', toolCallId: 'c1', content: '{"inquiries":[]}', state: 'complete' },
       { type: 'structured-output', status: 'complete', raw: '{}', data: { nested: [1, [2, { three: null }]], line: 'a b' } },
@@ -82,6 +82,8 @@ describe('the Ask tab\'s saved chats, on a real Strapi', () => {
     const opened = await call('findOne', 1, { params: { documentId } });
     assert.equal(opened.status, 200);
     assert.deepEqual(opened.body.conversation.messages, CHAT);
+    // A text part keeps its metadata too: a text part that did not keep extra keys would lose it on save, with no error.
+    assert.deepEqual(opened.body.conversation.messages[1].parts[1].metadata, { anthropic: { citations: [] } });
     // In the database it is the envelope.
     const row = await strapi.documents(CONVERSATION).findOne({ documentId });
     assert.deepEqual(row.messages, { v: 1, messages: CHAT });

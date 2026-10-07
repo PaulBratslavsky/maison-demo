@@ -13,12 +13,13 @@ describe('toStoredMessages', () => {
     expect(STORAGE_VERSION).toBe(1);
   });
 
-  it('keeps every key of every part: a thinking part with its signature, a tool call with its output, and the keys of a message', () => {
+  it('keeps every key of every part: a thinking part with its signature, a text part with its metadata, a tool call with its output, and the keys of a message', () => {
     const messages = [
       message(
         [
           { type: 'thinking', content: 'Let me look.', signature: 'EqQBCkYIBRgC', providerMetadata: { anthropic: { index: 0 } } },
-          text('Looking.'),
+          // TanStack AI's TextPart has an optional `metadata` key. A text part that did not keep extra keys would lose it on save, with no error.
+          { ...text('Looking.'), metadata: { anthropic: { citations: [] } } },
           { type: 'tool-call', id: 'c1', name: 'list_requests', arguments: '{}', state: 'complete', input: {}, output: { requests: [], capped: false }, approval: { id: 'x' } },
           { type: 'tool-result', toolCallId: 'c1', content: '{"requests":[]}', state: 'complete', extra: [1, 2] },
         ],
@@ -28,6 +29,7 @@ describe('toStoredMessages', () => {
     const stored = toStoredMessages(messages);
     expect(stored.ok).toBe(true);
     expect(stored.value?.messages).toEqual(messages);
+    expect(stored.value?.messages[0].parts[1]).toHaveProperty('metadata', { anthropic: { citations: [] } });
   });
 
   it('keeps a part of a type it does not know, as it is, instead of refusing the chat', () => {
@@ -69,7 +71,7 @@ describe('toStoredMessages', () => {
 
 describe('readStoredMessages', () => {
   it('gives back the messages of an envelope, with every key', () => {
-    const messages = [message([{ type: 'thinking', content: 'x', signature: 's' }, text('Hi.')])];
+    const messages = [message([{ type: 'thinking', content: 'x', signature: 's' }, { ...text('Hi.'), metadata: { anthropic: { citations: [] } } }])];
     expect(readStoredMessages({ v: 1, messages })).toEqual({ messages });
   });
 
