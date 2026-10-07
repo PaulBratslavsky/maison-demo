@@ -4,9 +4,10 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STARTERS } from '../../admin/src/assistant';
 import { AssistantProvider, useAssistant } from '../../admin/src/components/assistant/AssistantProvider';
 import { ChatDrawer } from '../../admin/src/components/assistant/ChatDrawer';
-import { declarationsOf, keyframesCss, mediaDeclarationsOf } from './css';
+import { declarationsOf, keyframesCss, mediaDeclarationsOf, mediaQueriesOf } from './css';
 import { renderInTheme } from './render';
 
 /*
@@ -151,6 +152,30 @@ const region = () => screen.getByRole('region', { name: 'Chat messages' });
 const shows = async (text: string) => within(await screen.findByRole('region', { name: 'Chat messages' })).findByText(text);
 /** The body of the request the page sent to the chat route. */
 const sentBody = (fetchMock: ReturnType<typeof vi.fn>, index = 0) => JSON.parse((fetchMock.mock.calls[index] as unknown as [string, { body: string }])[1].body);
+/** The row of quick questions above the text box, and its buttons. */
+const quickQuestions = () => screen.getByRole('group', { name: 'Quick questions' });
+const chips = () => within(quickQuestions()).getAllByRole('button') as HTMLButtonElement[];
+/** An answer that has begun and does not end until `finish()` is called, so a test can look at the chat while an answer is on its way. */
+const heldAnswer = () => {
+  let finish: () => void = () => {};
+  const respond = () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const send = (events: Array<Record<string, unknown>>) => {
+            for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+          };
+          send([event('RUN_STARTED'), event('TEXT_MESSAGE_START', { messageId: 'held', role: 'assistant' }), event('TEXT_MESSAGE_CONTENT', { messageId: 'held', delta: 'Looking into it' })]);
+          finish = () => {
+            send([event('TEXT_MESSAGE_CONTENT', { messageId: 'held', delta: ' and found two visits.' }), event('TEXT_MESSAGE_END', { messageId: 'held' }), event('RUN_FINISHED', { finishReason: 'stop' })]);
+            controller.close();
+          };
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+    );
+  return { respond, finish: () => finish() };
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -202,7 +227,7 @@ describe('before the chat', () => {
 });
 
 describe('the chat area', () => {
-  it('has the tools, the model and New chat in the top bar, the starters in the empty state, and the composer', async () => {
+  it('has the tools, the model and New chat in the top bar, the empty state, the quick questions above the text box, and the composer', async () => {
     world();
     expect(await screen.findByRole('button', { name: 'Tools (2)' })).toBeTruthy();
     expect(screen.getByText('claude-sonnet-5-5')).toBeTruthy();
@@ -210,6 +235,150 @@ describe('the chat area', () => {
     expect(screen.getByText('Ask Maison')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Which visits are waiting for staff?' })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// Paul, 7 October: five quick questions, always at the bottom, so a demo can use them at any point and they do not disappear after the first message.
+describe('the five quick questions', () => {
+  const sendOne = async (text = 'Which visits are waiting?') => {
+    await userEvent.type(box(), `${text}{Enter}`);
+    await within(region()).findByText(text);
+  };
+
+  it('are five buttons in the empty chat, in the order the spec gives them, and the empty state does not repeat them', async () => {
+    world();
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    expect(chips().map((chip) => chip.textContent)).toEqual([...STARTERS]);
+    expect(chips()).toHaveLength(5);
+    expect(screen.getByText('Ask Maison')).toBeTruthy();
+    // Each question is on the screen once: the empty state has none of its own.
+    for (const question of STARTERS) expect(screen.getAllByRole('button', { name: question }), question).toHaveLength(1);
+  });
+
+  it('sit directly above the text box and under the messages, inside the chat column, and not in the message list, so they never scroll with it', async () => {
+    world();
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    expect(chatColumn().contains(quickQuestions())).toBe(true);
+    expect(region().contains(quickQuestions())).toBe(false);
+    expect(Boolean(region().compareDocumentPosition(quickQuestions()) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    // The next thing in the column is the composer, so nothing sits between the questions and the box.
+    expect(quickQuestions().nextElementSibling).toBe(box().closest('form'));
+    expect(quickQuestions().parentElement).toBe(region().parentElement);
+  });
+
+  it('are still there after a message is sent, while the answer comes and after it, and after the next question', async () => {
+    const held = heldAnswer();
+    world({ chat: [held.respond, () => stream(answer('Three questions.'))] });
+    await screen.findByRole('textbox', { name: 'Chat message' });
+
+    await sendOne();
+    await within(region()).findByText('Looking into it');
+    expect(screen.queryByText('Ask Maison')).toBeNull();
+    expect(chips().map((chip) => chip.textContent)).toEqual([...STARTERS]);
+
+    held.finish();
+    await within(region()).findByText('Looking into it and found two visits.');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull());
+    expect(chips().map((chip) => chip.textContent)).toEqual([...STARTERS]);
+
+    await sendOne('And the questions?');
+    await within(region()).findByText('Three questions.');
+    expect(chips().map((chip) => chip.textContent)).toEqual([...STARTERS]);
+  });
+
+  it('are there in a saved chat that was reopened, with its messages, and after New chat', async () => {
+    world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+    await shows('The answer to Which visits are waiting?');
+    expect(chips()).toHaveLength(5);
+
+    await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(screen.getByText('Ask Maison')).toBeTruthy();
+    expect(chips()).toHaveLength(5);
+  });
+
+  it('send the question as it is written, from the chat that is on the screen, and leave the draft in the text box', async () => {
+    const { fetchMock } = world({ chat: [() => stream(answer('Two visits wait.')), () => stream(answer('Two complaints.'))] });
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    await sendOne('Which visits are waiting?');
+    await within(region()).findByText('Two visits wait.');
+    await userEvent.type(box(), 'A half-written question');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Any complaints this week?' }));
+
+    expect(await within(region()).findByText('Two complaints.')).toBeTruthy();
+    expect(sentBody(fetchMock, 1).messages.at(-1)).toMatchObject({ role: 'user', content: 'Any complaints this week?' });
+    expect(sentBody(fetchMock, 1).messages.map((message: { role: string }) => message.role)).toEqual(['user', 'assistant', 'user']);
+    expect(box().value).toBe('A half-written question');
+    expect(document.activeElement).toBe(box());
+  });
+
+  it('send each of the five as it is written', async () => {
+    const { fetchMock } = world({ chat: STARTERS.map(() => () => stream(answer('Done.'))) });
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    for (const [index, question] of STARTERS.entries()) {
+      await userEvent.click(screen.getByRole('button', { name: question }));
+      // Each answer says "Done.", so the number of answers on the screen says when this turn is over, and the questions are switched on again.
+      await waitFor(() => expect(within(region()).getAllByText('Done.')).toHaveLength(index + 1));
+      await waitFor(() => expect(chips().every((chip) => !chip.disabled)).toBe(true));
+      expect(sentBody(fetchMock, index).messages.at(-1), question).toMatchObject({ role: 'user', content: question });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(STARTERS.length);
+  });
+
+  it('are switched off while an answer comes, send nothing then, and are switched on again when it is over', async () => {
+    const held = heldAnswer();
+    const { fetchMock } = world({ chat: [held.respond] });
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    expect(chips().every((chip) => !chip.disabled)).toBe(true);
+
+    await sendOne();
+    await within(region()).findByText('Looking into it');
+    expect(chips()).toHaveLength(5);
+    expect(chips().every((chip) => chip.disabled)).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Any complaints this week?' }));
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    held.finish();
+    await within(region()).findByText('Looking into it and found two visits.');
+    await waitFor(() => expect(chips().every((chip) => !chip.disabled)).toBe(true));
+  });
+
+  it('are not there before the assistant is ready: while it is checked, when it is not set up, and when the check failed', async () => {
+    let answerStatus: (value: unknown) => void = () => {};
+    client.get.mockReset();
+    client.get.mockImplementation(() => new Promise((resolve) => (answerStatus = resolve)));
+    renderInTheme(
+      <AssistantProvider started>
+        <Drawer />
+      </AssistantProvider>
+    );
+    expect(screen.getByText('Checking the assistant…')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Quick questions' })).toBeNull();
+
+    answerStatus({ data: NOT_SET_UP });
+    await screen.findByRole('heading', { name: "The assistant isn't set up" });
+    expect(screen.queryByRole('group', { name: 'Quick questions' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Which visits are waiting for staff?' })).toBeNull();
+  });
+
+  it('are there when the assistant becomes ready after Check again', async () => {
+    world({ status: NOT_SET_UP });
+    await screen.findByRole('button', { name: 'Check again' });
+    expect(screen.queryByRole('group', { name: 'Quick questions' })).toBeNull();
+    client.get.mockImplementation(async () => ({ data: READY }));
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    expect(chips()).toHaveLength(5);
+  });
+
+  it('stay above the box when the red box shows, which sits between the messages and the questions', async () => {
+    world({ chat: [() => stream([event('RUN_STARTED'), event('RUN_ERROR', { message: 'Anthropic is busy. Try again in a minute.', code: '529' })])] });
+    await screen.findByRole('textbox', { name: 'Chat message' });
+    await userEvent.click(screen.getByRole('button', { name: 'Which visits are waiting for staff?' }));
+    const alert = (await screen.findByText('Anthropic is busy. Try again in a minute.')).closest('[role="alert"]') as HTMLElement;
+    expect(Boolean(alert.compareDocumentPosition(quickQuestions()) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(quickQuestions().nextElementSibling).toBe(box().closest('form'));
+    expect(chips()).toHaveLength(5);
   });
 });
 
@@ -239,7 +408,7 @@ describe('a turn', () => {
     expect((screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('sends a starter as it is written, and leaves what staff typed in the box', async () => {
+  it('sends a quick question as it is written, and leaves what staff typed in the box', async () => {
     const { fetchMock } = world({ chat: [() => stream(answer('Two visits wait.'))] });
     await screen.findByRole('textbox', { name: 'Chat message' });
     await userEvent.type(box(), 'A half-written question');
@@ -251,7 +420,7 @@ describe('a turn', () => {
     expect(box().value).toBe('A half-written question');
   });
 
-  it('puts the focus back in the text box after a send, from a starter and from the Send button alike, so the next question can be typed', async () => {
+  it('puts the focus back in the text box after a send, from a quick question and from the Send button alike, so the next question can be typed', async () => {
     world({ chat: [() => stream(answer('One.')), () => stream(answer('Two.'))] });
     await screen.findByRole('textbox', { name: 'Chat message' });
 
@@ -1012,6 +1181,15 @@ describe('the drawer', () => {
       expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': '90vw' });
     });
 
+    // The design system makes every box a border box (`box-sizing: border-box` for `*`, in the global style of its provider), and the admin draws it. In
+    // a border box the 1px border on the left is inside the 600px, so the chat column, which starts from 600px, would be one pixel short of the chat.
+    // The drawer says what it is, so its width is the width of what is inside it and the border is outside that.
+    it('is a content box whatever the design system says of boxes, so the chat column is as wide as the chat and the 1px border is outside it', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(drawer())['box-sizing']).toBe('content-box');
+    });
+
     it('is white, with a border on its left and the popup shadow, all from the theme', async () => {
       world();
       await screen.findByRole('textbox', { name: 'Chat message' });
@@ -1073,6 +1251,61 @@ describe('the drawer', () => {
       expect(await screen.findByRole('heading', { name: "The assistant isn't set up" })).toBeTruthy();
       expect(drawer()).toBeTruthy();
       expect(declarationsOf(drawer()).width).toBe('600px');
+    });
+  });
+
+  // Only the message list scrolls up and down. The top bar and the composer stay where they are. What keeps them there is a chain of flex boxes from the
+  // window down to the list: each one is as tall as the box above it leaves, and may be shorter than its content (`min-height: 0`). If one of them
+  // could not be, the messages would push the composer out of the window instead of scrolling. jsdom has no layout, so each link is held on its own.
+  describe('scrolling', () => {
+    const layout = () => chatColumn().parentElement as HTMLElement;
+
+    it('starts from a drawer that is exactly as tall as the window and lays its content out in a column', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(drawer())).toMatchObject({ position: 'fixed', top: '0', bottom: '0', display: 'flex', 'flex-direction': 'column' });
+    });
+
+    it('gives the chat the height that is left under the drawer, and lets it be shorter than what it holds', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(layout())).toMatchObject({ display: 'flex', flex: '1 1 0%', 'min-height': '0' });
+    });
+
+    it('makes the chat column a flex column that may be shorter than what it holds: the top bar, the list and the composer stack in it, and the list is what gives', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(chatColumn())).toMatchObject({ display: 'flex', 'flex-direction': 'column', 'min-height': '0' });
+    });
+
+    it('lets only the message list scroll up and down: the drawer, the layout and the chat column do not scroll, in either direction', async () => {
+      world();
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      expect(declarationsOf(region())['overflow-y']).toBe('auto');
+      for (const [name, element] of [['the drawer', drawer()], ['the layout', layout()], ['the chat column', chatColumn()]] as const) {
+        const declarations = declarationsOf(element);
+        for (const property of ['overflow', 'overflow-x', 'overflow-y']) expect(declarations[property] ?? 'visible', `${name}: ${property}`).not.toMatch(/auto|scroll/);
+      }
+    });
+
+    it('is the same with the list of saved chats open and with the drawer expanded: the chain does not change with either', async () => {
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      await shows('The answer to Which visits are waiting?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      expect(declarationsOf(layout())).toMatchObject({ flex: '1 1 0%', 'min-height': '0' });
+      expect(declarationsOf(chatColumn())).toMatchObject({ 'flex-direction': 'column', 'min-height': '0' });
+      expect(declarationsOf(region())).toMatchObject({ flex: '1', 'min-height': '0', 'overflow-y': 'auto', 'overflow-x': 'hidden' });
+    });
+
+    it('holds the saved chats in their own column, which scrolls by itself when the list is long and moves nothing else', async () => {
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      await shows('The answer to Which visits are waiting?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      expect(declarationsOf(savedList()).overflow).toBe('hidden');
+      const scrollers = Array.from(savedList().querySelectorAll('div')).filter((element) => declarationsOf(element)['overflow-y'] === 'auto');
+      expect(scrollers).toHaveLength(1);
+      expect(scrollers[0].contains(within(savedList()).getByRole('button', { name: 'Which visits are waiting?' }))).toBe(true);
     });
   });
 
@@ -1346,6 +1579,89 @@ describe('the drawer', () => {
     });
   });
 
+  // Paul's table fixes are for both widths: the drawer at 600px and expanded at 960px. The rules are the answer's own and do not read the width, so the same
+  // rules must be on the cells and the same room must be given to the bubble at each, and a rule that was written for one width only would show here.
+  describe('tables, at both widths', () => {
+    const TABLE = [
+      '| Reference | Customer | Requested | Summary |',
+      '| --- | --- | --- | --- |',
+      '| APT-4821 | line:Udec…02 | 2026-10-05 | The customer asks whether the strap of the watch can be made shorter before the visit on Saturday |',
+    ].join('\n');
+    const tableChat = () => savedChat('c1', 'Which visits are waiting?', [staffSays('u1', 'Which visits are waiting?'), assistantSays('a1', TABLE)]);
+    const answerBody = () => region().querySelector('[data-message-part="text"]') as HTMLElement;
+    const assistantRow = () => region().querySelector('[data-message-role="assistant"]') as HTMLElement;
+    /** The box the table scrolls in: the table's parent, inside the answer. */
+    const tableScroller = () => within(answerBody()).getByRole('table').parentElement as HTMLElement;
+    const at = async (width: 'narrow' | 'wide') => {
+      world({ saved: [tableChat()] });
+      await within(await screen.findByRole('region', { name: 'Chat messages' })).findByRole('table');
+      if (width === 'wide') await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      expect(declarationsOf(drawer()).width).toBe(width === 'wide' ? '960px' : '600px');
+    };
+
+    describe.each([['narrow', '600px'], ['wide', '960px']] as const)('at %s (%s)', (width) => {
+      it('keeps the text of a header cell on one line', async () => {
+        await at(width);
+        expect(declarationsOf(answerBody(), ' th')['white-space']).toBe('nowrap');
+      });
+
+      it('breaks the text of a body cell between words only, and never inside a word that fits its column', async () => {
+        await at(width);
+        const cells = declarationsOf(answerBody(), ' td');
+        expect(cells['white-space']).toBe('normal');
+        expect(cells['overflow-wrap']).toBe('break-word');
+        expect(cells['word-break']).toBe('normal');
+      });
+
+      it('gives a body cell a width of 7rem at least and 22rem at most, so a date or a masked customer keeps its line and long text wraps in its column', async () => {
+        await at(width);
+        expect(declarationsOf(answerBody(), ' td')).toMatchObject({ 'min-width': '7rem', 'max-width': '22rem' });
+      });
+
+      it('keeps the columns as wide as their content wants, so a date or a masked customer keeps its line, and scrolls a table that is wider than the bubble sideways inside the bubble, and the list does not move sideways', async () => {
+        await at(width);
+        expect(declarationsOf(answerBody(), ' table').width).toBe('max-content');
+        expect(declarationsOf(tableScroller())['overflow-x']).toBe('auto');
+        expect(declarationsOf(region())['overflow-x']).toBe('hidden');
+      });
+
+      it('gives the assistant\'s bubble the whole width of the list beside the avatar, and lets it be narrower than its table so the table scrolls', async () => {
+        await at(width);
+        expect(declarationsOf(assistantRow())).toMatchObject({ 'max-width': '100%', 'min-width': '0' });
+        const bubble = within(assistantRow()).getByText('Assistant').parentElement as HTMLElement;
+        expect(declarationsOf(bubble)['min-width']).toBe('0');
+      });
+    });
+
+    it('has no rule for the cells, the table, the bubble or the list that depends on the width of the window: none is in a media query on width', async () => {
+      await at('narrow');
+      const parts: Array<[string, Element, string]> = [
+        ['the table', answerBody(), ' table'],
+        ['a header cell', answerBody(), ' th'],
+        ['a body cell', answerBody(), ' td'],
+        ['the box the table scrolls in', tableScroller(), ''],
+        ['the assistant\'s row', assistantRow(), ''],
+        ['the list', region(), ''],
+      ];
+      for (const [name, element, suffix] of parts) for (const query of mediaQueriesOf(element, suffix)) expect(query, name).not.toMatch(/width/);
+    });
+
+    it('has the same rules for the cells, the table and the bubble at 960px as at 600px: nothing in them reads the width', async () => {
+      await at('narrow');
+      const rules = () => ({
+        table: declarationsOf(answerBody(), ' table'),
+        th: declarationsOf(answerBody(), ' th'),
+        td: declarationsOf(answerBody(), ' td'),
+        scroller: declarationsOf(tableScroller()),
+        row: declarationsOf(assistantRow()),
+        list: declarationsOf(region()),
+      });
+      const narrow = rules();
+      await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
+      expect(rules()).toEqual(narrow);
+    });
+  });
+
   // Paul, 7 October: "history should not interfere with the width, it should just open wider to preserve the chat".
   describe('History', () => {
     const chats = () => [savedChat('c2', 'Any complaints this week?'), savedChat('c1', 'Which visits are waiting?')];
@@ -1413,6 +1729,29 @@ describe('the drawer', () => {
       expect(column['min-width']).toBe('0');
       // The list does not shrink: its minimum width is its width.
       expect(declarationsOf(savedList())['min-width']).toBe('260px');
+    });
+
+    // The drawer gets 260px wider while the list gets 260px wide. They must move together, or the chat column would be squeezed for a moment while the
+    // list opens: the same time and the same easing for both, and none of it for staff who prefer less motion.
+    it('opens in step with the drawer: both change their width over the same 0.2 seconds with the same easing, so the chat is never squeezed on the way', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      const timing = (transition: string | undefined, property: string) => {
+        const part = (transition ?? '').split(',').map((item) => item.trim()).find((item) => item.startsWith(`${property} `));
+        return part?.slice(property.length).trim();
+      };
+      expect(timing(declarationsOf(drawer()).transition, 'width')).toBe('0.2s ease');
+      expect(timing(declarationsOf(savedList()).transition, 'width')).toBe('0.2s ease');
+      expect(timing(declarationsOf(savedList()).transition, 'min-width')).toBe('0.2s ease');
+    });
+
+    it('has no change over time, for the drawer or for the list, for staff who prefer less motion: the list is there at once, with the drawer', async () => {
+      world({ saved: chats() });
+      await shows('The answer to Any complaints this week?');
+      await userEvent.click(screen.getByRole('button', { name: 'History' }));
+      expect(mediaDeclarationsOf(drawer(), '(prefers-reduced-motion: reduce)').transition).toBe('none');
+      expect(mediaDeclarationsOf(savedList(), '(prefers-reduced-motion: reduce)').transition).toBe('none');
     });
 
     it('is the only thing that shows or hides the list: picking a chat, starting a new one and deleting one leave it as it is', async () => {

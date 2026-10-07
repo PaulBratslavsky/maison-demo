@@ -14,6 +14,7 @@ import { drawerWidthOf, MAX_DRAWER_WIDTH } from './drawerWidth';
 import { ErrorBox, NoteBox } from './ErrorBox';
 import { assistantLayer } from './layer';
 import { MessageList } from './MessageList';
+import { QuickQuestions } from './QuickQuestions';
 import { SetupNotice } from './SetupNotice';
 import { TopBarIcon } from './TopBarIcon';
 
@@ -30,8 +31,9 @@ const slideIn = keyframes`
  *
  * It is not taken out of the page when it is closed. It is hidden: out of sight (`visibility`), out of reach of the pointer, and out of the keyboard
  * and the accessibility tree (`inert`, `aria-hidden`). Drawing it again would draw the chat's screen again, and what staff see when they open the
- * drawer must be what they left: the same messages, the same text box with what they typed in it, and where they had scrolled to. The box is the
- * content box (no `box-sizing`), so the 1px border is outside its width and the chat column is exactly as wide as the chat.
+ * drawer must be what they left: the same messages, the same text box with what they typed in it, and where they had scrolled to. The box is a
+ * content box, so the 1px border is outside its width and the chat column is exactly as wide as the chat. It is written out because the design
+ * system's global style makes every box a border box, and in a border box the border would take one pixel from the chat.
  */
 const DrawerRoot = styled.aside<{ $width: number; $open: boolean }>`
   position: fixed;
@@ -41,6 +43,7 @@ const DrawerRoot = styled.aside<{ $width: number; $open: boolean }>`
   z-index: ${assistantLayer};
   display: flex;
   flex-direction: column;
+  box-sizing: content-box;
   width: ${({ $width }) => $width}px;
   max-width: ${MAX_DRAWER_WIDTH};
   background: ${({ theme }) => theme.colors.neutral0};
@@ -199,7 +202,7 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
   const send = (message: string, source: MessageSource) => {
     if (!canSend({ text: message, busy, ready })) return;
     void assistant.send(message, source);
-    // A starter's button goes when the chat starts, and a clicked Send is switched off while the answer comes: the text box keeps the focus.
+    // A quick question's button and Send are both switched off while the answer comes, so the focus would be lost with them: the text box keeps it.
     box.current?.focus();
   };
 
@@ -228,10 +231,12 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
       onToggleExpanded={onToggleExpanded}
       onClose={onClose}
     >
-      <MessageList messages={assistant.messages} busy={busy} onStarter={(starter) => send(starter, 'starter')} canStart={(starter) => canSend({ text: starter, busy, ready })} />
+      <MessageList messages={assistant.messages} busy={busy} />
       {/* A turn's error wins over a problem with the saved chats: it is about what staff are watching. */}
       {(notice?.text ?? history.error) && <ErrorBox>{notice?.text ?? history.error}</ErrorBox>}
       {note && <NoteBox>{note}</NoteBox>}
+      {/* The five quick questions, directly above the text box and outside the list, for the whole chat. Pressing one sends it as a starter. */}
+      <QuickQuestions onAsk={(question) => send(question, 'starter')} canAsk={(question) => canSend({ text: question, busy, ready })} />
       <Composer draft={draft} onDraft={assistant.setDraft} busy={busy} ready={ready} onSend={(text) => send(text, 'box')} onStop={assistant.stop} textareaRef={box} />
     </ChatArea>
   );

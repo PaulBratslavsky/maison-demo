@@ -1,5 +1,5 @@
 /**
- * What the Ask tab decides, apart from React: its starters, the state it shows, the notices under the messages, when
+ * What the assistant's drawer decides, apart from React: its quick questions, the state it shows, the notices under the messages, when
  * Send works, the line for each tool call, what stays in the chat after Stop or a failed turn, what happens to the text
  * box, and where the admin's token is. The components read these, and the unit tests hold them.
  */
@@ -7,8 +7,18 @@
 /** The assistant's two routes, served under /maison. */
 export const ASSISTANT_PATHS = { status: '/maison/assistant/status', chat: '/maison/assistant/chat' } as const;
 
-/** The three questions the tab suggests while the chat is empty. */
-export const STARTERS: readonly string[] = ['What are customers asking about today?', 'Any complaints this week?', 'Which visits are waiting for staff?'];
+/**
+ * The five quick questions: buttons above the text box for the whole chat, in this order. Pressing one sends it as it is written, as a starter, which
+ * leaves what staff have typed in the box. They replace the three starters of the first design, which showed in the empty chat only (Paul, 7 October:
+ * so a demo can use them at any point). Each is a question the assistant's tools can answer.
+ */
+export const STARTERS: readonly string[] = [
+  'Which visits are waiting for staff?',
+  'Any complaints this week?',
+  'Which customer questions still need an answer?',
+  'How many inquiries are open in each queue?',
+  'What are customers asking about today?',
+];
 
 /** A tool as the status lists it: its name, and what staff call it. */
 export interface ToolInfo {
@@ -35,14 +45,14 @@ export const isStatus = (value: unknown): value is AssistantStatus => {
   return ready === false && typeof reason === 'string';
 };
 
-/** What the tab shows: the check is running, the check failed, the assistant is not set up (a notice and no text box), or the chat. */
+/** What the drawer shows: the check is running, the check failed, the assistant is not set up (a notice and no text box), or the chat. */
 export type AskTabState =
   | { kind: 'loading' }
   | { kind: 'failed'; text: string }
   | { kind: 'not-ready'; text: string }
   | { kind: 'chat'; model: string; tools: ToolInfo[] };
 
-/** A status the tab already has is kept when a later check fails: the chat stays as it was. */
+/** A status the drawer already has is kept when a later check fails: the chat stays as it was. */
 export const askTabState = (status: AssistantStatus | null, statusError: string | null): AskTabState => {
   if (status) return status.ready ? { kind: 'chat', model: status.model, tools: status.tools } : { kind: 'not-ready', text: status.reason };
   if (statusError) return { kind: 'failed', text: `Couldn't check the assistant: ${statusError}` };
@@ -62,7 +72,7 @@ const CUSTOM_NOTES: Record<string, string> = {
 /** The note under the messages for a custom event, or null for any other. */
 export const customEventNote = (name: string): string | null => (Object.prototype.hasOwnProperty.call(CUSTOM_NOTES, name) ? CUSTOM_NOTES[name] : null);
 
-/** What the tab says about a failed turn, whether it offers New chat as the way on, and the code of the RUN_ERROR it came from, if it came from one. */
+/** What the drawer says about a failed turn, whether it offers New chat as the way on, and the code of the RUN_ERROR it came from, if it came from one. */
 export interface ErrorNotice {
   text: string;
   newChat: boolean;
@@ -332,7 +342,7 @@ export const drawableParts = (parts: readonly PartLike[]): PartLike[] =>
   });
 
 /**
- * Whether the tab says the assistant is working: it is answering, and its message has nothing drawn yet, because it holds no
+ * Whether the chat says the assistant is working: it is answering, and its message has nothing drawn yet, because it holds no
  * part at all, or only thinking, or because the last message is still the staff member's. Once text or a tool line is on the
  * screen, that is the sign of work.
  */

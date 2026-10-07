@@ -33,8 +33,8 @@ export const ChatColumn = styled.div<{ $width: number }>`
 `;
 
 /**
- * The bar of controls. It wraps when it is too narrow for them, which a long model ID in the badge can cause in a drawer 480px wide: the last
- * buttons then go to a second line, and none is cut off.
+ * The bar of controls. It wraps when it is too narrow for them, which a long model ID in the badge can cause when the window is small and the drawer
+ * is held at 90vw: the last buttons then go to a second line, and none is cut off.
  */
 export const ChatTopBar = styled.div`
   display: flex;

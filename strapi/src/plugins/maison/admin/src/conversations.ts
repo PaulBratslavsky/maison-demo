@@ -1,5 +1,5 @@
 /**
- * What the Ask tab decides about its saved chats, apart from React: the routes, the shape of the answers, a chat's title, how the list
+ * What the assistant decides about its saved chats, apart from React: the routes, the shape of the answers, a chat's title, how the list
  * changes when a chat is saved or deleted, when a chat needs saving, and the queue that saves them one at a time. The provider reads these,
  * and the unit tests hold them.
  */

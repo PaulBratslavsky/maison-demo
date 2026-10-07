@@ -1,11 +1,10 @@
-import { Box, Button, Flex, Typography } from '@strapi/design-system';
+import { Box, Typography } from '@strapi/design-system';
 import styled from 'styled-components';
 
-import { STARTERS } from '../../assistant';
-
 /**
- * What the message list shows before the first message: a title, one sentence, and the three starters. Centred in both directions, as in
- * strapi-plugin-tanstack-ai 1.6.0 (`MessageList.tsx`), which has no starters: they are Maison's.
+ * What the message list shows before the first message: a title and one sentence. Centred in both directions, as in strapi-plugin-tanstack-ai
+ * 1.6.0 (`MessageList.tsx`). It has no buttons: the questions to press are the quick questions above the text box (QuickQuestions.tsx), which stay
+ * for the whole chat, and this does not repeat them.
  */
 const Wrapper = styled.div`
   display: flex;
@@ -20,14 +19,7 @@ const Sentence = styled.div`
   max-width: 520px;
 `;
 
-interface EmptyStateProps {
-  /** A starter was pressed: its text is sent as it is. */
-  onStarter: (text: string) => void;
-  /** Whether a send of this text would work now. A starter that would not is switched off. */
-  canStart: (text: string) => boolean;
-}
-
-export const EmptyState = ({ onStarter, canStart }: EmptyStateProps) => (
+export const EmptyState = () => (
   <Wrapper>
     <Typography variant="beta" textColor="neutral400">
       Ask Maison
@@ -38,15 +30,6 @@ export const EmptyState = ({ onStarter, canStart }: EmptyStateProps) => (
           Ask about visit requests, customer questions and inquiries. The assistant looks things up and never sends, confirms or changes anything.
         </Typography>
       </Sentence>
-    </Box>
-    <Box paddingTop={5}>
-      <Flex role="group" aria-label="Suggestions" gap={2} wrap="wrap" justifyContent="center">
-        {STARTERS.map((starter) => (
-          <Button key={starter} size="S" variant="secondary" disabled={!canStart(starter)} onClick={() => onStarter(starter)}>
-            {starter}
-          </Button>
-        ))}
-      </Flex>
     </Box>
   </Wrapper>
 );

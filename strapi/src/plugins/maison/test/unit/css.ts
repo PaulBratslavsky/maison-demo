@@ -86,6 +86,19 @@ export const mediaDeclarationsOf = (element: Element, query: string, suffix = ''
   return found;
 };
 
+/**
+ * The queries of the media rules that hold a rule for the element, or for its `suffix` part, with the spaces taken out: `(min-width:768px)`. A test uses
+ * it to say that no rule of an element depends on the width of the window, which `declarationsOf` cannot say, as it leaves media rules out.
+ */
+export const mediaQueriesOf = (element: Element, suffix = ''): string[] => {
+  const found = new Set<string>();
+  for (const { prelude, body } of blocksOf(allCss())) {
+    if (!prelude.startsWith('@media')) continue;
+    if (Object.keys(collect(blocksOf(body), element, suffix)).length > 0) found.add(prelude.replace(/\s+/g, '').slice('@media'.length));
+  }
+  return [...found];
+};
+
 /** All the CSS rules of the document that are keyframes, as text. */
 export const keyframesCss = (): string =>
   blocksOf(allCss())

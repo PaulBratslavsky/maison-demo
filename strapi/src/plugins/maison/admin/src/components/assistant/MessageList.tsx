@@ -150,13 +150,9 @@ interface MessageListProps {
   messages: readonly UIMessage[];
   /** Whether an answer is on its way. */
   busy: boolean;
-  /** A starter in the empty state was pressed. */
-  onStarter: (text: string) => void;
-  /** Whether a send of this text would work now: a starter that would not is switched off. */
-  canStart: (text: string) => boolean;
 }
 
-export const MessageList = ({ messages, busy, onStarter, canStart }: MessageListProps) => {
+export const MessageList = ({ messages, busy }: MessageListProps) => {
   const list = useRef<HTMLDivElement>(null);
   // Whether the list follows the newest message. It does until the reader scrolls up.
   const following = useRef(true);
@@ -191,7 +187,7 @@ export const MessageList = ({ messages, busy, onStarter, canStart }: MessageList
         following.current = followsNewest(event.currentTarget);
       }}
     >
-      {messages.length === 0 && <EmptyState onStarter={onStarter} canStart={canStart} />}
+      {messages.length === 0 && <EmptyState />}
 
       {messages.map((message, index) => {
         const parts = message.parts as readonly PartLike[];

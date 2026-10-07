@@ -2,7 +2,7 @@
 import { lightTheme } from '@strapi/design-system';
 import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MessageList } from '../../admin/src/components/assistant/MessageList';
 import { declarationsOf } from './css';
 import { renderInTheme } from './render';
@@ -15,9 +15,7 @@ const runningCall = (id: string): Part => ({ type: 'tool-call', id, name: 'list_
 const finishedCall = (id: string, output: unknown = { requests: [{ reference: 'APT-4821' }], capped: false }): Part => ({ type: 'tool-call', id, name: 'list_requests', arguments: '{}', state: 'complete', output });
 const failedCall = (id: string): Part => finishedCall(id, { error: { code: 'not_found', message: 'No request APT-4812.', hint: 'Check the reference.' } });
 
-const list = (messages: unknown[], props: Partial<Parameters<typeof MessageList>[0]> = {}) => (
-  <MessageList messages={messages as never} busy={false} onStarter={() => {}} canStart={() => true} {...props} />
-);
+const list = (messages: unknown[], props: Partial<Parameters<typeof MessageList>[0]> = {}) => <MessageList messages={messages as never} busy={false} {...props} />;
 const rows = (container: HTMLElement, role?: string) => Array.from(container.querySelectorAll(`[data-message-role${role ? `="${role}"` : ''}]`)) as HTMLElement[];
 
 /** The rules styled-components wrote for an element: every rule in the document that starts with one of its classes. */
@@ -34,19 +32,12 @@ const cssOf = (element: Element): string => {
 };
 
 describe('the empty chat', () => {
-  it('shows the empty state with the starters, and no message', () => {
+  // The questions to press are not in the list: they are the quick questions above the text box, outside the list, so they never scroll with it.
+  it('shows the empty state, with no button and no message', () => {
     const { container } = renderInTheme(list([]));
     expect(screen.getByText('Ask Maison')).toBeTruthy();
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(rows(container)).toHaveLength(0);
-  });
-
-  it("sends a starter's text when it is pressed, and switches off the starters that cannot send", async () => {
-    const onStarter = vi.fn();
-    renderInTheme(list([], { onStarter, canStart: (starter) => starter !== 'Any complaints this week?' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Which visits are waiting for staff?' }));
-    expect(onStarter).toHaveBeenCalledExactlyOnceWith('Which visits are waiting for staff?');
-    expect((screen.getByRole('button', { name: 'Any complaints this week?' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('shows no empty state once there is a message', () => {

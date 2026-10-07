@@ -42,8 +42,25 @@ describe('the assistant paths', () => {
 });
 
 describe('STARTERS', () => {
-  it('are the three questions the tab suggests, as the spec words them', () => {
-    expect(STARTERS).toEqual(['What are customers asking about today?', 'Any complaints this week?', 'Which visits are waiting for staff?']);
+  // Paul, 7 October: five quick questions that stay above the text box for the whole chat, so a demo can use them at any point. They replace the
+  // three starters of the first design, and the order is the one he gave.
+  it('are the five quick questions, in the order the spec gives them', () => {
+    expect(STARTERS).toEqual([
+      'Which visits are waiting for staff?',
+      'Any complaints this week?',
+      'Which customer questions still need an answer?',
+      'How many inquiries are open in each queue?',
+      'What are customers asking about today?',
+    ]);
+  });
+
+  it('are each one line of plain text, with no two the same, so each chip is one button with a name of its own', () => {
+    expect(new Set(STARTERS).size).toBe(STARTERS.length);
+    for (const question of STARTERS) {
+      expect(question, question).toBe(question.trim());
+      expect(question, question).not.toMatch(/\n/);
+      expect(question.endsWith('?'), question).toBe(true);
+    }
   });
 });
 
