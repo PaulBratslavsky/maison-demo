@@ -6,7 +6,7 @@ This is for the agent that continues the Maison staff chat on another computer. 
 
 - **Project:** maison-demo. It holds a LINE mini app for a luxury boutique (`liff/`, Next.js) and a Strapi 5.55.1 back end (`strapi/`) with a local plugin, Maison (`strapi/src/plugins/maison`). Paul Bratslavsky owns it. It was built for his "UX to AX" talk (QBurst x LY, Tokyo, 7 October 2026).
 - **The feature:** a staff AI chat inside the Strapi admin. Staff ask about appointment requests, customer questions and inquiries. Seven read-only tools answer, Claude Sonnet 5.5 writes the reply, and TanStack AI 0.52.3 runs the conversation. Chats are saved per admin. The chat never sends, confirms or changes anything. It can only save the admin's own chats.
-- **Where it stands:** on branch `feat/maison-staff-chat`, about 40 commits ahead of `main`. It is tested locally only. Nothing on this branch is in production.
+- **Where it stands:** on branch `feat/maison-staff-chat`, pushed to GitHub and about 60 commits ahead of `main`. It is tested locally only. Nothing on this branch is in production. The last commit is unfinished work: read "State at handoff" below.
 - **Paul's last design decisions,** all recorded in the spec:
   - The chat looks and works like the chat in his own plugin, strapi-plugin-tanstack-ai 1.6.0.
   - It opens as a drawer from a floating button on every admin page.
@@ -79,7 +79,7 @@ This is for the agent that continues the Maison staff chat on another computer. 
    rm -rf dist && npm run build && node scripts/check-esm-import.mjs && node ../../../scripts/share-strapi-utils.mjs --check
    STRAPI_APP_DIR="$(cd ../../.. && pwd)" node --test --test-reporter=tap --test-concurrency=1 test/integration/*.test.mjs
    ```
-   - At handoff time the unit suite was about 113 files / 3,230 tests and the integration suite 149 tests, all passing. The counts grow with each task.
+   - At handoff the unit suite was 123 files with 3,426 tests. 3,419 passed; the 7 failures are the README tests of the unfinished D1 commit. The integration suite was 155 tests, all passing, before D1. The counts grow with each task.
    - Integration tests use their own SQLite databases and `listen(0)`, so they never touch the dev server on 1338.
    - No test calls Anthropic or LINE.
 
@@ -117,50 +117,78 @@ This is for the agent that continues the Maison staff chat on another computer. 
   - component tests with jsdom and Testing Library
 - **Paul tried the rebuilt chat on 7 October** and it worked: the model badge, a Markdown table of requests, the bullets and the avatar.
 
-## What was running at handoff
+## State at handoff (7 October 2026, about 10:30 JST)
 
-- **Task D1, the drawer and the compact header.** Brief: `.superpowers/sdd/2026-10-07-maison-ask-tab-rebuild/task-d1-brief.md`.
-  - Maison's left-menu icon component renders the chat into `document.body` with a React portal. Strapi draws menu icons on every admin page, and no documented API exists for that, so this is the only way to reach every page.
-  - The design includes:
-    - an owner rule, because icons can mount more than once
-    - events stopped at the chat's root, because React passes portal events up to the menu link
-    - a floating launcher button
-    - a 480px drawer with Expand to 760px
-    - the Ask tab removed
-    - a compact page header
-- **Server fix round 1** for the rebuild's server review. Spec: `server-fix-1.md`, review `review-server.md`.
-  - The integration test over real HTTP with two admins.
-  - The schema wording: a Super Admin can read saved chats through Strapi's Content Manager API.
-  - A deleted chat during update.
-  - One owner query.
-  - `update` refusing an empty body.
-  - Titles cut by grapheme.
-  - The generated types.
-- **The admin-side review** of the rebuild. Its output is `review-admin.md`.
+The branch is pushed. Its last commit is a work-in-progress commit:
 
-Check the rebuild ledger and `git log` to see which of these finished. A task is done only when its commit exists and the ledger says "complete".
+- **`wip(maison): the chat drawer and the compact header, unfinished`.** This is Task D1, stopped part way for the move. Brief: `.superpowers/sdd/2026-10-07-maison-ask-tab-rebuild/task-d1-brief.md`.
+  - Unit suite: 3,419 of 3,426 pass. The 7 failures are all in `test/unit/readme-ask.test.ts`, because the README's Ask section was being rewritten for the drawer. Both type checks are clean.
+  - It has not been reviewed, and the cold build and integration tests have not been run on it.
+  - What it holds:
+    - the menu-icon mount (`MaisonMenuIcon.tsx`, `menuIconOwner.ts`, `assistantHost.tsx`, `GlobalAssistant.tsx`)
+    - `Launcher.tsx`, `ChatDrawer.tsx`, `drawerWidth.ts` and `layer.ts` (the z-index)
+    - the compact `PageHeader.tsx`
+    - the Ask tab removed (`AskTab.tsx` deleted, its tests moved to `chat-drawer.test.tsx`)
+    - many new component tests
+- **Paul's seven pieces of feedback on the drawer.** He gave them while trying the unfinished drawer in his browser. All seven are in the spec's drawer section (commits 8fbf03d, 83d76fc, 7f673a9, a109a15), and they override the D1 brief. Some were in progress when D1 stopped. **Check each one against the code. Assume none is done until you see it and its test:**
+  1. The drawer opens at 600px, not 480px.
+  2. Tables:
+     - header cells on one line
+     - body cells break only between words (`overflow-wrap: break-word`, never `anywhere`), with about 7rem to 22rem per column
+     - dates like `2026-10-05` and masked customers like `line:Udec…02` stay on one line
+     - a wide table scrolls sideways inside the bubble
+     - in the drawer, the assistant's bubble uses the full width beside the avatar
+
+     His screenshots showed headers breaking as "Rec / eive / d" and dates as "202 / 6- / 10- / 05".
+  3. Only the message list scrolls up and down. The top bar and the composer stay put, and a table's sideways scroll moves nothing else.
+  4. Opening the drawer never starts or clears a chat. Closing and reopening shows the same chat. The first opening in a page load reopens the most recent saved chat. Only New chat starts a new one. He saw a new chat on every opening.
+  5. The table fix applies at both widths.
+  6. Expand only widens the chat, 600px to 960px. It doesn't open History.
+  7. History adds width and never takes it from the chat. Opening it makes the drawer 260px wider (860px or 1220px), so the chat keeps its width. The list always sits beside the chat, with no overlay form. All widths are capped at 90vw.
+- **Server fix round 1** for the rebuild's server review is done and committed (1b0edb8 to 52876d3, 13 commits). Its scoped re-review was started and stopped for the move, so it has not run. Report: `server-fix-1-report.md`.
+- **The admin-side review** of the rebuild is done: `review-admin.md`, 1 Important and 9 Minors, with tests (Appendix A) and patches (Appendix C) ready. The fix round has not run. It applies to the code as D1 leaves it.
 
 ## What is left, in order
 
-1. **Finish whatever was still running.** Then fix what `review-admin.md` found, applied to the code as D1 left it, because D1 moved the components into the drawer. Re-review the fixes.
-2. **A docs round:**
-   - the README and CHANGELOG wording about who can read saved chats (server review Important 2)
-   - README wording (server review Minor 8)
-   - Paul's checklist item for Tools (0) (server review Minor 9)
-   - a README line that the sidebar lists the newest 100 chats (server review Minor 6, parked)
-   - the admin's `conversationTitle` cut by grapheme like the server
-3. **Paul's browser check of the drawer.**
-   - On a Content Manager page and on the Maison page.
-   - Reply on LINE and Answer open above the drawer.
-   - The page stays clickable beside it.
-   - Escape and the focus.
-   - Expand and History.
-   - The compact header.
-   - Tables wrap in the narrow drawer.
-   - Light and dark mode.
-4. **The first plan's Tasks 11 to 16, adapted** (read `preflight-11-16.md` first; its UI rulings were made before the rebuild and the drawer, so check each against the current code):
-   - **11: Ask about this.** A small button on each request, question and inquiry row. It opens the drawer and sends "Tell me about request APT-4821." (or question Q-..., or inquiry <documentId>). The message must not clear the staff member's draft.
-   - **12: The two draft tools on the server.** `draft_reply` for an inquiry and `draft_answer` for a question. They are client tools, plus their read routes. They join the Tools list with the labels "Draft a LINE reply" and "Draft an answer".
+1. **Finish D1.**
+   - Check Paul's seven changes and do what is missing, test first.
+   - Fix the README section and `readme-ask.test.ts`. The section describes the drawer, with Paul's browser checklist for it.
+   - Run every check: the whole unit suite, both type checks, the cold build, `check-esm-import`, `share-strapi-utils --check`, and the integration files `assistant-conversations`, `permissions` and `demo-activity`.
+   - Then replace the WIP commit's subject in the history, or follow it with a normal commit that finishes the task. Don't rewrite anything already on `main`.
+2. **A review of D1** on Sonnet, plus the scoped re-review of the server fix round (`server-fix-1.md`, review `review-server.md`). One fix round for both.
+3. **The admin fix round** (`review-admin.md`, ruling R-AFIX in the rebuild ledger):
+   - Important 1: the five tests in Appendix A.
+   - Minors L1, L2 and L3: the patches in Appendix C.
+   - L4: the admin's `conversationTitle` cut by grapheme like the server's `cutTitle`, with the server's test cases.
+   - L5: `React.memo`.
+   - L6: the accessibility names.
+   - L7: the spec points with no test, and the order-dependent CSS asserts.
+   - L8: idioms in comments. The status-check notice gets a fixed staff text, with the raw text going to the log.
+   - L9: hide the footnote heading.
+4. **A docs round.**
+   - README and CHANGELOG: don't promise that only the admin can read a saved chat, because a Super Admin can, through the Content Manager API (server review Important 2).
+   - README wording (server review Minor 8).
+   - Paul's checklist item for Tools (0) (Minor 9).
+   - A README line that the sidebar lists the newest 100 chats (Minor 6).
+   - The saved-chat schema description still says "Ask tab of the Maison page". Reword it for the drawer and commit the regenerated `strapi/types/generated/contentTypes.d.ts`, which Strapi writes on its next start.
+5. **Paul's browser check of the drawer.** Run `cd strapi && npm run dev`, and he signs in. Check:
+   - the drawer on a Content Manager page and on the Maison page
+   - Reply on LINE and Answer open above it
+   - the page stays clickable
+   - Escape and the focus
+   - Expand and History widths
+   - tables
+   - reopening keeps the chat
+   - the compact header
+   - light and dark
+6. **Merge to production. Paul approved this on 7 October, to happen after the drawer, the server fixes and the admin fixes are in and every check passes.** Confirm with him before you merge, because his production LINE app runs on this stack.
+   - Open a pull request from `feat/maison-staff-chat` to `main` with `gh pr create`, and merge it with `gh pr merge`.
+   - Strapi Cloud then deploys `main` (project `reassuring-feast-8a3e120af6`). Watch the deploy until it is live.
+   - The deploy adds a new table, `maison_conversations`, on Postgres.
+   - `AI_API_KEY` is already set on Strapi Cloud, and the model defaults to `claude-sonnet-5-5`. Super Admin gets the new permission automatically.
+7. **The first plan's Tasks 11 to 16, adapted.** Read `preflight-11-16.md` first. Its UI rulings were made before the rebuild and the drawer, so check each against the current code.
+   - **11: Ask about this.** A small button on each request, question and inquiry row. It opens the drawer and sends "Tell me about request APT-4821." (or question Q-..., or inquiry <documentId>). It must not clear the staff member's draft.
+   - **12: The two draft tools on the server.** `draft_reply` for an inquiry and `draft_answer` for a question, as client tools, plus their read routes. They join the Tools list as "Draft a LINE reply" and "Draft an answer".
    - **13: Draft cards** inside the assistant's bubble, with the client tools in `admin/src/assistant-client-tools.ts`.
      - The idle cleanup (`withoutOpenToolCalls`) must never remove a draft tool call that is waiting for or running its client execute.
      - `drawableParts` must count draft tool calls.
@@ -168,8 +196,7 @@ Check the rebuild ledger and `git log` to see which of these finished. A task is
    - **14: Use this draft.** It opens the page's own Reply on LINE or Answer dialog, pre-filled. Staff send it themselves.
    - **15: Integration tests.** Include one request aborted mid-stream, and one schema-invalid tool input through the real `chat()`.
    - **16: The live tests with a real key, run by Paul, and the docs.**
-5. **The final whole-branch review,** on the most capable model, with one fix round.
-6. **`finishing-a-development-branch`.** Present Paul the options: merge, pull request, or keep. He decides. Nothing reaches `main` without him.
+8. **The final whole-branch review** on the most capable model, with one fix round. Then `finishing-a-development-branch`: Paul decides how it lands.
 
 ## How the work has been run
 
