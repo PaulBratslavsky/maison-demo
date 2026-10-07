@@ -738,6 +738,14 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 - **Loading.**
   - The status (`GET /maison/assistant/status`) and the saved chats load the first time the drawer opens, not on every page.
   - The chat, its saved chats and the draft stay while staff move between admin pages. They end on a reload.
+- **Five quick questions, always at the bottom.** They sit in a row of small chips directly above the composer. They show whenever the assistant is ready, from the empty chat onwards, and never disappear after the first message, so a demo can use them at any point. In order:
+  1. "Which visits are waiting for staff?"
+  2. "Any complaints this week?"
+  3. "Which customer questions still need an answer?"
+  4. "How many inquiries are open in each queue?"
+  5. "What are customers asking about today?"
+
+  A chip sends its question and leaves the draft in the text box. Chips are off while an answer comes. The empty state keeps its title and sentence, without the starters. These replace the three starters of section 1. (Paul, 7 October: so they don't disappear after the first request, which makes the demo easier.)
 - **Opening never starts a new chat.**
   - Closing and opening the drawer again shows the same chat, with its messages and the draft.
   - The first opening in a page load reopens the most recent saved chat, or the chat staff already began.
