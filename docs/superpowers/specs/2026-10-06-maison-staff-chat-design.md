@@ -673,3 +673,86 @@ The Ask tab holds one chat area, laid out as `R/admin/src/components/ChatPanel.t
   - The draft cards sit inside the assistant's bubble.
   - The draft tools count as something to draw.
   - Saved chats keep the draft tools' results.
+
+## The chat drawer and a compact page header (7 October 2026)
+
+### Why
+
+Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
+
+- **The chat as a drawer on every admin page.** In his words: "a pop up that can work across all our route, maybe a drawer that opens, so that way we don't have to go to the different screens." His screenshot showed the Inquiries tab, which staff had to leave to ask about it.
+- **A smaller Maison page header.** "The top nav and title and subtitle is taking too much real estate."
+
+### Paul's answers (7 October 2026)
+
+1. **The drawer is on every admin page:** the Content Manager, the Maison page, settings and the rest. The chat stays open and keeps going as staff move between pages.
+2. **A floating button opens it.** A round Sparkle button sits at the bottom right of every page. It opens the drawer.
+3. **It is a side panel, and the page stays usable.**
+   - It slides in from the right, 480px wide and full height, with no dark backdrop, so staff can read and click the page beside it.
+   - An expand button widens it to 760px, which shows the history sidebar beside the chat.
+4. **The Ask tab is removed.** The drawer replaces it. "Ask about this" on a row (step 2) opens the drawer and asks about that row.
+
+### How the drawer is mounted
+
+- **Strapi has no documented place for UI on every admin page.** Its admin panel API offers menu links, settings links, Content Manager panels and actions, injection zones, and Homepage widgets (docs.strapi.io, "Admin Panel API for plugins").
+- **Strapi draws each menu link's icon on every page.** In 5.55.1 the left menu is part of the signed-in layout, around every page (`@strapi/admin` `layouts/AuthenticatedLayout.mjs`). It draws each menu link's icon as `<LinkIcon width="20" height="20" fill="neutral500" />` (`components/MainNav/MainNavLinks.mjs:51-70`, and `:108-130` in the mobile menu).
+- **So Maison's menu icon carries the chat.**
+  - Maison's menu link gets its own icon component. It draws the Crown as today.
+  - It also renders the chat (the launcher and the drawer) into `document.body` with a React portal. A portal keeps Strapi's providers: the theme, the router, the admin's sign-in and the fetch client.
+- **One chat only.** Strapi may draw the icon more than once, on desktop and in the mobile menu. A small module-level owner rule makes the first mounted icon the only one that renders the chat. When it unmounts, the next one takes over.
+- **Events stay inside the chat.** React passes events from a portal up to its React parents, and the icon's parent is the menu link. The chat's root stops clicks, pointer, mouse, key and focus events from going further, so a click in the drawer never follows the menu link.
+- **The cost of this choice.** It rests on how Strapi 5.55.1 draws its menu, not on a documented API. A Strapi upgrade can need a fix here, and a unit test holds the rule.
+- **Who sees it.** Only admins with "Use the Maison assistant" (`useRBAC`), and the menu link itself needs the Maison page permission. So an admin with the assistant permission but no Maison page permission has no drawer. That is noted in the README.
+
+### What staff see
+
+- **The launcher.**
+  - A 56px round button at the bottom right, 24px from the edges.
+  - `primary600`, with the Sparkle icon in white.
+  - Accessible name "Open the Maison assistant".
+  - Hidden while the drawer is open.
+- **The drawer.**
+  - Fixed to the right edge, full height, 480px wide, or 760px when expanded.
+  - The chat area from the rebuild section, in full: top bar, message list, error box and composer.
+  - It sits above the page and the left menu, and below Strapi's dialogs. When Reply on LINE or Answer opens, the dialog is on top.
+- **The top bar** gains two buttons at the right, after New chat:
+  - Expand or Collapse, an icon button.
+  - Close, the Cross icon, named "Close the assistant".
+- **History.**
+  - At 480px, the History button opens the chat list over the messages, the full width of the drawer. Picking a chat closes the list.
+  - At 760px, the list is the 260px sidebar beside the chat, as in the rebuild section.
+- **Keyboard and focus.**
+  - Opening moves the focus to the text box.
+  - Escape, with the focus in the drawer, closes it. The focus goes back to the launcher.
+  - The drawer is `role="complementary"`, named "Maison assistant". It does not trap the focus, because the page stays usable.
+- **Tables in a narrow drawer.** In the bubbles, table cells wrap their text. The table still scrolls sideways when it can't fit.
+- **Loading.**
+  - The status (`GET /maison/assistant/status`) and the saved chats load the first time the drawer opens, not on every page.
+  - The chat, its saved chats and the draft stay while staff move between admin pages. They end on a reload.
+
+### The Maison page
+
+- **The Ask tab is removed.** The page has three tabs again: Requests, Questions and Inquiries. The full-height frame and the hidden Demo data block, which existed for Ask, go too.
+- **A compact header** takes the place of `Layouts.Header`:
+  - The title "Maison" as `Typography variant="beta"` (`h1`).
+  - The subtitle beside it, in `omega` and `neutral600`. It wraps under the title on a narrow screen.
+  - The header is about 56px high, with 24px above it.
+  - The tab row sits 8px under it, and the tab's content 16px under the tabs.
+  - The page keeps its side padding.
+
+### Tests
+
+- **Unit tests:**
+  - the owner rule (one chat however many icons mount, and the next icon takes over)
+  - that events stop at the chat's root
+- **Component tests:**
+  - the launcher shows only with the permission, opens the drawer and hides
+  - Close and Escape close the drawer, and the focus returns to the launcher
+  - Expand shows the sidebar; at 480px History shows the list over the messages
+  - the chat survives a route change, so the provider is not remounted
+  - the Maison page shows three tabs and the compact header
+- **Paul's browser check:**
+  - the drawer on a Content Manager page and on the Maison page
+  - Reply on LINE opens above the drawer
+  - the page stays clickable
+  - the compact header
