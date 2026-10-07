@@ -317,7 +317,7 @@ describe('the Ask tab\'s saved chats, on a real Strapi', () => {
     it('answers 403 to an admin without the permission and 401 to nobody, on all five routes, and changes nothing', async () => {
       const alice = await assistantAdmin('gate-alice');
       const mine = await saveChat(alice, 'Gate chat');
-      const before = await strapi.documents(CONVERSATION).count();
+      const chatsBefore = await strapi.documents(CONVERSATION).count();
       const routes = [
         ['GET', '/maison/conversations'],
         ['POST', '/maison/conversations', { title: 'x', messages: CHAT }],
@@ -333,26 +333,27 @@ describe('the Ask tab\'s saved chats, on a real Strapi', () => {
         assert.equal(anonymous.status, 401, `${method} ${path}: ${anonymous.text}`);
         // Neither learns whether the ID is there: the answer is the one an ID nobody has gets.
         if (path.includes(mine)) {
-          const nobodys = path.replace(mine, 'no-such-chat');
-          assert.equal(denied.text, (await request(method, nobodys, manager, body)).text, `${method}: 403 for an ID nobody has`);
-          assert.equal(anonymous.text, (await request(method, nobodys, null, body)).text, `${method}: 401 for an ID nobody has`);
+          const unknownPath = path.replace(mine, 'no-such-chat');
+          assert.equal(denied.text, (await request(method, unknownPath, manager, body)).text, `${method}: 403 for an ID nobody has`);
+          assert.equal(anonymous.text, (await request(method, unknownPath, null, body)).text, `${method}: 401 for an ID nobody has`);
         }
       }
-      assert.equal(await strapi.documents(CONVERSATION).count(), before, 'nothing was saved or deleted');
+      assert.equal(await strapi.documents(CONVERSATION).count(), chatsBefore, 'nothing was saved or deleted');
       assert.equal((await strapi.documents(CONVERSATION).findOne({ documentId: mine })).title, 'Gate chat');
     });
 
     it('answers 413 to a body over 1 MB and saves nothing, and takes one just under it', async () => {
       const alice = await assistantAdmin('limit-alice');
       const mine = await saveChat(alice, 'Limit chat');
-      const before = await strapi.documents(CONVERSATION).count();
+      const chatsBefore = await strapi.documents(CONVERSATION).count();
+      // Strapi's body limit is 1 MB, which is 1,048,576 bytes: a message of 1,100,000 characters is over it, and one of 1,000,000 is under.
       const bodyOf = (characters) => ({ title: 'Big', messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'x'.repeat(characters) }] }] });
 
       const created = await request('POST', '/maison/conversations', alice, bodyOf(1_100_000));
       assert.equal(created.status, 413, created.text.slice(0, 200));
       const saved = await request('PUT', `/maison/conversations/${mine}`, alice, bodyOf(1_100_000));
       assert.equal(saved.status, 413, saved.text.slice(0, 200));
-      assert.equal(await strapi.documents(CONVERSATION).count(), before, 'nothing was saved');
+      assert.equal(await strapi.documents(CONVERSATION).count(), chatsBefore, 'nothing was saved');
       assert.deepEqual((await strapi.documents(CONVERSATION).findOne({ documentId: mine })).messages, { v: 1, messages: CHAT }, 'the chat is as it was');
 
       const nearly = await request('POST', '/maison/conversations', alice, bodyOf(1_000_000));
@@ -368,13 +369,13 @@ describe('the Ask tab\'s saved chats, on a real Strapi', () => {
       const aliceChat = await saveChat(alice, 'Alice before the reset');
       await saveChat(alice, 'Alice again');
       await saveChat(bob, 'Bob before the reset');
-      const before = await strapi.documents(CONVERSATION).count();
-      assert.ok(before >= 3, 'there are chats to clear');
+      const chatsBefore = await strapi.documents(CONVERSATION).count();
+      assert.ok(chatsBefore >= 3, 'there are chats to clear');
 
       // Reset deletes every admin's chats, so it is for the demo permission only: an admin who may just use the assistant gets 403, and nobody signed in gets 401.
       assert.equal((await request('POST', '/maison/demo/reset', alice)).status, 403);
       assert.equal((await request('POST', '/maison/demo/reset', null)).status, 401);
-      assert.equal(await strapi.documents(CONVERSATION).count(), before, 'the chats are still there');
+      assert.equal(await strapi.documents(CONVERSATION).count(), chatsBefore, 'the chats are still there');
 
       const reset = await request('POST', '/maison/demo/reset', manager);
       assert.equal(reset.status, 200, reset.text);
