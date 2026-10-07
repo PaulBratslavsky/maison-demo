@@ -37,6 +37,27 @@ describe('the actions bootstrap registers', () => {
   });
 });
 
+describe('the assistant action', () => {
+  it('is the thirteenth action bootstrap registers, with its own sub category and the name staff see in the role editor', async () => {
+    const registerMany = vi.fn();
+    const strapi = { ...fakeStrapi(), service: () => ({ actionProvider: { registerMany } }), server: { use: vi.fn() } };
+    await bootstrap({ strapi } as any);
+    const actions = registerMany.mock.calls.flatMap(([registered]) => registered);
+    expect(actions).toHaveLength(13);
+    expect(actions.find(({ uid }) => uid === 'assistant.use')).toEqual({
+      section: 'plugins',
+      pluginName: 'maison',
+      uid: 'assistant.use',
+      displayName: 'Use the Maison assistant',
+      subCategory: 'assistant',
+    });
+  });
+
+  it('is registered under the full name the routes and the page check', async () => {
+    expect(await registeredActions()).toContain(ACTION.assistantUse);
+  });
+});
+
 describe("the admin panel's permissions for customer questions", () => {
   const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
 
@@ -53,9 +74,7 @@ describe("the admin panel's permissions for customer questions", () => {
   });
 
   it('make the flags the Maison page reads: canReview, canConfirm, canManage, canRead, canAnswer, canView and canReply', () => {
-    expect(PERMISSIONS.sections.map(flagOf)).toEqual(
-      expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply'])
-    );
+    expect(PERMISSIONS.sections.map(flagOf)).toEqual(expect.arrayContaining(['canReview', 'canConfirm', 'canManage', 'canRead', 'canAnswer', 'canView', 'canReply']));
   });
 
   it('make a different flag for each action: actions that end in the same word would share one flag', () => {
@@ -69,6 +88,29 @@ describe("the admin panel's permissions for customer questions", () => {
   it('make seven flags for the seven actions the page checks, none of them shared', () => {
     expect(PERMISSIONS.sections).toHaveLength(7);
     expect(new Set(PERMISSIONS.sections.map(flagOf)).size).toBe(7);
+  });
+});
+
+describe("the admin panel's permission for the assistant", () => {
+  const actionsOf = (permissions: ReadonlyArray<{ action: string }>) => permissions.map(({ action }) => action);
+
+  // The assistant is a drawer on every admin page, drawn by Maison's menu icon, which checks this one permission and reads canUse.
+  it("is one entry of its own, checked with useRBAC by the menu icon, for the icon to read as canUse", () => {
+    expect(PERMISSIONS.assistant).toEqual([{ action: ACTION.assistantUse, subject: null }]);
+    expect(ACTION.assistantUse.split('.').slice(-1)[0]).toBe('use');
+  });
+
+  it("is not one of the permissions the Maison page checks: the page has no assistant of its own any more", () => {
+    expect(actionsOf(PERMISSIONS.sections)).not.toContain(ACTION.assistantUse);
+  });
+
+  it("doesn't open the page on its own: the page is for staff who read something, and the assistant is on every page", () => {
+    expect(actionsOf(PERMISSIONS.page)).not.toContain(ACTION.assistantUse);
+  });
+
+  it('is on no Homepage widget', () => {
+    expect(actionsOf(PERMISSIONS.widget)).not.toContain(ACTION.assistantUse);
+    expect(actionsOf(PERMISSIONS.inquiriesWidget)).not.toContain(ACTION.assistantUse);
   });
 });
 

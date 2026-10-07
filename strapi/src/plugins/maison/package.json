@@ -59,8 +59,11 @@
     "@strapi/sdk-plugin": "^6.1.1",
     "@strapi/strapi": "^5.55.1",
     "@strapi/typescript-utils": "^5.55.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "jsdom": "^25.0.1",
     "prettier": "^3.9.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -89,6 +92,12 @@
     "@ai-sdk/anthropic": "^4.0.71",
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/openai-compatible": "^3.0.62",
-    "ai": "^7.0.127"
+    "@tanstack/ai": "0.52.3",
+    "@tanstack/ai-anthropic": "0.18.3",
+    "@tanstack/ai-client": "0.29.2",
+    "@tanstack/ai-react": "0.22.4",
+    "ai": "^7.0.127",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

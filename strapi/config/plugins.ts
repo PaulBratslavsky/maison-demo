@@ -71,6 +71,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
         // new inquiries wait under Not labelled.
         aiProvider: env('AI_PROVIDER', '').trim() || null,
         aiModel: env('AI_MODEL', '').trim() || null,
+        // The model of the Ask tab, a chat for staff on the Maison page. It is an Anthropic model ID, and the chat uses AI_API_KEY
+        // (with AI_PROVIDER unset or anthropic). Unset: claude-sonnet-5-5. It is not AI_MODEL, which labels inquiries.
+        aiChatModel: env('AI_CHAT_MODEL', '').trim() || null,
         aiApiKey: env('AI_API_KEY', '').trim() || null,
         aiBaseUrl: env('AI_BASE_URL', '').trim() || null,
         // Optional: your own LINE user ID (U and 32 lowercase hex characters). With it, Load demo activity gives your

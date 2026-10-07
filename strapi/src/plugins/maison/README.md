@@ -9,6 +9,7 @@ A Strapi 5 plugin that shows one content model serving people and AI agents. It 
 - **Customer questions for staff:** when the concierge can't answer, Strapi records the question, staff let the customer know or answer on LINE in their own name, and an answer can become product knowledge ([Customer questions](#customer-questions))
 - **Customer inquiries:** every concierge turn is recorded, a model labels it in the background, and staff work the queues on the Maison page and reply on LINE ([Customer inquiries](#customer-inquiries))
 - **Customer identity comes from sign-in, never from the model**, through [strapi-oauth-mcp-manager](https://github.com/PaulBratslavsky/strapi-oauth-mcp-manager) 1.1 and LINE
+- **The assistant drawer:** a chat for staff, in a drawer on every admin page, that looks up requests, questions, inquiries and the catalog, answers in Markdown with tables, shows each lookup in a box, and saves each admin's chats ([The assistant drawer](#the-assistant-drawer))
 - **A live requests board and demo data** in the admin panel, with content in Japanese and English
 
 Maison is fictional. The plugin uses no real brand's names, products or images.
@@ -34,6 +35,7 @@ Confirming a request is one act wherever it happens: the `confirm_appointment` t
 - Node 22.12 or later: the AI SDK that labels inquiries is an ES module, which Strapi loads with `require()`
 - For the customer tools and the customer routes, strapi-oauth-mcp-manager 1.1 with LINE sign-in configured. Without it, those tools answer `not_signed_in` and those routes answer 503.
 - For the admin chat, strapi-plugin-tanstack-ai 1.6 with its chat configured. Maison needs no setup for it: the chat finds Maison's tools by itself.
+- For the assistant drawer, an Anthropic API key in `AI_API_KEY`, with `AI_PROVIDER` unset or `anthropic` ([The assistant drawer](#the-assistant-drawer))
 
 ## Install
 
@@ -66,11 +68,12 @@ Restart Strapi. Open **Maison** in the admin menu and choose **Load demo catalog
 | `defaultLocale` | `ja` | Content language when a tool call doesn't pass `locale` (`ja` or `en`) |
 | `maxOpenRequestsPerCustomer` | `3` | Unconfirmed future requests a customer may have |
 | `houseName` | `{ ja: 'メゾン', en: 'Maison' }` | Header of the LINE confirmation, in the visit's language |
-| `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat |
+| `disabledTools` | `[]` | Tool names to leave out of MCP and the admin chat. In the assistant drawer it removes the catalog tools it names (`search_knowledge`, `search_products` and `view_product`) and affects no other tool. |
 | `lineChannelAccessToken` | `null` | The channel access token of your LINE Messaging API channel, which Strapi sends confirmations and staff's answers to customer questions with: `env('LINE_CHANNEL_ACCESS_TOKEN', null)`. Without it, Strapi sends none. An empty value counts as not set. |
 | `lineApiBaseUrl` | `https://api.line.me` | Where Strapi sends them. Any https URL, or `http://127.0.0.1:<port>` and `http://localhost:<port>` for a stand-in in tests. No trailing slash. |
 | `aiProvider` | `anthropic` | The provider of the model that labels inquiries: `anthropic`, `openai` or `openai-compatible`, which is any server that speaks OpenAI's format, such as Ollama, vLLM or LM Studio: `env('AI_PROVIDER', '')`. An empty value counts as not set. |
 | `aiModel` | the provider's own | A model ID: `env('AI_MODEL', '')`. Without one, it's `claude-haiku-4-5-20251001` for `anthropic`, `gpt-5-mini` for `openai` and `llama3.1` for `openai-compatible`. |
+| `aiChatModel` | `claude-sonnet-5-5` | The model of the assistant drawer's chat, an Anthropic model ID: `env('AI_CHAT_MODEL', '')`. It is not `aiModel`, which labels inquiries. The chat uses `aiApiKey`, and is ready only when `aiProvider` is `anthropic` ([The assistant drawer](#the-assistant-drawer)). An empty value counts as not set. |
 | `aiApiKey` | `null` | The provider's API key: `env('AI_API_KEY', '')`. Without it, and for `openai-compatible` without `aiBaseUrl`, labelling is off ([Labelling](#labelling)). |
 | `aiBaseUrl` | `null` | Where an `openai-compatible` server answers, such as `http://127.0.0.1:11434/v1` for Ollama: `env('AI_BASE_URL', '')`. An http or https URL, with no trailing slash. |
 | `demoLineUserId` | `null` | Optional. Your own LINE user ID, `U` and 32 lowercase hex characters: `env('MAISON_DEMO_LINE_USER_ID', '')`. With it, [Load demo activity](#load-demo-activity) gives your LINE account one waiting request, one open question and one open complaint, so confirming and replying send real LINE messages to your phone. Any other value is ignored, with a warning at boot that names the setting and never the value, and the demo activity goes to made-up customers only. Never logged, and masked in the admin like every customer, with a "Your LINE" label next to your own rows. An empty value counts as not set. |
@@ -218,11 +221,13 @@ Each tool is offered only to admins whose role holds its permission. `search_kno
 
 ## The admin page
 
-**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
+**Maison** in the admin menu is shown to admins with "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". It has up to three tabs, each shown to the admins who may see what is in it, and **Demo data** below them. The title and its subtitle share one row at the top, so the tabs start high on the page. A tab's label says how many are waiting in it, so staff who land on one see where the work is: **Requests 3** for the requests waiting for staff, **Questions 2** for the open and taken questions, and **Inquiries 2** for the inquiries in Needs an answer. A tab with nothing waiting has no number. The numbers refresh every 5 seconds, whichever tab is open, and at once after an action. The page opens on the first tab the admin may see, or on the one its address names: `/plugins/maison?tab=inquiries`, `?tab=questions` or `?tab=requests`, when the admin may see that tab. Picking a tab puts it in the address.
 - **Requests**, for admins with "MCP: review appointment requests": the Homepage widget's three cards (waiting for staff, confirmed and upcoming, LINE sent), then a board that refreshes every 5 seconds. You can filter it to requests waiting for staff, confirmed ones, or all. Each row shows the customer's note. Admins with "MCP: confirm appointment requests" get a **Confirm** button on requests whose visit is still ahead, and the cards update as soon as they confirm. They also get **Send again** on confirmed requests whose LINE column says "not sent", until the visit is over ([Send again](#send-again)). A made-up demo customer's request says "demo customer" in grey, and has no Send again: Strapi sends those customers nothing.
 - **Questions**, for admins with "Read customer questions": the questions the concierge handed to staff, with **Let them know** and **Answer** for admins with "Answer customer questions on LINE" ([Customer questions](#customer-questions)).
 - **Inquiries**, for admins with "Review customer inquiries": every concierge turn, in queues, with **Reply on LINE**, **Close**, **Change label** and **Label again** for admins with "Reply to customer inquiries on LINE" ([Customer inquiries](#customer-inquiries)).
-- **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, and the product knowledge entries staff added by answering questions.
+- **Demo data:** **Load demo catalog**, **Load demo activity** (below) and **Reset demo activity**, which deletes every appointment, notification, question and inquiry, every admin's saved assistant chats, and the product knowledge entries staff added by answering questions.
+
+The assistant is not a tab. It was the page's fourth tab, **Ask**, and is now a drawer on every admin page ([The assistant drawer](#the-assistant-drawer)), so the Maison page is a page of three lists. An old address with `?tab=ask` opens the first tab, as an address with any name that is not a tab does.
 
 ### Load demo activity
 
@@ -253,6 +258,127 @@ The five made-up customers' LINE user IDs belong to nobody, so LINE refuses ever
 - **Reply on LINE:** the inquiry is replied, with `lineOutcome` `demo`, shown in grey.
 
 These answer `200` with `status: "demo"`, and the page shows an info notice. A `demo` outcome is never pending (`pending_confirmations` lists none), and never counts as "LINE sent". The LINE quota line counts what LINE itself reports, so a demo outcome never shows there.
+
+## The assistant drawer
+
+The assistant is a chat for staff, in a drawer that opens from a round button at the bottom right of every admin page: the Content Manager, the Maison page, the settings and the rest. It looks things up and summarizes them: visit requests, the questions the concierge handed to staff, inquiries, and the catalog. It never sends, confirms, answers, closes or relabels anything. Staff do that with the Maison page's own buttons.
+
+- **Who sees it:** admins whose role holds "Use the Maison assistant" (`plugin::maison.assistant.use`). Super Admin has it. The drawer is added to the page by Maison's menu link, so the admin also needs a permission that shows that link: "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". An admin who holds the assistant permission and none of those has no menu link, and so no drawer ([How it is mounted](#how-it-is-mounted)).
+- **What it needs:** an Anthropic API key in `AI_API_KEY`, with `AI_PROVIDER` unset or `anthropic`. Without one, the drawer shows "The assistant isn't set up", the reason and **Check again**, and no text box. Set the key, restart Strapi, and press **Check again**.
+- **Which model:** `aiChatModel` (`AI_CHAT_MODEL`), `claude-sonnet-5-5` by default. It is not `aiModel`, which labels inquiries. The model's ID is in a badge in the top bar.
+- **How it calls the model:** only through TanStack AI. The server runs `chat()` from `@tanstack/ai` with the Anthropic adapter, and the page runs `useChat` from `@tanstack/ai-react`. The four TanStack AI packages are pinned to exact versions (0.52.3, 0.18.3, 0.22.4 and 0.29.2), because a range lets npm install two copies of the SDK side by side.
+
+### How it is mounted
+
+Strapi has no place for something that is on every admin page. Its Admin Panel API offers menu links, settings links, Content Manager panels and actions, injection zones and Homepage widgets (docs.strapi.io, "Admin Panel API for plugins"), and none of them is on every page. What Strapi does draw on every signed-in page is the icon of each menu link, in the left menu. So Maison's menu link has an icon component of its own, `MaisonMenuIcon`, and the assistant is added to the page through it.
+- **The icon is still the Crown.** `MaisonMenuIcon` draws the Crown with the props Strapi gives its icons, so the menu looks as it did. Strapi can draw the icon more than once at the same time: in the left menu, and in the mobile menu while that is open. Each icon claims when it mounts and releases when it unmounts (`menuIconOwner.ts`). The oldest icon is the owner, and only the owner looks after the assistant, so there is one assistant however many icons are on the screen. When the owner goes, the oldest icon that is left takes over.
+- **The chat is not in the icon.** Strapi draws the icon again on every change of address. In 5.55.1, `LeftMenu` reads the location, so it renders on each change, and `MainNavIcons` makes a new component for each link on each render, so React replaces the old icon with a new one. A chat held by the icon would be lost at each click on a menu link, and at each change of tab on the Maison page, and an answer on its way would stop. So the owning icon only tells a **host** (`assistantHost.tsx`) what Strapi's providers say and the host cannot read: the theme, the language, and whether this admin holds "Use the Maison assistant". The host draws the assistant in a React root of its own, in an element added to the body.
+- **How long it stays:** for as long as an icon is on the screen. Half a second after the last icon has gone, which is when the admin has signed out, the host takes the assistant away with its chat, so the next admin does not find it. While the admin is signed in, the chat, its saved chats and the text typed and not sent stay as staff move between pages and while the drawer is closed, and an answer on its way goes on. A reload ends them.
+- **The code is loaded when it is needed.** The icon and the host are in the admin's first bundle, and are small. The assistant itself (Markdown, TanStack AI and the screens) is a chunk of its own, loaded the first time an admin who may use it is on a page. Its status check and its saved chats are asked for the first time the drawer is opened, not on every page.
+- **A window 1080px wide or more:** below that width, which is Strapi's `large` breakpoint, Strapi draws only a few links in the top bar of its mobile layout, and the other links, Maison's among them, only inside its menu while that menu is open. So the round button is there while the menu is open and goes half a second after it closes, and the chat goes with it. Use the assistant in a window 1080px wide or more.
+- **The cost of this choice:** it rests on how Strapi 5.55.1 draws its menu (`components/MainNav/MainNavLinks.mjs` and `components/LeftMenu.mjs` in `@strapi/admin`), not on a documented API. A Strapi upgrade can need a fix here. `test/unit/maison-menu-icon.test.tsx` holds the rule: it draws the icon in a stand-in for the menu that follows those files (`test/unit/fake-strapi-menu.tsx` names the files and lines it follows). After a Strapi upgrade, compare those two files of Strapi with the stand-in, run the tests, and open any admin page: the round button must be at the bottom right.
+
+### The screen
+
+The button is 56px across, 24px from the bottom and right edges, in the primary colour with the Sparkle icon, and it is not on the screen while the drawer is open. The drawer slides in from the right and is the full height of the window, with no dark layer behind it, so the page beside it stays readable and clickable. It is above the page and the left menu and below Strapi's dialogs, so **Reply on LINE**, **Answer** and **Change label** open above it. Only the message list scrolls up and down, and it follows the newest message only while you are at the bottom. The top bar, the quick questions and the text box stay where they are.
+- **Widths:** the chat is 600px wide, and 960px when the drawer is expanded. The list of saved chats is a column of 260px beside the chat. **History** makes the drawer 260px wider, 860px or 1220px expanded, so the chat keeps its width and gives up nothing to the list. A drawer is never wider than 90vw: only when it would pass that does the chat give up the difference, and the list keeps its 260px. The width changes over 0.2 seconds, the drawer and the list together, and not at all for staff who prefer less motion.
+- **The top bar:** **History** opens the saved chats. **Tools (N)** opens a read-only list of the tools your chat has, each with a label, one line about it and its name. A role that may read less sees fewer. A badge names the model. **New chat** starts an empty chat. When the chat is too long to go on, the button also shows the words "New chat". At the right end, **Expand the assistant** widens the chat from 600px to 960px (**Collapse the assistant** narrows it again) and never opens the list, and **Close the assistant** closes the drawer.
+- **The saved chats:** only **History** shows or hides the list, as a column beside the chat, to its left, at either width. It is never drawn over the messages. Picking a chat, starting a new one and deleting one leave it as it is.
+- **Keyboard and focus:** opening moves the focus to the text box. Escape, with the focus in the drawer, closes it, and the focus goes back to the round button. An Escape that something else has used first does not close it: the one that closes the list of tools, and the one that cancels a conversion of Japanese text. There is no focus trap, because the page stays usable.
+- **Messages:** your messages are on the right, the assistant's on the left with its avatar. The assistant's bubble uses the full width beside the avatar. Answers are Markdown: paragraphs, lists, tables, code and quotes. Images are not drawn. Only `http:` and `https:` links are links, and they open in a new tab. Raw HTML shows as text.
+- **Tables:** header cells stay on one line. Body cells wrap between words and never inside one that fits, and each column is 7rem to 22rem wide (the admin's rem is 10px, so 70px to 220px), so a date such as `2026-10-05` and a masked customer such as `line:Udec…02` keep their line, and a long text wraps inside its column. A table is never squeezed to fit the bubble, because a browser that squeezes a table breaks a date after its second hyphen. It is as wide as its columns want to be, and a table wider than the bubble scrolls sideways inside its bubble, and nothing else moves: not the message list, not the drawer. This is the same at 600px and at 960px. At 600px, a table with a long text column is wider than the bubble, so scroll it sideways to read that column.
+- **Tool boxes:** each lookup is a box in the answer, in the order it happened, closed at first. Its header says `Tool: list_requests` and then a spinner, "3 results" (or "1 result", or "done" for a tool with nothing to count), or "failed". Opened, it shows the result as JSON with the customer-text tags taken out and customers still masked. A failed box is marked: its border takes the error colour, its header says "failed" in the error colour, and its body shows the tool's own message.
+- **Waiting:** three dots show while the assistant starts to answer, and "Working on it…" shows under the boxes while a tool runs.
+- **The text box:** one line, growing to six. Enter sends, Shift+Enter adds a line, and the Enter that confirms a Japanese conversion sends nothing. **Send** and **Stop** sit side by side, so a double click on Send never stops an answer.
+- **Quick questions:** five small buttons in a row directly above the text box, for the whole chat: in the empty chat, and after any number of messages, so a demo can use them at any point. They are "Which visits are waiting for staff?", "Any complaints this week?", "Which customer questions still need an answer?", "How many inquiries are open in each queue?" and "What are customers asking about today?" They show whenever the assistant is ready. Pressing one sends that question as it is written, leaves what you have typed in the text box, and puts the focus there. They are off while an answer comes, and they wrap onto more lines when the drawer is narrow. They are outside the message list, so they never scroll with it. The empty chat shows only its title and one sentence.
+
+### Saved chats
+
+Each admin's chats are saved for them, and only they can read them.
+- **When it saves:** after each turn ends, however it ends. A cut-off tool call or a turn that failed before anything came back is taken out first, so a reopened chat never shows a spinner.
+- **The list:** **History** opens it. It lists your chats, newest first, at most 100, each with a trash button that deletes the chat at once. While an answer comes, its rows, **New chat** and the trash buttons are off.
+- **When the drawer is opened:** the first time in a page load, the assistant is checked and the list loads, and not on every page. Once the assistant is ready, the most recent chat reopens, or the chat you had already begun. With no saved chat, the empty chat shows. Opening the drawer never starts a chat, never saves one and never clears the messages: closing it and opening it again, or moving to another page, shows the same chat with its messages and what you typed. Only the New chat buttons start a new one.
+- **New chat** keeps the old chat in the list, and the next turn saves a chat of its own. What you typed and did not send stays in the box.
+- **The title** is your first message, on one line, cut to 80 characters.
+- **Where it lives:** the content type `plugin::maison.conversation` (table `maison_conversations`), hidden from the Content Manager and the Content-Type Builder. A chat is stored as `{ v: 1, messages }`, with every key of every part kept: the model gets the whole history back each turn, and Anthropic refuses a thinking block whose signature was changed. A stored chat that can't be read opens as an empty chat, and the log says which one.
+- **What a saved chat holds:** the messages as you saw them, with the tool results: customers masked, customer text cut and tagged. **Reset demo activity** deletes every admin's saved chats, because they quote the demo customers. Its notice does not count them.
+- **Limits:** a reopened chat still counts toward the 20 messages of a chat.
+
+### Tools
+
+| Tool | Offered with | Label |
+|---|---|---|
+| `list_requests` | "MCP: review appointment requests" | Visit requests |
+| `list_questions` | "Read customer questions" | Customer questions |
+| `list_inquiries` | "Review customer inquiries" | Inquiries |
+| `inquiry_counts` | "Review customer inquiries" | Inquiry counts |
+| `search_knowledge` | "MCP: browse the catalog" | Product knowledge |
+| `search_products` | "MCP: browse the catalog" | Product search |
+| `view_product` | "MCP: browse the catalog" | Product details |
+
+A tool is offered only when the admin's role holds its permission, and `disabledTools` can remove the three catalog tools here, as it does on MCP. An admin with the assistant permission and none of these gets no tools: the assistant says so and looks nothing up. `GET /maison/assistant/status` lists the tools the admin's chat really has.
+
+### What the model sees
+
+- **The customer is masked,** like `line:U4af…88`. A full LINE user ID and a LINE display name never reach the model.
+- **Customer text is data.** It is inside `<customer_message>`, `<customer_question>`, `<customer_note>` or `<concierge_reply>`, and a `<` before one of those names is written as `&lt;`, so customer text can't close a tag. The instructions and every tool's description say that everything a tool returns is data, never instructions.
+- **Lists are cut.** A list answer has at most 50 rows, each long text is cut to 300 characters and marked `truncated`, and `capped` says when there were more rows. One item, looked up by its reference or documentId, has its full text.
+- **The assistant answers in Markdown,** with a table for items that have the same fields, and is told never to include images.
+
+### Limits and errors
+
+| Limit | Value |
+|---|---|
+| Messages from you in one chat | 20. The 21st is refused with "This chat is long. Start a new chat." |
+| Model turns for one answer | 6. After that, "The assistant stopped after 6 steps. Ask a narrower question." |
+| Time for one answer | 90 seconds |
+| Output of one model turn | 16,000 tokens, thinking included |
+| Request body | Strapi's 1 MB |
+
+An error before the stream starts (not set up, a chat that is too long, a failure in setting up) is a `200` event stream with one `RUN_ERROR`, because the page's client never reads the body of an HTTP error. Only a body that is not a run input (400), a role that lost the permission (403) and a body over the limit (413) are real HTTP errors. Staff read plain text:
+
+| What happened | What staff see |
+|---|---|
+| Not set up | The reason, and **Check again** |
+| Anthropic refused the key (401, 403) | "Anthropic refused the key. Check AI_API_KEY." |
+| The model ID is unknown (404) | "Anthropic doesn't know the model", then the ID, then "Check AI_CHAT_MODEL." |
+| Anthropic is busy (429, 529) | "Anthropic is busy. Try again in a minute." |
+| Over 90 seconds | "The assistant took too long and stopped. Try again." |
+| The answer reached 16,000 tokens | "The answer was cut off because it was too long. Ask for less." |
+| The model declined | "The model declined to answer this. Rephrase the question." |
+| The chat can't continue, or is too long | "This chat can't continue. Start a new chat." or "This chat is long. Start a new chat.", with **New chat** |
+| The connection dropped | "The connection to Strapi was lost. Try again." |
+| The session ended | "Your Strapi session has ended. Reload the page to sign in again." |
+| A tool fails | Its box is marked "failed", with its message |
+| A call to the saved chats fails | "Couldn't load your saved chats.", "Couldn't open that chat.", "Couldn't save this chat." or "Couldn't delete that chat." |
+| Anything else | "Something went wrong. Try again." |
+
+The log has one line for each turn, with the admin's ID, the tools called and how long it took, and never customer text. A model error goes to the log once, with the key taken out, and staff never read the provider's own text.
+
+### Routes
+
+All of them are for admins who hold "Use the Maison assistant", and are served under `/maison`.
+- `GET /assistant/status`: `{ ready: true, model, tools: [{ name, label }] }`, or `{ ready: false, reason }`. Never the key.
+- `POST /assistant/chat`: one turn, streamed. The page sends the whole history each time.
+- `GET /conversations` (the admin's chats, newest first, at most 100, each `{ documentId, title, updatedAt }`) and `POST /conversations` (`{ title, messages }`).
+- `GET /conversations/:documentId`, `PUT /conversations/:documentId` (`{ title, messages }`, either or both) and `DELETE /conversations/:documentId`. A chat that belongs to another admin answers `404`, as an ID nobody has does. A body that is not a chat answers `400` with "This chat could not be saved."
+
+The chat's tests never reach Anthropic: they use a scripted adapter, set through the service's `adapterFor`.
+
+### Checking it in the browser
+
+This is for the person who tries the drawer. It needs Strapi running (port 1338 here), an Anthropic key in `AI_API_KEY`, an admin whose role holds "Use the Maison assistant" and a permission that shows the Maison menu link, and a window 1080px wide or more. Each item says what to do and what to expect.
+1. **The button on every page.** Open a Content Manager list and an entry, the Media Library, a Settings page and the Maison page. A round Sparkle button is at the bottom right of each. It is not there for an admin without the assistant permission.
+2. **Open, Escape and the focus.** Press the button: the drawer slides in from the right, the full height of the window and 600px wide, with no dark layer, and the focus is in the text box. Press Escape: it closes, and the focus is on the round button. Open it again and press **Close the assistant**.
+3. **The page stays clickable.** With the drawer open, click a row, a tab and a link in the left menu: the page reacts, and the drawer stays open.
+4. **Dialogs open above it.** On the Maison page, with the drawer open, press **Reply on LINE** on an inquiry, then **Answer** on a question. Each dialog and the dim layer behind it are above the drawer.
+5. **The same chat every time.** Ask a question, and type half of another in the box. Close the drawer and open it again: the same messages and the same half question. Go to another admin page and open it: still the same. Open **History**: one row for the chat, not one for each opening. Reload the page and open the drawer: the most recent chat is back. Only **New chat** starts a new one.
+6. **The five quick questions.** In the empty chat, five small buttons are above the text box. Press one while the box has half a question in it: the question is sent, the half question stays in the box, and the focus is in the box. The buttons are grey while the answer comes, and they are still there when it is over and after more messages.
+7. **Expand and History.** **Expand the assistant**: the chat grows from 600px to 960px, and the list of saved chats does not open. **Collapse the assistant**. **History**: the drawer gets 260px wider (860px, or 1220px expanded), the list is a column to the left of the chat, and the chat keeps its width. Make the window about 1100px wide and open both: the drawer stops at 90% of the window, and the chat gets narrower, not the list.
+8. **Tables.** Ask "Which visits are waiting for staff?" and for a table of the open questions with their reference, customer, date and text. Header cells stay on one line, dates and masked customers stay on one line (not even `2026-10-` and `05` on two lines), and long text wraps between words in a column about 220px wide. Check it at 600px and expanded. A table wider than the bubble scrolls sideways inside the bubble, and nothing else moves: at 600px, the long text column is off to the right until you scroll.
+9. **Scrolling.** In a long chat, only the message list scrolls up and down: the top bar, the quick questions and the text box stay where they are. While an answer streams, scroll up: the list does not pull you back down. Send a message: it goes to the bottom.
+10. **Light and dark.** Switch the admin theme from the profile menu with the drawer open and a table in the chat: the drawer, the bubbles, the quick questions and the table are readable in both.
+11. **The compact header.** On the Maison page, the title "Maison" and its subtitle are on one row about 56px high, and the tabs start right under it. Make the window narrower: the subtitle wraps under the title. The page has three tabs, and `/plugins/maison?tab=ask` opens the first one.
 
 ## The Homepage widgets
 
@@ -565,7 +691,7 @@ Point Claude Desktop at Strapi with the ops token and at LINE Bot MCP with a Mes
 ## Development
 
 ```bash
-npm test                    # unit tests (vitest)
+npm test                    # unit tests and component tests (vitest, with jsdom and Testing Library for the components)
 npm run test:ts:back        # type-check the server
 npm run test:ts:front       # type-check the admin
 npm run test:live           # labelling with a real model, skipped without AI_API_KEY (or, for openai-compatible, AI_BASE_URL)

@@ -3,13 +3,14 @@ import type { Core } from '@strapi/strapi';
 import { getConfig } from '../config';
 import { MAX_OPEN_QUESTIONS, UID, type KnowledgeCategory, type Locale, type QuestionReason, type QuestionStatus } from '../constants';
 import { isDemoCustomer, isYourLine } from '../domain/demo-activity';
+import { isRealIsoDate } from '../domain/hours';
 import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
 import { getDisplayName, pushMessages } from '../domain/line-push';
 import { acknowledgementText, answerText, knowledgeTitleOf } from '../domain/question-messages';
 import { generateReference } from '../domain/reference';
 import { failure, type ServiceResult } from '../domain/service-result';
 import { lineUserIdOf, maskSubject } from '../domain/subject';
-import { isoOrNull } from '../domain/time';
+import { isoOrNull, zonedDayRange } from '../domain/time';
 import { productNamed, rememberProductNames } from './product-names';
 
 type Doc = Record<string, any>;
@@ -59,6 +60,10 @@ export interface QuestionFilters {
   /** open: open or taken, the default. */
   status?: 'open' | 'answered' | 'all';
   limit?: number;
+  /** Only questions that came in on or after this day (YYYY-MM-DD), a day in the plugin's time zone. */
+  since?: string;
+  /** One question by its reference, whatever its status: with it, the status filter is `all`. */
+  reference?: string;
 }
 
 const STATUS_FILTERS: Record<NonNullable<QuestionFilters['status']>, Doc> = {
@@ -280,10 +285,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       return { ok: true, value: { reference, status: 'open', product } };
     },
 
-    /** The Customer questions section's rows, newest first. Each piece is looked up once per language. */
+    /**
+     * The Customer questions section's rows, newest first. Each piece is looked up once per language. `since` keeps the
+     * questions from that day on, and a `since` that is not a real date is `invalid_input`. A `reference` finds one question
+     * whatever its status.
+     */
     async list(filters: QuestionFilters = {}): Promise<ServiceResult<StaffQuestionView[]>> {
+      if (filters.since !== undefined && !isRealIsoDate(filters.since)) {
+        return failure('invalid_input', `The date "${String(filters.since)}" is not a real date.`, 'Use YYYY-MM-DD, such as 2026-10-06.');
+      }
+      const { timezone } = getConfig(strapi);
       const rows = (await strapi.documents(UID.question).findMany({
-        filters: STATUS_FILTERS[filters.status ?? 'open'],
+        filters: {
+          ...STATUS_FILTERS[filters.reference ? 'all' : (filters.status ?? 'open')],
+          ...(filters.reference ? { reference: { $eq: filters.reference } } : {}),
+          ...(filters.since !== undefined ? { createdAt: { $gte: zonedDayRange(filters.since, timezone).start.toISOString() } } : {}),
+        },
         sort: 'createdAt:desc',
         limit: filters.limit ?? 50,
       })) as Doc[];

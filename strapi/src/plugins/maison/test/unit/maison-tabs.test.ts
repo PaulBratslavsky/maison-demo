@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { PAGE_SUBTITLE, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
+import { PAGE_SUBTITLE, TABS, TAB_LABELS, selectTab, tabCounts, tabLabel, visibleTabs } from '../../admin/src/tabs';
 import { COUNTS } from '../../admin/src/inquiries';
 import { isSummary } from '../../admin/src/inquiries';
 import { world } from './fake-inquiries';
 
 describe('the tabs of the Maison page', () => {
-  it('are Requests, Questions and Inquiries', () => {
+  // The assistant was a fourth tab, Ask, until it became a drawer on every admin page.
+  it('are Requests, Questions and Inquiries: the assistant is not a tab', () => {
     expect(TAB_LABELS).toEqual({ requests: 'Requests', questions: 'Questions', inquiries: 'Inquiries' });
   });
 
-  it('are all three, in that order, for an admin who may see all of them', () => {
+  it('are the three lists, in the order of the page', () => {
+    expect(TABS).toEqual(['requests', 'questions', 'inquiries']);
+  });
+
+  it('are the three lists, in that order, for an admin who may see all of them', () => {
     expect(visibleTabs({ canReview: true, canRead: true, canView: true })).toEqual(['requests', 'questions', 'inquiries']);
+  });
+
+  it('are the same for an admin who may also use the assistant: that permission adds no tab', () => {
+    expect(visibleTabs({ canReview: true, canRead: true, canView: true, canUse: true } as never)).toEqual(['requests', 'questions', 'inquiries']);
+    expect(visibleTabs({ canReview: false, canRead: false, canView: false, canUse: true } as never)).toEqual([]);
   });
 
   it.each([
@@ -31,6 +41,7 @@ describe('the tabs of the Maison page', () => {
   it('treat a flag useRBAC has not answered as no permission', () => {
     expect(visibleTabs({} as never)).toEqual([]);
     expect(visibleTabs({ canView: true } as never)).toEqual(['inquiries']);
+    expect(visibleTabs({ canView: true, canReview: undefined } as never)).toEqual(['inquiries']);
   });
 });
 
@@ -38,7 +49,7 @@ describe('the page subtitle', () => {
   // The subtitle sat on the page after the Inquiries tab was added, and still named only requests and questions.
   it('names what each tab shows: the requests, the questions and the inquiries', () => {
     const subtitle = PAGE_SUBTITLE.toLowerCase();
-    for (const label of Object.values(TAB_LABELS)) expect(subtitle, label).toContain(label.toLowerCase());
+    for (const tab of TABS) expect(subtitle, TAB_LABELS[tab]).toContain(TAB_LABELS[tab].toLowerCase());
   });
 });
 
@@ -120,6 +131,13 @@ describe('selectTab', () => {
   it('opens nothing for an admin with no tabs', () => {
     expect(selectTab([], 'inquiries')).toBeUndefined();
     expect(selectTab([], null)).toBeUndefined();
+  });
+
+  // Ask was a tab until the assistant became a drawer, so an address or a bookmark may still say `?tab=ask`. It opens the first tab, as any name that is not a tab does.
+  it('opens the first tab for `ask`, which was a tab before the assistant became a drawer: an old link still opens the page', () => {
+    expect(selectTab(ALL, 'ask')).toBe('requests');
+    expect(selectTab(['questions', 'inquiries'], 'ask')).toBe('questions');
+    expect(selectTab([], 'ask')).toBeUndefined();
   });
 
   it('reads a query string as the address gives it', () => {

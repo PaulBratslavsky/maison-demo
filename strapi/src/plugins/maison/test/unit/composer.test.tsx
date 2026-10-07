@@ -1,0 +1,181 @@
+// @vitest-environment jsdom
+import { createRef } from 'react';
+
+import { fireEvent, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { Composer } from '../../admin/src/components/assistant/Composer';
+import { renderInTheme } from './render';
+
+const composer = (props: Partial<Parameters<typeof Composer>[0]> = {}) => (
+  <Composer draft="Which visits are waiting?" onDraft={() => {}} busy={false} ready onSend={() => {}} onStop={() => {}} textareaRef={createRef<HTMLTextAreaElement>()} {...props} />
+);
+const box = () => screen.getByRole('textbox', { name: 'Chat message' }) as HTMLTextAreaElement;
+const send = () => screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+
+/** The rules styled-components wrote for an element: every rule in the document that starts with one of its classes. */
+const cssOf = (element: Element): string => {
+  const all = Array.from(document.querySelectorAll('style'))
+    .map((style) => style.textContent ?? '')
+    .join('\n');
+  const classes = Array.from(element.classList);
+  return all
+    .split('}')
+    .filter((rule) => classes.some((name) => rule.trimStart().startsWith(`.${name}`)))
+    .map((rule) => `${rule}}`)
+    .join('\n');
+};
+
+describe('the text box', () => {
+  it('is a multi-line box named "Chat message", with the placeholder "Type your message...", one row tall at first', () => {
+    renderInTheme(composer({ draft: '' }));
+    expect(box().tagName).toBe('TEXTAREA');
+    expect(box().getAttribute('placeholder')).toBe('Type your message...');
+    expect(box().getAttribute('rows')).toBe('1');
+  });
+
+  it('shows the draft, and tells the page what staff type', async () => {
+    const onDraft = vi.fn();
+    renderInTheme(composer({ draft: '', onDraft }));
+    await userEvent.type(box(), 'Hi');
+    expect(onDraft).toHaveBeenCalledTimes(2);
+    expect(onDraft.mock.calls.map(([value]) => value)).toEqual(['H', 'i']);
+    expect(box().value).toBe('');
+  });
+
+  it('is the element the page is given, so it can put the focus back after a send', () => {
+    const textareaRef = createRef<HTMLTextAreaElement>();
+    renderInTheme(composer({ textareaRef }));
+    expect(textareaRef.current).toBe(box());
+  });
+
+  it('stays usable while an answer comes: only Send waits', () => {
+    renderInTheme(composer({ busy: true }));
+    expect(box().disabled).toBe(false);
+  });
+
+  // A textarea scrolls by itself once its content is taller than its box, so the cap is the whole rule: one line at least, six at most.
+  it('is one line tall at least and six lines tall at most, and stays that size: the staff cannot drag it', () => {
+    renderInTheme(composer({ draft: '' }));
+    const css = cssOf(box());
+    expect(css).toContain('min-height:4rem');
+    expect(css).toContain('max-height:13.6rem');
+    expect(css).toContain('resize:none');
+  });
+
+  it('grows with what is typed: its height follows its content', () => {
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get: () => 88 });
+    try {
+      const view = renderInTheme(composer({ draft: '' }));
+      expect(box().style.height).toBe('88px');
+      view.rerender(composer({ draft: 'one\ntwo\nthree\nfour' }));
+      expect(box().style.height).toBe('88px');
+    } finally {
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
+  });
+});
+
+describe('Enter', () => {
+  it('sends the draft', () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    expect(fireEvent.keyDown(box(), { key: 'Enter', keyCode: 13 })).toBe(false);
+    expect(onSend).toHaveBeenCalledExactlyOnceWith('Which visits are waiting?');
+  });
+
+  it('adds a line break and sends nothing with Shift', () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    expect(fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  // Staff typing Japanese press Enter to confirm a conversion. That Enter belongs to the input method.
+  it('sends nothing while an input method composes: the Enter that confirms a conversion is not a send', () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: true, keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for keyCode 229, which Safari reports for the Enter that ends a composition after it has stopped composing', () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: false, keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for any other key', () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    for (const key of ['a', ' ', 'Tab', 'Escape', 'ArrowUp']) fireEvent.keyDown(box(), { key });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('adds no line break when there is nothing to send: an empty box, a box with only spaces, or an answer on its way', () => {
+    const onSend = vi.fn();
+    for (const props of [{ draft: '' }, { draft: '  \n ' }, { busy: true }, { ready: false }]) {
+      const { unmount } = renderInTheme(composer({ onSend, ...props }));
+      expect(fireEvent.keyDown(box(), { key: 'Enter' }), JSON.stringify(props)).toBe(false);
+      unmount();
+    }
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+describe('Send', () => {
+  it('is a button that sends the draft', async () => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend }));
+    await userEvent.click(send());
+    expect(onSend).toHaveBeenCalledExactlyOnceWith('Which visits are waiting?');
+  });
+
+  it.each([
+    ['the box is empty', { draft: '' }],
+    ['the box has only spaces', { draft: '   ' }],
+    ['an answer is on its way', { busy: true }],
+    ['the assistant is not ready', { ready: false }],
+  ])('is switched off, and sends nothing, when %s', async (_why, props) => {
+    const onSend = vi.fn();
+    renderInTheme(composer({ onSend, ...props }));
+    expect(send().disabled).toBe(true);
+    await userEvent.click(send());
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('has no Stop while nothing is answering', () => {
+    renderInTheme(composer());
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+});
+
+describe('Stop', () => {
+  it('shows beside Send while an answer comes, and stops it', async () => {
+    const onStop = vi.fn();
+    const onSend = vi.fn();
+    renderInTheme(composer({ busy: true, onStop, onSend }));
+    const stop = screen.getByRole('button', { name: 'Stop' }) as HTMLButtonElement;
+    expect(send().disabled).toBe(true);
+    expect(Boolean(send().compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    await userEvent.click(stop);
+    expect(onStop).toHaveBeenCalledOnce();
+    // Inside the form a submit button would send the draft instead of stopping the answer.
+    expect(stop.getAttribute('type')).toBe('button');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  // A double click on Send: the second click must land on a button that does nothing, never on Stop.
+  it('is not where Send was: a second click on Send, as in a double click, stops nothing', async () => {
+    const onStop = vi.fn();
+    const onSend = vi.fn();
+    const view = renderInTheme(composer({ onStop, onSend }));
+    await userEvent.click(send());
+    view.rerender(composer({ busy: true, onStop, onSend }));
+    await userEvent.click(send());
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onStop).not.toHaveBeenCalled();
+  });
+});

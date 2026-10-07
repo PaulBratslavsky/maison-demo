@@ -895,6 +895,45 @@ export interface PluginMaisonCollection extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface PluginMaisonConversation extends Struct.CollectionTypeSchema {
+  collectionName: 'maison_conversations';
+  info: {
+    description: 'A chat in the Ask tab of the Maison page, saved for the admin who had it. Only that admin can open it in the assistant.';
+    displayName: 'Maison assistant chat';
+    pluralName: 'conversations';
+    singularName: 'conversation';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
+  };
+  attributes: {
+    adminUserId: Schema.Attribute.Integer & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'plugin::maison.conversation'
+    > &
+      Schema.Attribute.Private;
+    messages: Schema.Attribute.JSON & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.Text & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface PluginMaisonInquiry extends Struct.CollectionTypeSchema {
   collectionName: 'maison_inquiries';
   info: {
@@ -1980,6 +2019,7 @@ declare module '@strapi/strapi' {
       'plugin::maison.appointment': PluginMaisonAppointment;
       'plugin::maison.boutique': PluginMaisonBoutique;
       'plugin::maison.collection': PluginMaisonCollection;
+      'plugin::maison.conversation': PluginMaisonConversation;
       'plugin::maison.inquiry': PluginMaisonInquiry;
       'plugin::maison.knowledge': PluginMaisonKnowledge;
       'plugin::maison.notification': PluginMaisonNotification;

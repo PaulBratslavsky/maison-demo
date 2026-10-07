@@ -23,6 +23,11 @@ export interface MaisonConfig {
   aiProvider: AiProvider;
   /** The provider's default model when null. */
   aiModel: string | null;
+  /**
+   * The model the Ask tab chats with (AI_CHAT_MODEL). Not `aiModel`: that one labels inquiries, and is chosen for
+   * classification. The chat is Anthropic only, so this is an Anthropic model ID.
+   */
+  aiChatModel: string;
   aiApiKey: string | null;
   /** Where an openai-compatible server answers, e.g. http://127.0.0.1:11434/v1 for Ollama. Only that provider uses it. */
   aiBaseUrl: string | null;
@@ -45,6 +50,7 @@ export const defaultConfig: MaisonConfig = {
   lineApiBaseUrl: 'https://api.line.me',
   aiProvider: 'anthropic',
   aiModel: null,
+  aiChatModel: 'claude-sonnet-5-5',
   aiApiKey: null,
   aiBaseUrl: null,
   demoLineUserId: null,
@@ -121,6 +127,11 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
   if (isSet(model) && (typeof model !== 'string' || /\s/.test(model))) {
     fail("config.aiModel must be a model ID, a string without spaces, or null for the provider's default model");
   }
+  // The message never repeats the value.
+  const chatModel: unknown = merged.aiChatModel;
+  if (isSet(chatModel) && (typeof chatModel !== 'string' || /\s/.test(chatModel))) {
+    fail('config.aiChatModel must be a model ID, a string without spaces, or null for the default chat model');
+  }
   // The message never repeats the key.
   const key: unknown = merged.aiApiKey;
   if (isSet(key) && (typeof key !== 'string' || /\s/.test(key))) {
@@ -147,7 +158,7 @@ export const demoLineUserIdProblem = (value: unknown): string | null =>
 export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
   const config = { ...defaultConfig, ...(strapi.config.get(`plugin::${PLUGIN_ID}`) as Partial<MaisonConfig>) };
   // An empty value is the same as none: no liffUrl, no token, LINE's own API, Anthropic as the provider, no model, key or
-  // base URL, and no demo LINE account.
+  // base URL, the default chat model, and no demo LINE account.
   return {
     ...config,
     liffUrl: config.liffUrl || null,
@@ -155,6 +166,7 @@ export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
     lineApiBaseUrl: config.lineApiBaseUrl || defaultConfig.lineApiBaseUrl,
     aiProvider: config.aiProvider || defaultConfig.aiProvider,
     aiModel: config.aiModel || null,
+    aiChatModel: config.aiChatModel || defaultConfig.aiChatModel,
     aiApiKey: config.aiApiKey || null,
     aiBaseUrl: config.aiBaseUrl || null,
     demoLineUserId: config.demoLineUserId && demoLineUserIdProblem(config.demoLineUserId) === null ? config.demoLineUserId : null,

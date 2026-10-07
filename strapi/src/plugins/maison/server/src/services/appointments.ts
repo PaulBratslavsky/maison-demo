@@ -62,6 +62,8 @@ export interface RequestFilters {
   status?: 'requested' | 'confirmed' | 'all';
   boutique?: string;
   date?: string;
+  /** One request by its reference, whatever its status or its visit date: with it, the status filter is `all`. */
+  reference?: string;
   limit?: number;
   locale?: Locale;
   /** Only for tests. Defaults to the current time. */
@@ -356,11 +358,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * Appointments for staff. "requested" (the default) lists what staff can still confirm: not confirmed yet, with
-     * the visit ahead, soonest visit first. "confirmed" and "all" list the newest requests first.
+     * the visit ahead, soonest visit first. "confirmed" and "all" list the newest requests first. With a `reference`
+     * the status is "all": a request is found whether it is confirmed or its visit has passed, and an unknown reference
+     * gives an empty list.
      */
     async listRequests(filters: RequestFilters = {}): Promise<ServiceResult<StaffAppointmentView[]>> {
       const { defaultLocale, timezone } = getConfig(strapi);
-      const status = filters.status ?? 'requested';
+      const status = filters.reference ? 'all' : (filters.status ?? 'requested');
       const conditions: Doc[] = [];
 
       if (filters.boutique) {
@@ -370,6 +374,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         }
         conditions.push({ boutique: { documentId: { $eq: boutique.documentId } } });
       }
+      if (filters.reference) conditions.push({ reference: { $eq: filters.reference } });
       if (filters.date) {
         const { start, end } = zonedDayRange(filters.date, timezone);
         conditions.push({ requestedFor: { $gte: start.toISOString(), $lt: end.toISOString() } });

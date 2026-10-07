@@ -3,6 +3,7 @@ import type { Core } from '@strapi/strapi';
 import { getConfig } from '../config';
 import {
   INQUIRY_FILTERS,
+  INQUIRY_KINDS,
   UID,
   type AnalysisStatus,
   type CloseReason,
@@ -15,6 +16,7 @@ import {
   type SentimentLabel,
 } from '../constants';
 import { isDemoCustomer, isYourLine } from '../domain/demo-activity';
+import { isRealIsoDate } from '../domain/hours';
 import { queueFor } from '../domain/inquiry-queue';
 import { inquiryReplyText } from '../domain/inquiry-replies';
 import { DEMO_DETAIL, NO_TOKEN, lineDetailOf, reasonOf } from '../domain/line-outcome';
@@ -22,7 +24,7 @@ import { getMonthlyUsage, pushMessages, type MonthlyUsage } from '../domain/line
 import { failure, type ServiceResult } from '../domain/service-result';
 import { lineUserIdOf, maskSubject } from '../domain/subject';
 import { fitLines } from '../domain/text';
-import { isoOrNull } from '../domain/time';
+import { isoOrNull, zonedDayRange } from '../domain/time';
 import { productNamed, rememberProductNames } from './product-names';
 
 type Doc = Record<string, any>;
@@ -82,6 +84,10 @@ export interface InquiryFilters {
   /** needs-answer, the default: the Inquiries tab opens on it. */
   filter?: InquiryFilter;
   limit?: number;
+  /** Only inquiries that came in on or after this day (YYYY-MM-DD), a day in the plugin's time zone. */
+  since?: string;
+  /** Only inquiries of this kind, as well as the filter's own conditions: All with a kind lists replied and closed ones too. */
+  kind?: InquiryKind;
 }
 
 /** The open inquiries in each queue, and the open ones nobody has labelled. */
@@ -317,19 +323,40 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     /**
      * The Inquiries tab's rows, newest first. A filter that is not one of `INQUIRY_FILTERS` is `invalid_input`: the route
-     * checks it first, and a caller that doesn't is told, and never shown every row.
+     * checks it first, and a caller that doesn't is told, and never shown every row. So is a `kind` that is not one of
+     * `INQUIRY_KINDS`, and a `since` that is not a real date. `since` keeps the inquiries from that day on, a day in the
+     * plugin's time zone. `kind` is added to the filter's own conditions.
      */
     async list(filters: InquiryFilters = {}): Promise<ServiceResult<StaffInquiryView[]>> {
       const filter = filters.filter ?? 'needs-answer';
       if (!isInquiryFilter(filter)) {
         return failure('invalid_input', `Unknown filter "${String(filter)}".`, `Use one of ${INQUIRY_FILTERS.join(', ')}.`);
       }
+      if (filters.kind !== undefined && !(INQUIRY_KINDS as readonly unknown[]).includes(filters.kind)) {
+        return failure('invalid_input', `Unknown kind "${String(filters.kind)}".`, `Use one of ${INQUIRY_KINDS.join(', ')}.`);
+      }
+      if (filters.since !== undefined && !isRealIsoDate(filters.since)) {
+        return failure('invalid_input', `The date "${String(filters.since)}" is not a real date.`, 'Use YYYY-MM-DD, such as 2026-10-06.');
+      }
+      const { timezone } = getConfig(strapi);
       const rows = (await strapi.documents(UID.inquiry).findMany({
-        filters: FILTERS[filter],
+        filters: {
+          ...FILTERS[filter],
+          ...(filters.kind !== undefined ? { kind: { $eq: filters.kind } } : {}),
+          ...(filters.since !== undefined ? { createdAt: { $gte: zonedDayRange(filters.since, timezone).start.toISOString() } } : {}),
+        },
         sort: 'createdAt:desc',
         limit: filters.limit ?? LIST_LIMIT,
       })) as Doc[];
       return { ok: true, value: await viewsOf(rows) };
+    },
+
+    /** One inquiry as staff see it, or `not_found`. */
+    async view(documentId: string): Promise<ServiceResult<StaffInquiryView>> {
+      const row = await findRow(documentId);
+      if (!row) return notFound(documentId);
+      const [view] = await viewsOf([row]);
+      return { ok: true, value: view };
     },
 
     /** The cards above the rows: the open inquiries each filter shows. */
