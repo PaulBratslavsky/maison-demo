@@ -23,13 +23,13 @@ const toolResultPart = z.looseObject({ type: z.literal('tool-result'), toolCallI
 /** Any part the page sends now or later. Kept as it is. */
 const otherPart = z.looseObject({ type: z.string() });
 
-export const uiMessageSchema = z.looseObject({
+const uiMessageSchema = z.looseObject({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant', 'system']),
   parts: z.array(z.union([textPart, thinkingPart, toolCallPart, toolResultPart, otherPart])),
 });
 
-export const storedMessagesSchema = z.object({ v: z.literal(STORAGE_VERSION), messages: z.array(uiMessageSchema) });
+const storedMessagesSchema = z.object({ v: z.literal(STORAGE_VERSION), messages: z.array(uiMessageSchema) });
 
 export type StoredMessages = z.infer<typeof storedMessagesSchema>;
 
@@ -37,7 +37,7 @@ export type StoredMessages = z.infer<typeof storedMessagesSchema>;
  * Server TypeScript is not strict, so a union is not narrowed by `if (!result.ok)`: this is one interface with optional fields, which
  * the compiler follows.
  */
-export interface ToStoredResult {
+interface ToStoredResult {
   ok: boolean;
   value?: StoredMessages;
   error?: string;

@@ -205,13 +205,13 @@ export interface TurnRequest {
 export type AssistantStatus = { ready: true; model: string } | { ready: false; reason: string };
 
 /** A tool as the Ask tab lists it: its name, and what staff call it. */
-export interface ToolInfo {
+interface ToolInfo {
   name: string;
   label: string;
 }
 
 /** What GET /assistant/status answers: the status, and for a ready assistant the tools this admin's chat gets. */
-export type AssistantStatusAnswer = { ready: true; model: string; tools: ToolInfo[] } | { ready: false; reason: string };
+type AssistantStatusAnswer = { ready: true; model: string; tools: ToolInfo[] } | { ready: false; reason: string };
 
 /** How many messages staff have sent in a chat: the ones with the role `user`. The model's answers and the tool results are not counted. */
 export const countStaffMessages = (messages: ReadonlyArray<{ role?: string }>): number => messages.filter((message) => message.role === 'user').length;

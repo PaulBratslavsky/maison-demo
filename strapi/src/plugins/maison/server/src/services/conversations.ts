@@ -2,8 +2,8 @@
 /// <reference lib="es2022.intl" />
 import type { Core } from '@strapi/strapi';
 
+import { readStoredMessages, toStoredMessages, type StoredMessages } from '../assistant/stored-messages';
 import { SAVED_CHATS, UID } from '../constants';
-import { toStoredMessages, readStoredMessages, type StoredMessages } from '../assistant/stored-messages';
 import { failure, type ServiceResult } from '../domain/service-result';
 
 /** What the sidebar lists of a chat: no messages, so a long history stays a short answer. */
