@@ -146,6 +146,25 @@ describe('one chat, however many icons Strapi draws', () => {
     expect(document.querySelectorAll('[data-maison-assistant]')).toHaveLength(1);
   });
 
+  // Two feeds would tell the host the same thing twice, and ask Strapi for the permission twice. The owner rule keeps it to one.
+  it('checks the permission for one icon only: the second icon draws the Crown and no feed', async () => {
+    const feeds = new Set<string>();
+    rbac.use.mockImplementation(() => {
+      feeds.add(React.useId());
+      return checked(true);
+    });
+    renderInTheme(
+      <IntlProvider locale="en" messages={{}}>
+        <MaisonMenuIcon data-icon="first" />
+        <MaisonMenuIcon data-icon="second" />
+      </IntlProvider>
+    );
+    await launcher();
+
+    expect(document.querySelectorAll('svg[data-icon]')).toHaveLength(2);
+    expect(feeds.size).toBe(1);
+  });
+
   it('keeps the same chat when the second icon goes: staff typed in it, and what they typed is still there', async () => {
     renderInTheme(<FakeAdmin links={[maisonLink()]} />);
     await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
