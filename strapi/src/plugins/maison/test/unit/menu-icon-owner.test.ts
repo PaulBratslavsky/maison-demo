@@ -27,7 +27,7 @@ describe('the menu icon owner', () => {
     expect(owner()).toBe('left-menu');
   });
 
-  it('hands over to the oldest icon that is left when the owner releases, one icon at a time, and to nobody after the last', () => {
+  it('passes the ownership to the oldest icon that is left when the owner releases, one icon at a time, and to nobody after the last', () => {
     take('a');
     take('b');
     take('c');

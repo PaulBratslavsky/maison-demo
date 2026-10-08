@@ -26,7 +26,7 @@ const InputArea = styled.div`
 `;
 
 interface ComposerProps {
-  /** What staff have typed and not sent. It lives in the provider, so it is still there when staff come back from another tab. */
+  /** What staff have typed and not sent. It is kept in the provider, so it is still there when staff come back from another tab. */
   draft: string;
   onDraft: (text: string) => void;
   /** Whether an answer is on its way. */

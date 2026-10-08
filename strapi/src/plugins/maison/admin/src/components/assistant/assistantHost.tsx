@@ -6,19 +6,19 @@ import type { DefaultTheme } from 'styled-components';
 import { AssistantBoundary } from './AssistantBoundary';
 
 /**
- * The assistant's host: the one place on the screen where the assistant lives, in a React root of its own, in an element added to the body.
+ * The assistant's host: the one place on the screen where the assistant is kept, in a React root of its own, in an element added to the body.
  *
  * Why it is not in the menu icon. Strapi has no place for something that is on every admin page, but it draws every menu link's icon on every
  * signed-in page (`LeftMenu` and `MainNavLinks` in @strapi/admin 5.55.1), so Maison's menu icon is how the assistant gets onto every page. But
  * Strapi draws the icon again on every change of address: `LeftMenu` reads the location, and `MainNavIcons` makes a new component type for each
- * link on every render, so React throws the old icon away and draws a new one. Anything the icon held, the chat among it, would be lost at
+ * link on every render, so React removes the old icon and draws a new one. Anything the icon held, the chat among it, would be lost at
  * each click on a menu link, and at each change of tab on the Maison page. And an answer on its way would be stopped.
  *
  * So the icon holds nothing. It tells the host what Strapi's providers say and the host cannot read (the theme, the language and whether the
  * admin may use the assistant), and it keeps the host in place for as long as an icon is on the screen. The host's own React root has no
  * Strapi provider, which the chat does not need: it reads the theme and the language from what the icon tells it, and it calls the server with
  * `useFetchClient`, which does not read a provider. When no icon has been drawn for a short time, the admin has left the signed-in pages
- * (they signed out), and the host takes the assistant away with its chat.
+ * (they signed out), and the host removes the assistant and its chat.
  *
  * A failure inside the host, while drawing or while loading the chunk, would unmount the whole root and take the launcher with it. The root is
  * inside an error boundary (AssistantBoundary.tsx) that keeps the launcher and shows a short fixed text instead.
@@ -110,7 +110,7 @@ export const detachHost = (): void => {
   }, HOST_GRACE_MS);
 };
 
-/** Takes the assistant away now, with its chat, and forgets everything. The next icon starts a new chat. */
+/** Removes the assistant and its chat now, and clears everything. The next icon starts a new chat. */
 export const destroyHost = (): void => {
   stopTimer();
   root?.unmount();

@@ -113,7 +113,7 @@ describe('who gets the assistant', () => {
     expect(await launcher()).toBeTruthy();
   });
 
-  it('takes the assistant away when the role loses the permission while the page is open, and brings it back if the role gets it again', async () => {
+  it('removes the assistant when the role loses the permission while the page is open, and brings it back if the role gets it again', async () => {
     let setCan: (value: boolean) => void = () => {};
     rbac.use.mockImplementation(() => {
       const [can, set] = React.useState(true);
@@ -268,7 +268,7 @@ describe('moving between pages', () => {
   });
 
   // The permission check of an icon that is drawn again starts from "loading", with every flag false. That is not a role that lost the permission.
-  it('does not take the assistant away while an icon that is drawn again checks the permission once more', async () => {
+  it('does not remove the assistant while an icon that is drawn again checks the permission once more', async () => {
     rbac.use.mockImplementation(() => {
       const [done, setDone] = React.useState(false);
       React.useEffect(() => {

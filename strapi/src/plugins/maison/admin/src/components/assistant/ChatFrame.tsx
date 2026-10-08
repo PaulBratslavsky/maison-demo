@@ -21,7 +21,7 @@ export const ChatLayout = styled.div`
 /**
  * The chat column. It starts from the width of the chat, 600px or 960px when the drawer is expanded (`$width`), and the list of saved chats is
  * added beside it, so opening the list makes the drawer wider and leaves the chat as wide as it was. The column may shrink (`flex-shrink: 1`,
- * `min-width: 0`): when the drawer is at its limit of 90vw, the list keeps its 260px and the chat column gives up the difference.
+ * `min-width: 0`): when the drawer is at its limit of 90vw, the list keeps its 260px and the chat column has less width.
  */
 export const ChatColumn = styled.div<{ $width: number }>`
   display: flex;

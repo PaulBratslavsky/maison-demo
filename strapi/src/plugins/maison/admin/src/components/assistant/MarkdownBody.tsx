@@ -10,7 +10,7 @@ import { safeLink } from '../../assistant';
  * The assistant's answer, drawn from Markdown: paragraphs, lists, tables, code, quotes and links. Copied from strapi-plugin-tanstack-ai
  * 1.6.0 (`MarkdownBody` in `MessageList.tsx`), with these changes.
  * - The four tints that were literal black overlays are theme colours, so inline code, code blocks and table headers show in the dark theme.
- * - Lists have their markers and headings their weight. The design system's global style takes both away (`list-style: none`, `font: unset`).
+ * - Lists have their markers and headings their weight. The design system's global style removes both (`list-style: none`, `font: unset`).
  * - Tables. The reference keeps every cell on one line, which is right for a chat the width of a page and wrong for a drawer. Here a header cell stays
  *   on one line, and a body cell wraps its text between words, in a column between 7rem and 22rem wide: a short value (a date, a reference, a masked
  *   customer) keeps its line, and a long text wraps inside its column. A word is broken only when it is longer than the column can be (`overflow-wrap:
@@ -103,7 +103,7 @@ const TableScroll = styled.div`
   overscroll-behavior-x: contain;
 `;
 
-/** A table in an answer, in its own scroll box. react-markdown hands its own `node` to a custom component, which is left out so it does not land on the element. */
+/** A table in an answer, in its own scroll box. react-markdown passes its own `node` to a custom component, which is left out so it does not land on the element. */
 const MarkdownTable = ({ node: _node, ...props }: ComponentProps<'table'> & { node?: unknown }) => (
   <TableScroll>
     <table {...props} />
@@ -112,7 +112,7 @@ const MarkdownTable = ({ node: _node, ...props }: ComponentProps<'table'> & { no
 
 /**
  * A link in an answer. Only an `http:` or `https:` address is a link: it opens in a new tab and gives the page no way back to its window.
- * Anything else is its text, as plain text. react-markdown hands its own `node` to a custom component, which is left out here so it does not
+ * Anything else is its text, as plain text. react-markdown passes its own `node` to a custom component, which is left out here so it does not
  * land on the element as an attribute.
  */
 const MarkdownLink = ({ href, children, node: _node, ...props }: ComponentProps<'a'> & { node?: unknown }) => {

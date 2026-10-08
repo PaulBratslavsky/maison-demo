@@ -9,7 +9,7 @@ import { STARTERS } from '../../assistant';
  * were in the empty chat only.
  *
  * - They are outside the message list, so they never scroll with it. They take the room of the rows they need and no more, and never shrink
- *   (`flex: 0 0 auto`): the list gives up height, not the buttons.
+ *   (`flex: 0 0 auto`): the list has less height, and the buttons keep theirs.
  * - They wrap onto a second line, and a third, when the drawer is narrow. The row never scrolls sideways.
  * - Each is the design system's small button in its quiet look (tertiary: a white fill and a grey border), so Send stays the one filled button
  *   and the list keeps its room. The side padding is the text box's own, 16px.
