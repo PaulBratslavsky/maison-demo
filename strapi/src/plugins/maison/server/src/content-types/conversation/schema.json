@@ -5,7 +5,7 @@
     "singularName": "conversation",
     "pluralName": "conversations",
     "displayName": "Maison assistant chat",
-    "description": "A chat in the Ask tab of the Maison page, saved for the admin who had it. Only that admin can open it in the assistant."
+    "description": "A chat in the assistant drawer, saved for the admin who had it. Only that admin can open it in the assistant."
   },
   "options": { "draftAndPublish": false },
   "pluginOptions": { "content-manager": { "visible": false }, "content-type-builder": { "visible": false } },

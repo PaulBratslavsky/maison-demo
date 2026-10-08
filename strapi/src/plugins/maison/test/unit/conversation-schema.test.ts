@@ -35,6 +35,8 @@ describe('the saved chat content type', () => {
   // API, so the description says where an admin can open a chat, and never that nobody else can read it.
   it('says where its admin opens a chat, and does not say that nobody else can read it', () => {
     expect(schema.info.description).toContain('Only that admin can open it in the assistant.');
+    expect(schema.info.description).toContain('A chat in the assistant drawer');
+    expect(schema.info.description).not.toContain('Ask tab');
     expect(schema.info.description).not.toMatch(/\bread\b/i);
   });
 });
