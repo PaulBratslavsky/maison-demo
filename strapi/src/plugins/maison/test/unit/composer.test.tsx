@@ -3,7 +3,7 @@ import { createRef } from 'react';
 
 import { lightTheme } from '@strapi/design-system';
 import { Cross, Sparkle } from '@strapi/icons';
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Composer } from '../../admin/src/components/assistant/Composer';
@@ -83,6 +83,65 @@ describe('the text box', () => {
       expect(box().style.height).toBe('88px');
     } finally {
       delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
+  });
+
+  // A text box does not measure itself again when its width changes (Expand, Collapse, a window resize), and the same text takes more or fewer lines.
+  it('measures its height again when its width changes, with the same text', () => {
+    let height = 88;
+    let widthChanged: (width: number) => void = () => {};
+    class FakeResizeObserver {
+      constructor(callback: (entries: Array<{ contentRect: { width: number } }>) => void) {
+        widthChanged = (width) => callback([{ contentRect: { width } }]);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get: () => height });
+    try {
+      renderInTheme(composer({ draft: 'one two three four five six seven' }));
+      act(() => widthChanged(500));
+      expect(box().style.height).toBe('88px');
+
+      height = 44;
+      act(() => widthChanged(860));
+      expect(box().style.height).toBe('44px');
+
+      height = 66;
+      act(() => widthChanged(560));
+      expect(box().style.height).toBe('66px');
+    } finally {
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves its height alone when the observer reports the same width again, which is what its own height change causes', () => {
+    let height = 88;
+    let widthChanged: (width: number) => void = () => {};
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: (entries: Array<{ contentRect: { width: number } }>) => void) {
+          widthChanged = (width) => callback([{ contentRect: { width } }]);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get: () => height });
+    try {
+      renderInTheme(composer({ draft: 'one two three' }));
+      act(() => widthChanged(500));
+      height = 44;
+      act(() => widthChanged(500));
+      expect(box().style.height).toBe('88px');
+    } finally {
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+      vi.unstubAllGlobals();
     }
   });
 });
