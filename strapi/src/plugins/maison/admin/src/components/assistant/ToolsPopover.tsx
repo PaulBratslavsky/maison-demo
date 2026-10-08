@@ -68,14 +68,18 @@ export const ToolsPopover = ({ tools }: { tools: readonly ToolInfo[] }) => {
     const onPointerDown = (event: MouseEvent) => {
       if (wrapper.current && !wrapper.current.contains(event.target as Node)) setOpen(false);
     };
+    // A capture listener runs before React's handlers, so it marks the Escape as used (preventDefault) before the drawer sees it. The drawer
+    // ignores an Escape that is marked, so with the list open the first Escape closes the list only, wherever the focus is.
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open]);
 

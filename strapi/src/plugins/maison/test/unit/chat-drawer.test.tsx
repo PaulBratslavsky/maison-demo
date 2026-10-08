@@ -1686,6 +1686,21 @@ describe('the drawer', () => {
       expect(onClose).toHaveBeenCalledOnce();
     });
 
+    // The list stays open when the focus moves on, so the first Escape is for the list wherever the focus is.
+    it('closes only the list of tools when the focus is in the text box, and the drawer with the next Escape', async () => {
+      const onClose = await open();
+      await userEvent.click(screen.getByRole('button', { name: /^Tools \(/ }));
+      box().focus();
+      expect(screen.getByRole('dialog', { name: 'Tools' })).toBeTruthy();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'Tools' })).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('works while the assistant is being checked, and when it is not set up: the focus is on the drawer then', async () => {
       const onClose = vi.fn();
       world({ status: NOT_SET_UP, mount: false }).show(<Drawer onClose={onClose} />);
