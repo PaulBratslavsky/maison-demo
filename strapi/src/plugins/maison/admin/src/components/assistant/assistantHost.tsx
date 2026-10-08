@@ -3,6 +3,8 @@ import { Suspense, lazy } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DefaultTheme } from 'styled-components';
 
+import { AssistantBoundary } from './AssistantBoundary';
+
 /**
  * The assistant's host: the one place on the screen where the assistant lives, in a React root of its own, in an element added to the body.
  *
@@ -17,6 +19,9 @@ import type { DefaultTheme } from 'styled-components';
  * Strapi provider, which the chat does not need: it reads the theme and the language from what the icon tells it, and it calls the server with
  * `useFetchClient`, which does not read a provider. When no icon has been drawn for a short time, the admin has left the signed-in pages
  * (they signed out), and the host takes the assistant away with its chat.
+ *
+ * A failure inside the host, while drawing or while loading the chunk, would unmount the whole root and take the launcher with it. The root is
+ * inside an error boundary (AssistantBoundary.tsx) that keeps the launcher and shows a short fixed text instead.
  *
  * The chat is loaded when it is needed. Its code (the Markdown, TanStack AI and the rest) is a chunk of its own, loaded the first time an admin
  * who may use the assistant is on a page, and not in the admin's first bundle for everyone.
@@ -73,9 +78,11 @@ const draw = () => {
   if (!container.isConnected) document.body.appendChild(container);
   root.render(
     <DesignSystemProvider theme={environment.theme} locale={environment.locale}>
-      <Suspense fallback={null}>
-        <GlobalAssistant />
-      </Suspense>
+      <AssistantBoundary>
+        <Suspense fallback={null}>
+          <GlobalAssistant />
+        </Suspense>
+      </AssistantBoundary>
     </DesignSystemProvider>
   );
 };
