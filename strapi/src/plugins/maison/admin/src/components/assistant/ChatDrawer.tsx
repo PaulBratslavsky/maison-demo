@@ -100,7 +100,7 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
   const box = React.useRef<HTMLTextAreaElement>(null);
   const root = React.useRef<HTMLElement>(null);
 
-  const state = assistant ? askTabState(assistant.status, assistant.statusError) : null;
+  const state = assistant ? askTabState(assistant.status, assistant.statusFailed) : null;
   const showsChat = state?.kind === 'chat';
 
   // When the drawer opens, the focus goes to the text box, or to the drawer if there is no text box yet. A closed drawer is hidden, and can't take it.

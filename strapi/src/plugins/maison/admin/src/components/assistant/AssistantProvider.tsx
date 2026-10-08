@@ -70,7 +70,8 @@ export interface AssistantHistory {
 export interface AssistantApi {
   /** null until GET /maison/assistant/status answers. */
   status: AssistantStatus | null;
-  statusError: string | null;
+  /** Whether the last check of the assistant failed and there is no status to show. */
+  statusFailed: boolean;
   /** Whether the assistant is set up: the status says ready. */
   ready: boolean;
   messages: UIMessage[];
@@ -117,7 +118,7 @@ const cookies = (): string => {
 
 /**
  * The chat, kept above the drawer. The drawer is closed and opened as staff please, and the chat, its saved chats and the text staff have
- * typed must be as they left them, so they live here and the drawer only reads them. This provider stays for as long as the assistant's
+ * typed must be as they left them, so they are kept here and the drawer only reads them. This provider stays for as long as the assistant's
  * host is on the screen, which is every admin page (see assistantHost.tsx).
  *
  * It asks the server nothing until `started` is true, which is when staff open the drawer for the first time. It is on every admin page, and
@@ -135,7 +136,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
   clientRef.current = fetchClient;
 
   const [status, setStatus] = React.useState<AssistantStatus | null>(null);
-  const [statusError, setStatusError] = React.useState<string | null>(null);
+  const [statusFailed, setStatusFailed] = React.useState(false);
   const [notice, setNotice] = React.useState<ErrorNotice | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
@@ -161,17 +162,17 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       if (!mounted.current) return;
       if (isStatus(data)) {
         setStatus(data);
-        setStatusError(null);
+        setStatusFailed(false);
         // A "not set up" notice from an earlier send is stale once the assistant is ready.
         setNotice((current) => noticeAfterStatus(current, data));
       } else {
         console.error('Maison assistant: the status check answered with something that is not a status.');
-        setStatusError('The answer was not a status.');
+        setStatusFailed(true);
       }
     } catch (error) {
       // Staff read a fixed text (askTabState). What went wrong is written to the console.
       console.error('Maison assistant: the status check failed.', error);
-      if (mounted.current) setStatusError((error as Error).message);
+      if (mounted.current) setStatusFailed(true);
     }
   }, [mounted]);
 
@@ -424,7 +425,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
   const api = React.useMemo<AssistantApi>(
     () => ({
       status,
-      statusError,
+      statusFailed,
       ready,
       messages: chat.messages,
       busy,
@@ -438,7 +439,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       recheck,
       history,
     }),
-    [status, statusError, ready, chat.messages, busy, notice, note, draft, send, stop, newChat, recheck, history]
+    [status, statusFailed, ready, chat.messages, busy, notice, note, draft, send, stop, newChat, recheck, history]
   );
 
   return <AssistantContext.Provider value={api}>{children}</AssistantContext.Provider>;

@@ -56,9 +56,9 @@ export type AskTabState =
 export const STATUS_CHECK_FAILED = "Couldn't check the assistant.";
 
 /** A status the drawer already has is kept when a later check fails: the chat stays as it was. */
-export const askTabState = (status: AssistantStatus | null, statusError: string | null): AskTabState => {
+export const askTabState = (status: AssistantStatus | null, statusFailed: boolean): AskTabState => {
   if (status) return status.ready ? { kind: 'chat', model: status.model, tools: status.tools } : { kind: 'not-ready', text: status.reason };
-  if (statusError) return { kind: 'failed', text: STATUS_CHECK_FAILED };
+  if (statusFailed) return { kind: 'failed', text: STATUS_CHECK_FAILED };
   return { kind: 'loading' };
 };
 
