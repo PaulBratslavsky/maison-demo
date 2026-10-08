@@ -685,6 +685,34 @@ describe('saved chats', () => {
     expect(rowOf('Which visits are waiting?').getAttribute('aria-current')).toBe('true');
   });
 
+  it('takes away the error of the last turn when another chat is opened: the error was about the chat that is left', async () => {
+    const failed = [event('RUN_STARTED'), event('RUN_ERROR', { message: 'Anthropic is busy. Try again in a minute.', code: '529' })];
+    world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')], chat: [() => stream(failed)] });
+    await shows('The answer to Newer chat');
+    await userEvent.type(box(), 'Another question{Enter}');
+    expect(await screen.findByText('Anthropic is busy. Try again in a minute.')).toBeTruthy();
+    await openSidebar();
+
+    await userEvent.click(rowOf('Older chat'));
+
+    expect(await shows('The answer to Older chat')).toBeTruthy();
+    expect(screen.queryByText('Anthropic is busy. Try again in a minute.')).toBeNull();
+  });
+
+  it('takes away the line about how the last turn ended when another chat is opened', async () => {
+    const stopped = [...answer('Part of an answer.').slice(0, 4), event('CUSTOM', { name: 'max_turns', value: {} }), event('RUN_FINISHED', { finishReason: 'stop' })];
+    world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')], chat: [() => stream(stopped)] });
+    await shows('The answer to Newer chat');
+    await ask('Another question', 'Part of an answer.');
+    expect(await screen.findByText('The assistant stopped after 6 steps. Ask a narrower question.')).toBeTruthy();
+    await openSidebar();
+
+    await userEvent.click(rowOf('Older chat'));
+
+    expect(await shows('The answer to Older chat')).toBeTruthy();
+    expect(screen.queryByText('The assistant stopped after 6 steps. Ask a narrower question.')).toBeNull();
+  });
+
   it('opens the chat that was chosen last when two are chosen one after the other: the answer that comes late is dropped', async () => {
     let answerFirst: () => void = () => {};
     world({ saved: [savedChat('c3', 'Newest chat'), savedChat('c2', 'Middle chat'), savedChat('c1', 'Oldest chat')] });

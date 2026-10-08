@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
+import { darkTheme, lightTheme } from '@strapi/design-system';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { CollapseIcon, ExpandIcon, HistoryIcon, NewChatIcon, ToolsIcon, TopBarIcon } from '../../admin/src/components/assistant/TopBarIcon';
+import { declarationsOf } from './css';
 import { renderInTheme } from './render';
 
 /** The CSS styled-components wrote for an element: every rule in the document that starts with one of its classes. */
@@ -77,6 +79,29 @@ describe('TopBarIcon', () => {
     const button = screen.getByRole('button', { name: 'New chat' });
     expect(button.textContent).toBe('New chat');
     expect(button.querySelector('svg')).not.toBeNull();
+  });
+
+  it('has the emphasised button in the primary colour, with white words, in both themes, and the plain one on the neutral fill', () => {
+    for (const [dark, theme] of [[false, lightTheme], [true, darkTheme]] as const) {
+      const { unmount } = renderInTheme(
+        <>
+          <TopBarIcon label="Emphasised" emphasis="New chat" onClick={() => {}}>
+            <NewChatIcon />
+          </TopBarIcon>
+          <TopBarIcon label="Plain" onClick={() => {}}>
+            <NewChatIcon />
+          </TopBarIcon>
+        </>,
+        { dark }
+      );
+      expect(declarationsOf(screen.getByRole('button', { name: 'Emphasised' })), String(dark)).toMatchObject({
+        background: theme.colors.primary600,
+        'border-color': theme.colors.primary600,
+        color: theme.colors.neutral0,
+      });
+      expect(declarationsOf(screen.getByRole('button', { name: 'Plain' })).background, String(dark)).toBe(theme.colors.neutral0);
+      unmount();
+    }
   });
 
   it('shows no words without an emphasis: the icon alone', () => {

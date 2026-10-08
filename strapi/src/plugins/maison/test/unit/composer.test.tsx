@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { createRef } from 'react';
 
+import { lightTheme } from '@strapi/design-system';
+import { Cross, Sparkle } from '@strapi/icons';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Composer } from '../../admin/src/components/assistant/Composer';
+import { declarationsOf } from './css';
 import { renderInTheme } from './render';
 
 const composer = (props: Partial<Parameters<typeof Composer>[0]> = {}) => (
@@ -12,6 +15,14 @@ const composer = (props: Partial<Parameters<typeof Composer>[0]> = {}) => (
 );
 const box = () => screen.getByRole('textbox', { name: 'Chat message' }) as HTMLTextAreaElement;
 const send = () => screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+const stop = () => screen.getByRole('button', { name: 'Stop' }) as HTMLButtonElement;
+/** The markup of an icon, to tell which icon a button holds. */
+const markupOf = (icon: ReturnType<typeof Sparkle>) => {
+  const { container, unmount } = renderInTheme(icon);
+  const markup = container.querySelector('svg')?.innerHTML;
+  unmount();
+  return markup;
+};
 
 /** The rules styled-components wrote for an element: every rule in the document that starts with one of its classes. */
 const cssOf = (element: Element): string => {
@@ -177,5 +188,38 @@ describe('Stop', () => {
     await userEvent.click(send());
     expect(onSend).toHaveBeenCalledOnce();
     expect(onStop).not.toHaveBeenCalled();
+  });
+});
+
+// How the buttons and the row look, held by what the component asked of the design system: the size, the look, the icon and the line on top.
+describe('the look of the composer', () => {
+  it('has Send at size L, in the primary colour, with the Sparkle icon and one icon only', () => {
+    renderInTheme(composer({ busy: true }));
+    // Size L is 4.8rem tall. Size S, the next one down, is 4rem.
+    expect(declarationsOf(send()).height).toBe('4.8rem');
+    expect(declarationsOf(send()).background).toBe(lightTheme.colors.primary600);
+    expect(send().querySelectorAll('svg')).toHaveLength(1);
+    expect(send().querySelector('svg')?.innerHTML).toBe(markupOf(<Sparkle />));
+  });
+
+  it('has Stop at size L, in the danger-light look, with the Cross icon and one icon only', () => {
+    renderInTheme(composer({ busy: true }));
+    expect(declarationsOf(stop()).height).toBe('4.8rem');
+    expect(declarationsOf(stop())).toMatchObject({
+      background: lightTheme.colors.danger100,
+      border: `1px solid ${lightTheme.colors.danger200}`,
+      color: lightTheme.colors.danger700,
+    });
+    expect(stop().querySelectorAll('svg')).toHaveLength(1);
+    expect(stop().querySelector('svg')?.innerHTML).toBe(markupOf(<Cross />));
+    expect(markupOf(<Cross />)).not.toBe(markupOf(<Sparkle />));
+  });
+
+  it('has a line on top of the row, in the theme colour, that holds the text box and the buttons', () => {
+    renderInTheme(composer({ busy: true }));
+    const row = box().closest('form')?.firstElementChild as HTMLElement;
+    expect(row.contains(send())).toBe(true);
+    expect(declarationsOf(row)['border-top']).toBe(`1px solid ${lightTheme.colors.neutral200}`);
+    expect(declarationsOf(row).padding).toBe('16px');
   });
 });
