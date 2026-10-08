@@ -126,7 +126,7 @@ export const TopBarIcon = ({ label, onClick, children, active, disabled, expande
 );
 
 /*
- * The reference plugin's own icons, copied so the two panels look like siblings. They are inline and not from @strapi/icons, because
+ * The reference plugin's own icons, copied so the two panels look the same. They are inline and not from @strapi/icons, because
  * these are the exact shapes it uses, and picking near-equivalents from an icon set is how two things that should match stop matching.
  */
 

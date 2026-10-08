@@ -232,7 +232,7 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
       onClose={onClose}
     >
       <MessageList messages={assistant.messages} busy={busy} />
-      {/* A turn's error wins over a problem with the saved chats: it is about what staff are watching. */}
+      {/* A turn's error is shown in place of a problem with the saved chats, because it is about what staff are watching. */}
       {(notice?.text ?? history.error) && <ErrorBox>{notice?.text ?? history.error}</ErrorBox>}
       {note && <NoteBox>{note}</NoteBox>}
       {/* The five quick questions, directly above the text box and outside the list, for the whole chat. Pressing one sends it as a starter. */}

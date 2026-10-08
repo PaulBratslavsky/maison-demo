@@ -182,6 +182,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('before the chat', () => {
@@ -217,9 +218,17 @@ describe('before the chat', () => {
     expect(await screen.findByRole('textbox', { name: 'Chat message' })).toBeTruthy();
   });
 
-  it("says the assistant could not be checked, in the server's words, when the status call fails, with Check again", async () => {
-    world({ status: new Error('Forbidden') });
-    expect(await screen.findByText("Couldn't check the assistant: Forbidden")).toBeTruthy();
+  // Staff read a fixed text. What the fetch client said goes to the console, for whoever looks into it.
+  it('says the assistant could not be checked, in a fixed text, when the status call fails, with Check again, and logs the error', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      world({ status: new Error('Forbidden') });
+      expect(await screen.findByText("Couldn't check the assistant.")).toBeTruthy();
+      expect(screen.queryByText(/Forbidden/)).toBeNull();
+      expect(logged.mock.calls.some((call) => call.some((item) => item instanceof Error && item.message === 'Forbidden'))).toBe(true);
+    } finally {
+      logged.mockRestore();
+    }
     expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
@@ -1061,7 +1070,7 @@ describe('saved chats', () => {
       expect(client.put).not.toHaveBeenCalled();
     });
 
-    // New chat wins over a chat that was chosen and has not arrived yet.
+    // New chat takes precedence over a chat that was chosen and has not arrived yet.
     it('keeps the empty chat that New chat made when the answer for a chat chosen just before arrives late', async () => {
       let answerOlder: () => void = () => {};
       world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
@@ -1210,7 +1219,7 @@ describe('saved chats', () => {
       expect(screen.queryByText("Couldn't save this chat.")).toBeNull();
     });
 
-    // Deleting the open chat wins over a chat that was chosen and has not arrived yet.
+    // Deleting the open chat takes precedence over a chat that was chosen and has not arrived yet.
     it('keeps the empty screen after the open chat is deleted when the answer for a chat chosen just before arrives late', async () => {
       let answerOlder: () => void = () => {};
       world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
@@ -1722,8 +1731,9 @@ describe('the drawer', () => {
 
     it('is there when the check failed, with Check again', async () => {
       const onClose = vi.fn();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
       world({ status: new Error('Forbidden'), mount: false }).show(<Drawer onClose={onClose} />);
-      await screen.findByText("Couldn't check the assistant: Forbidden");
+      await screen.findByText("Couldn't check the assistant.");
       await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }));
       expect(onClose).toHaveBeenCalledOnce();
     });

@@ -52,10 +52,13 @@ export type AskTabState =
   | { kind: 'not-ready'; text: string }
   | { kind: 'chat'; model: string; tools: ToolInfo[] };
 
+/** What staff read when the check fails. It holds none of the error: the fetch client's own text goes to the console. */
+export const STATUS_CHECK_FAILED = "Couldn't check the assistant.";
+
 /** A status the drawer already has is kept when a later check fails: the chat stays as it was. */
 export const askTabState = (status: AssistantStatus | null, statusError: string | null): AskTabState => {
   if (status) return status.ready ? { kind: 'chat', model: status.model, tools: status.tools } : { kind: 'not-ready', text: status.reason };
-  if (statusError) return { kind: 'failed', text: `Couldn't check the assistant: ${statusError}` };
+  if (statusError) return { kind: 'failed', text: STATUS_CHECK_FAILED };
   return { kind: 'loading' };
 };
 

@@ -165,9 +165,12 @@ export const AssistantProvider = ({ children, started }: { children: React.React
         // A "not set up" notice from an earlier send is stale once the assistant is ready.
         setNotice((current) => noticeAfterStatus(current, data));
       } else {
+        console.error('Maison assistant: the status check answered with something that is not a status.');
         setStatusError('The answer was not a status.');
       }
     } catch (error) {
+      // Staff read a fixed text (askTabState). What went wrong is written to the console.
+      console.error('Maison assistant: the status check failed.', error);
       if (mounted.current) setStatusError((error as Error).message);
     }
   }, [mounted]);

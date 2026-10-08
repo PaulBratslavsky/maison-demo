@@ -71,7 +71,7 @@ describe('MarkdownBody', () => {
     expect(body.textContent).toBe('<img src=x onerror="alert(1)"> and <script>alert(2)</script> and <b>bold</b>');
   });
 
-  it('draws an http or https link that opens in a new tab and keeps the window to itself', () => {
+  it('draws an http or https link that opens in a new tab and gives the page no way back to its window', () => {
     const { body } = draw('[Care guide](https://example.com/care) and [plain](http://example.com)');
     const [care, plain] = Array.from(body.querySelectorAll('a'));
     expect(care.getAttribute('href')).toBe('https://example.com/care');

@@ -24,7 +24,7 @@ import { ToolBox } from './ToolBox';
 
 /**
  * The one thing in the drawer that scrolls up and down: the top bar and the composer stay where they are. It takes the height that is left
- * (`flex: 1` with `min-height: 0`, the part that is easy to leave out: a flex child will not shrink below its content, so without it the messages would
+ * (`flex: 1` with `min-height: 0`, which is needed because a flex child will not shrink below its content, so without it the messages would
  * push the composer off the bottom). It never scrolls sideways: a table that is too wide scrolls inside its bubble. And it does not pass its scrolling
  * on (`overscroll-behavior`), so the end of the list does not scroll what is behind the drawer.
  */

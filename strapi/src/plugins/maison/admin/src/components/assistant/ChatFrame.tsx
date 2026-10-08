@@ -7,9 +7,8 @@ import styled from 'styled-components';
  */
 
 /**
- * Fills the drawer under nothing but itself: the drawer is a flex column and this takes what it has. `min-height: 0` is the part that is easy to
- * leave out: a flex child will not shrink below its content, so without it the messages would push the composer off the bottom instead of
- * scrolling.
+ * Fills the drawer under nothing but itself: the drawer is a flex column and this takes what it has. `min-height: 0` is needed because a
+ * flex child will not shrink below its content, so without it the messages would push the composer off the bottom instead of scrolling.
  */
 export const ChatLayout = styled.div`
   display: flex;

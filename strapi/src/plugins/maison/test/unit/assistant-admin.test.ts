@@ -104,9 +104,9 @@ describe('askTabState', () => {
     expect(askTabState(null, null)).toEqual({ kind: 'loading' });
   });
 
-  it('says the assistant could not be checked, with the error, when the status call failed and there is no status', () => {
-    expect(askTabState(null, 'Forbidden')).toEqual({ kind: 'failed', text: "Couldn't check the assistant: Forbidden" });
-    expect(askTabState(null, 'The answer was not a status.')).toEqual({ kind: 'failed', text: "Couldn't check the assistant: The answer was not a status." });
+  it('says the assistant could not be checked, in a fixed text that holds none of the error, when the status call failed and there is no status', () => {
+    expect(askTabState(null, 'Forbidden')).toEqual({ kind: 'failed', text: "Couldn't check the assistant." });
+    expect(askTabState(null, 'The answer was not a status.')).toEqual({ kind: 'failed', text: "Couldn't check the assistant." });
   });
 
   it("shows the server's reason, and no text box, when the assistant is not ready", () => {
