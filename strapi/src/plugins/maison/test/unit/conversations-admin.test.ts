@@ -110,10 +110,31 @@ describe('conversationTitle', () => {
     expect(conversationTitle([staff('u1')])).toBe('New chat');
   });
 
+  // A character as people see it can be several code points. Counting code points would cut one of them in two.
+  describe('counts characters as people see them', () => {
+    const limit = SAVED_CHATS.titleChars;
+
+    it.each([
+      ['an emoji with a skin tone', '👍🏽'],
+      ['a family emoji joined by zero-width joiners', '👨‍👩‍👧‍👦'],
+      ['a flag', '🇯🇵'],
+      ['a Japanese character with a separate voiced mark', 'か\u3099'],
+    ])('and never splits %s', (_what, character) => {
+      const titleOf = (title: string) => conversationTitle([staff('u1', text(title))]);
+      // The 80th character is the whole one, and what follows it is cut off.
+      expect(titleOf(`${'a'.repeat(limit - 1)}${character}tail`)).toBe(`${'a'.repeat(limit - 1)}${character}`);
+      // One that does not fit is left out whole.
+      expect(titleOf(`${'a'.repeat(limit)}${character}`)).toBe('a'.repeat(limit));
+      // A title made of them is 80 of them, not 80 code points, and one of 80 is not cut.
+      expect(titleOf(character.repeat(limit + 20))).toBe(character.repeat(limit));
+      expect(titleOf(character.repeat(limit))).toBe(character.repeat(limit));
+    });
+  });
+
   // The page and the server each cut a title, and they are the same cut: the title staff see is the title the server keeps.
   it('is cut exactly as the server cuts a title', () => {
     expect(SAVED_CHATS.titleChars).toBe(80);
-    for (const title of ['Which visits are waiting?', '  spaced \n out  ', 'x'.repeat(300), '😀'.repeat(90), '今日のお客様からの問い合わせを教えてください。'.repeat(6), '', '   ']) {
+    for (const title of ['Which visits are waiting?', '  spaced \n out  ', 'x'.repeat(300), '😀'.repeat(90), `${'a'.repeat(79)}👨‍👩‍👧‍👦tail`, `${'a'.repeat(79)}🇯🇵tail`, `${'a'.repeat(79)}か\u3099tail`, '今日のお客様からの問い合わせを教えてください。'.repeat(6), '', '   ']) {
       expect(conversationTitle([staff('u1', text(title))]), JSON.stringify(title)).toBe(cutTitle(title));
     }
   });

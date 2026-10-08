@@ -3,6 +3,8 @@
  * changes when a chat is saved or deleted, when a chat needs saving, and the queue that saves them one at a time. The provider reads these,
  * and the unit tests hold them.
  */
+// Intl.Segmenter is ES2022. The admin's base tsconfig may declare less, but every browser Strapi's admin supports has it.
+/// <reference lib="es2022.intl" />
 import type { MessageLike, PartLike } from './assistant';
 
 /** The saved chats' routes, served under /maison. A unit test holds them to the server's. */
@@ -49,8 +51,23 @@ export const isSavedAnswer = (value: unknown): value is { conversation: SavedCha
 const MAX_TITLE = 80;
 
 /**
- * A chat's title: its first staff message, on one line, cut to 80 characters (whole characters, so an emoji or a Japanese character is
- * never split), or "New chat" when there is none. The server cuts a title the same way, and a unit test holds the two to each other.
+ * The first `max` characters of `text` as people see them. One character can be several code points: an emoji with a skin tone, a family
+ * emoji joined by zero-width joiners, a flag, or a Japanese character with a separate voiced mark. Each is kept whole or left out.
+ */
+const firstCharacters = (text: string, max: number): string => {
+  let kept = '';
+  let count = 0;
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+    if (count === max) break;
+    kept += segment;
+    count += 1;
+  }
+  return kept;
+};
+
+/**
+ * A chat's title: its first staff message, on one line, cut to 80 characters (characters as people see them, so an emoji, a flag or a
+ * Japanese character with its mark is never split), or "New chat" when there is none. The server cuts a title the same way, and a unit test holds the two to each other.
  */
 export const conversationTitle = (messages: readonly MessageLike[]): string => {
   const first = messages.find((message) => message.role === 'user');
@@ -61,7 +78,7 @@ export const conversationTitle = (messages: readonly MessageLike[]): string => {
         .join(' ')
     : '';
   const line = text.replace(/\s+/g, ' ').trim();
-  return line === '' ? 'New chat' : Array.from(line).slice(0, MAX_TITLE).join('');
+  return line === '' ? 'New chat' : firstCharacters(line, MAX_TITLE);
 };
 
 /** The list with `row` at the top: a chat that was just saved is the newest, and appears once. */
