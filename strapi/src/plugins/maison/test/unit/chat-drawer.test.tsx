@@ -1071,6 +1071,56 @@ describe('saved chats', () => {
       await shows('The answer to Older chat');
       expect(box().value).toBe('Not sent yet');
     });
+
+    // A chat that was deleted elsewhere is saved again as a new chat, and the old row goes.
+    it('shows the chat once in the sidebar after a vanished chat is saved again as a new one', async () => {
+      const { rows } = world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [() => stream(answer('More.'))] });
+      await shows('The answer to Which visits are waiting?');
+      rows.splice(0, rows.length);
+      await ask('Tell me more', 'More.');
+      await waitFor(() => expect(client.post).toHaveBeenCalledTimes(1));
+      await openSidebar();
+      await waitFor(() => expect(titlesInSidebar()).toHaveLength(1));
+    });
+
+    // A save that failed is tried again by the next save of the same chat, which New chat makes.
+    it('saves a chat whose save failed when New chat is pressed afterwards', async () => {
+      const { rows } = world({ chat: [() => stream(answer('Two visits wait.'))] });
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      client.post.mockRejectedValueOnce(new Error('Gateway timeout'));
+      await ask('Which visits are waiting?', 'Two visits wait.');
+      await screen.findByText("Couldn't save this chat.");
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(rows).toHaveLength(1);
+    });
+
+    // A turn that begins while a delete is on its way stays on the screen.
+    it('keeps a turn that began while the open chat was being deleted', async () => {
+      let finishDelete: () => void = () => {};
+      const slow = (signal?: AbortSignal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      await shows('The answer to Which visits are waiting?');
+      const del = client.del.getMockImplementation() as (...args: any[]) => Promise<unknown>;
+      client.del.mockImplementation((...args: any[]) => new Promise((resolve) => (finishDelete = () => resolve(del(...args)))));
+      await openSidebar();
+      await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Which visits are waiting?' }));
+      await userEvent.type(box(), 'Another question{Enter}');
+      await within(region()).findByText('Looking into it');
+      finishDelete();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(within(region()).queryByText('Another question')).not.toBeNull();
+    });
   });
 
   describe('deleting', () => {

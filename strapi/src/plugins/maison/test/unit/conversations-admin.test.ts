@@ -269,7 +269,7 @@ describe('the save queue', () => {
       }),
     });
     await queue.save(snapshot('One'));
-    expect(deps.onError).toHaveBeenCalledExactlyOnceWith(error);
+    expect(deps.onError).toHaveBeenCalledExactlyOnceWith(error, { current: true });
     expect(queue.openId()).toBeNull();
     // The chat was never created, so the next save creates it.
     deps.create.mockImplementation(async (shot) => {
@@ -301,7 +301,7 @@ describe('the save queue', () => {
     expect(deps.onError).not.toHaveBeenCalled();
     expect(log).toEqual(['create One', 'create One']);
     expect(queue.openId()).toBe('chat-2');
-    expect(deps.onSaved).toHaveBeenLastCalledWith(row('chat-2', 'One'), { created: true, current: true });
+    expect(deps.onSaved).toHaveBeenLastCalledWith(row('chat-2', 'One'), { created: true, current: true, replaced: 'chat-1' });
   });
 
   it('reports a 404 on the create it falls back to like any other failure', async () => {
@@ -312,6 +312,17 @@ describe('the save queue', () => {
     await queue.save(snapshot('One', staff('u1')));
     expect(deps.onError).toHaveBeenCalledOnce();
     expect(queue.openId()).toBeNull();
+  });
+
+  it('says, when a save fails, whether its chat is still the open one', async () => {
+    const gate = deferred<SavedChatRow>();
+    const { queue, deps } = queueWith({ create: vi.fn<SaveQueueDeps['create']>(() => gate.promise) });
+    const first = queue.save(snapshot('Old'));
+    queue.switchTo(null);
+    const failure = new Error('Strapi is down');
+    gate.reject(failure);
+    await first;
+    expect(deps.onError).toHaveBeenCalledExactlyOnceWith(failure, { current: false });
   });
 
   describe('starting another chat', () => {

@@ -228,14 +228,17 @@ export const AssistantProvider = ({ children, started }: { children: React.React
     createSaveQueue({
       create: async (snapshot: ChatSnapshot) => savedRow((await clientRef.current.post<unknown>(CONVERSATION_PATHS.list, snapshot)).data),
       update: async (documentId: string, snapshot: ChatSnapshot) => savedRow((await clientRef.current.put<unknown>(CONVERSATION_PATHS.one(documentId), snapshot)).data),
-      onSaved: (row, { current }) => {
+      onSaved: (row, { current, replaced }) => {
         if (!mounted.current) return;
-        setChats((list) => withSavedChat(list, row));
+        // A chat that was saved again as a new one replaces the row of the chat that was gone.
+        setChats((list) => withSavedChat(replaced === undefined ? list : withoutSavedChat(list, replaced), row));
         // A chat that staff have already left is not the open one: its row is in the list, and nothing else changes.
         if (current) setOpenId(row.documentId);
         setHistoryError(null);
       },
-      onError: () => {
+      onError: (_error, { current }) => {
+        // What was being saved is not saved: the next save of this chat (a turn, or New chat) tries again.
+        if (current) savedKey.current = '';
         if (mounted.current) setHistoryError(HISTORY_ERRORS.save);
       },
     })
@@ -354,7 +357,9 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       setHistoryError(null);
       if (wasOpen) {
         opening.current += 1;
-        showChat(null, []);
+        // A turn that began while the delete was on its way stays on the screen. Its save creates a new chat.
+        if (busyRef.current) setOpenId(null);
+        else showChat(null, []);
       }
     },
     [queue, showChat, mounted]

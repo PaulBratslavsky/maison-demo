@@ -86,9 +86,9 @@ export interface SaveQueueDeps {
   create: (snapshot: ChatSnapshot) => Promise<SavedChatRow>;
   update: (documentId: string, snapshot: ChatSnapshot) => Promise<SavedChatRow>;
   /** A save went through. `current` is whether the chat it saved is still the open one: staff may have started another since. */
-  onSaved: (row: SavedChatRow, info: { created: boolean; current: boolean }) => void;
-  /** A save failed. The queue goes on with the next. */
-  onError: (error: unknown) => void;
+  onSaved: (row: SavedChatRow, info: { created: boolean; current: boolean; replaced?: string }) => void;
+  /** A save failed. The queue goes on with the next. `current` is whether the chat it was saving is still the open one. */
+  onError: (error: unknown, info: { current: boolean }) => void;
 }
 
 export interface SaveQueue {
@@ -139,10 +139,10 @@ export const createSaveQueue = (deps: SaveQueueDeps): SaveQueue => {
     save(snapshot) {
       const chat = current;
       return enqueue(async () => {
-        const create = async () => {
+        const create = async (replaced?: string) => {
           const row = await deps.create(snapshot);
           ids.set(chat, row.documentId);
-          deps.onSaved(row, { created: true, current: chat === current });
+          deps.onSaved(row, { created: true, current: chat === current, ...(replaced === undefined ? {} : { replaced }) });
         };
         try {
           const documentId = ids.get(chat);
@@ -154,10 +154,10 @@ export const createSaveQueue = (deps: SaveQueueDeps): SaveQueue => {
             if (!isNotFound(error)) throw error;
             // The chat was deleted elsewhere. What staff have is saved again, as a new chat.
             ids.delete(chat);
-            await create();
+            await create(documentId);
           }
         } catch (error) {
-          deps.onError(error);
+          deps.onError(error, { current: chat === current });
         }
       });
     },
