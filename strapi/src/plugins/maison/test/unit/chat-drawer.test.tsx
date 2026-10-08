@@ -949,6 +949,110 @@ describe('saved chats', () => {
       expect(within(region()).queryByText('Fine.')).toBeNull();
     });
 
+    // The save goes to the chat it was made for, so a saved chat is updated and no second chat is made.
+    it('updates the saved chat it leaves, and creates no second chat, when New chat stops an answer on its way', async () => {
+      const slow = (signal?: AbortSignal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      await shows('The answer to Which visits are waiting?');
+      await userEvent.type(box(), 'Another question{Enter}');
+      await within(region()).findByText('Looking into it');
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+
+      await waitFor(() => expect(client.put).toHaveBeenCalledTimes(1));
+      expect(client.put.mock.calls[0][0]).toBe('/maison/conversations/c1');
+      expect(client.put.mock.calls[0][1].messages).toHaveLength(4);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    // What is saved holds no tool call that was cut off.
+    it('saves no cut-off tool call when New chat is pressed while a tool runs', async () => {
+      const midTool = (signal?: AbortSignal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const events = [
+                event('RUN_STARTED'),
+                event('TEXT_MESSAGE_START', { messageId: 'm1', role: 'assistant' }),
+                event('TEXT_MESSAGE_CONTENT', { messageId: 'm1', delta: 'Looking. ' }),
+                event('TEXT_MESSAGE_END', { messageId: 'm1' }),
+                event('TOOL_CALL_START', { toolCallId: 'c1', toolCallName: 'list_requests', parentMessageId: 'm1' }),
+                event('TOOL_CALL_ARGS', { toolCallId: 'c1', delta: '{"sta' }),
+              ];
+              for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      world();
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => midTool(init?.signal)));
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByRole('button', { name: /Tool: list_requests/ });
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+
+      await waitFor(() => expect(client.post).toHaveBeenCalled());
+      const saved = client.post.mock.calls.at(-1)?.[1].messages as Array<{ parts: Array<{ type: string }> }>;
+      expect(saved.map((message) => message.parts.map((part) => part.type))).toEqual([['text'], ['text']]);
+    });
+
+    // A question with no answer yet is not a chat.
+    it('saves nothing when New chat is pressed before the answer has begun', async () => {
+      const silent = (signal?: AbortSignal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event('RUN_STARTED'))}\n\n`));
+              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      world();
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => silent(init?.signal)));
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await screen.findByRole('status', { name: 'Assistant is replying' });
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(client.post).not.toHaveBeenCalled();
+      expect(client.put).not.toHaveBeenCalled();
+    });
+
+    // New chat wins over a chat that was chosen and has not arrived yet.
+    it('keeps the empty chat that New chat made when the answer for a chat chosen just before arrives late', async () => {
+      let answerOlder: () => void = () => {};
+      world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
+      await shows('The answer to Newer chat');
+      const get = client.get.getMockImplementation() as (url: string) => Promise<unknown>;
+      client.get.mockImplementation((url: string) => (url === '/maison/conversations/c1' ? new Promise((resolve) => (answerOlder = () => resolve(get(url)))) : get(url)));
+      await openSidebar();
+      await userEvent.click(rowOf('Older chat'));
+      // With the sidebar open there are two buttons named "New chat". This one is the sidebar's.
+      await userEvent.click(within(sidebar()).getByRole('button', { name: 'New chat' }));
+      expect(await screen.findByText('Ask Maison')).toBeTruthy();
+
+      answerOlder();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(screen.getByText('Ask Maison')).toBeTruthy();
+      expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
+    });
+
     it('leaves what staff have typed in the box', async () => {
       world({ chat: [() => stream(answer('Two visits wait.'))] });
       await screen.findByRole('textbox', { name: 'Chat message' });
@@ -1026,6 +1130,25 @@ describe('saved chats', () => {
       finishSave(undefined);
       await waitFor(() => expect(client.del).toHaveBeenCalledExactlyOnceWith('/maison/conversations/c1'));
       expect(screen.queryByText("Couldn't save this chat.")).toBeNull();
+    });
+
+    // Deleting the open chat wins over a chat that was chosen and has not arrived yet.
+    it('keeps the empty screen after the open chat is deleted when the answer for a chat chosen just before arrives late', async () => {
+      let answerOlder: () => void = () => {};
+      world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
+      await shows('The answer to Newer chat');
+      const get = client.get.getMockImplementation() as (url: string) => Promise<unknown>;
+      client.get.mockImplementation((url: string) => (url === '/maison/conversations/c1' ? new Promise((resolve) => (answerOlder = () => resolve(get(url)))) : get(url)));
+      await openSidebar();
+      await userEvent.click(rowOf('Older chat'));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Newer chat' }));
+      expect(await screen.findByText('Ask Maison')).toBeTruthy();
+
+      answerOlder();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(screen.getByText('Ask Maison')).toBeTruthy();
+      expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
     });
 
     it('says so, and keeps the row, when the chat could not be deleted', async () => {
