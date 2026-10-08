@@ -21,7 +21,7 @@ import { HISTORY_WIDTH } from './drawerWidth';
  * - The open chat's row says so to screen readers (`aria-current`), and each trash button names its chat.
  */
 
-const SidebarRoot = styled.div<{ $open: boolean }>`
+const SidebarRoot = styled.aside<{ $open: boolean }>`
   box-sizing: border-box;
   width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};
   min-width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};
