@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { screen } from '@testing-library/react';
 import { createElement } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageList } from '../../admin/src/components/assistant/MessageList';
 import { renderInTheme } from './render';
 
@@ -23,6 +23,10 @@ vi.mock('react-markdown', async (importOriginal) => {
 
 const staff = (id: string, content: string) => ({ id, role: 'user', parts: [{ type: 'text', content }] }) as never;
 const assistant = (id: string, content: string) => ({ id, role: 'assistant', parts: [{ type: 'text', content }] }) as never;
+beforeEach(() => {
+  drawn.length = 0;
+});
+
 const timesDrawn = (content: string) => drawn.filter((text) => text === content).length;
 
 describe('the message list while an answer streams in', () => {
@@ -38,6 +42,17 @@ describe('the message list while an answer streams in', () => {
 
     expect(screen.getByText('Three complaints')).toBeTruthy();
     expect(timesDrawn('Three complaints')).toBe(1);
+    expect(timesDrawn('Two visits wait.')).toBe(1);
+  });
+
+  // The row's memo cannot help here, because the message objects are new. Only the memo of `MarkdownBody`, which compares the text, stops the parse.
+  it('does not parse an answer again when its message is replaced by an equal one: the text did not change', () => {
+    const { rerender } = renderInTheme(<MessageList messages={[staff('u1', 'Which visits are waiting?'), assistant('a1', 'Two visits wait.')]} busy />);
+    expect(timesDrawn('Two visits wait.')).toBe(1);
+
+    rerender(<MessageList messages={[staff('u1', 'Which visits are waiting?'), assistant('a1', 'Two visits wait.')]} busy />);
+
+    expect(screen.getByText('Two visits wait.')).toBeTruthy();
     expect(timesDrawn('Two visits wait.')).toBe(1);
   });
 
