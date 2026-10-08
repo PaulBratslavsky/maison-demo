@@ -39,7 +39,7 @@ Confirming a request is one act wherever it happens: the `confirm_appointment` t
 
 ## Install
 
-Maison lives in the [maison-demo](https://github.com/PaulBratslavsky/maison-demo) repo, in `strapi/src/plugins/maison`, and the demo's Strapi loads it as a local plugin. To use it in another Strapi app, copy this folder into that app's `src/plugins/maison`, run `npm install` in it, and add it to `config/plugins.ts` with `resolve`:
+Maison is in the [maison-demo](https://github.com/PaulBratslavsky/maison-demo) repo, in `strapi/src/plugins/maison`, and the demo's Strapi loads it as a local plugin. To use it in another Strapi app, copy this folder into that app's `src/plugins/maison`, run `npm install` in it, and add it to `config/plugins.ts` with `resolve`:
 
 ```ts
 // config/plugins.ts
@@ -266,15 +266,15 @@ The assistant is a chat for staff, in a drawer that opens from a round button at
 - **Who sees it:** admins whose role holds "Use the Maison assistant" (`plugin::maison.assistant.use`). Super Admin has it. The drawer is added to the page by Maison's menu link, so the admin also needs a permission that shows that link: "MCP: review appointment requests", "Read customer questions", "Review customer inquiries" or "Load and reset demo data". An admin who holds the assistant permission and none of those has no menu link, and so no drawer ([How it is mounted](#how-it-is-mounted)).
 - **What it needs:** an Anthropic API key in `AI_API_KEY`, with `AI_PROVIDER` unset or `anthropic`. Without one, the drawer shows "The assistant isn't set up", the reason and **Check again**, and no text box. Set the key, restart Strapi, and press **Check again**.
 - **Which model:** `aiChatModel` (`AI_CHAT_MODEL`), `claude-sonnet-5-5` by default. It is not `aiModel`, which labels inquiries. The model's ID is in a badge in the top bar.
-- **How it calls the model:** only through TanStack AI. The server runs `chat()` from `@tanstack/ai` with the Anthropic adapter, and the page runs `useChat` from `@tanstack/ai-react`. The four TanStack AI packages are pinned to exact versions (0.52.3, 0.18.3, 0.22.4 and 0.29.2), because a range lets npm install two copies of the SDK side by side.
+- **How it calls the model:** only through TanStack AI. The server runs `chat()` from `@tanstack/ai` with the Anthropic adapter, and the page runs `useChat` from `@tanstack/ai-react`. The four TanStack AI packages are pinned to exact versions (`@tanstack/ai` 0.52.3, `@tanstack/ai-anthropic` 0.18.3, `@tanstack/ai-react` 0.22.4 and `@tanstack/ai-client` 0.29.2), because a range lets npm install two copies of the SDK side by side.
 
 ### How it is mounted
 
 Strapi has no place for something that is on every admin page. Its Admin Panel API offers menu links, settings links, Content Manager panels and actions, injection zones and Homepage widgets (docs.strapi.io, "Admin Panel API for plugins"), and none of them is on every page. What Strapi does draw on every signed-in page is the icon of each menu link, in the left menu. So Maison's menu link has an icon component of its own, `MaisonMenuIcon`, and the assistant is added to the page through it.
 - **The icon is still the Crown.** `MaisonMenuIcon` draws the Crown with the props Strapi gives its icons, so the menu looks as it did. Strapi can draw the icon more than once at the same time: in the left menu, and in the mobile menu while that is open. Each icon claims when it mounts and releases when it unmounts (`menuIconOwner.ts`). The oldest icon is the owner, and only the owner looks after the assistant, so there is one assistant however many icons are on the screen. When the owner goes, the oldest icon that is left takes over.
 - **The chat is not in the icon.** Strapi draws the icon again on every change of address. In 5.55.1, `LeftMenu` reads the location, so it renders on each change, and `MainNavIcons` makes a new component for each link on each render, so React replaces the old icon with a new one. A chat held by the icon would be lost at each click on a menu link, and at each change of tab on the Maison page, and an answer on its way would stop. So the owning icon only tells a **host** (`assistantHost.tsx`) what Strapi's providers say and the host cannot read: the theme, the language, and whether this admin holds "Use the Maison assistant". The host draws the assistant in a React root of its own, in an element added to the body.
-- **How long it stays:** for as long as an icon is on the screen. Half a second after the last icon has gone, which is when the admin has signed out, the host takes the assistant away with its chat, so the next admin does not find it. While the admin is signed in, the chat, its saved chats and the text typed and not sent stay as staff move between pages and while the drawer is closed, and an answer on its way goes on. A reload ends them.
-- **The code is loaded when it is needed.** The icon and the host are in the admin's first bundle, and are small. The assistant itself (Markdown, TanStack AI and the screens) is a chunk of its own, loaded the first time an admin who may use it is on a page. Its status check and its saved chats are asked for the first time the drawer is opened, not on every page.
+- **How long it stays:** for as long as an icon is on the screen. Half a second after the last icon has gone, which is when the admin has signed out, the host removes the assistant and its chat, so the next admin does not find it. While the admin is signed in, the chat, its saved chats and the text typed and not sent stay as staff move between pages and while the drawer is closed, and an answer on its way goes on. A reload ends them.
+- **The code is loaded when it is needed.** The icon and the host are in the admin's first bundle, and are small. The assistant itself (Markdown, TanStack AI and the screens) is a chunk of its own, loaded the first time an admin who may use it is on a page. Its status check and its saved chats are asked for the first time the drawer is opened, not on every page. If the chunk fails to load, or the chat fails while it is drawn, the round button stays. Pressing it shows "The assistant could not load. Reload the page to try again.", and the error is written to the browser's console.
 - **A window 1080px wide or more:** below that width, which is Strapi's `large` breakpoint, Strapi draws only a few links in the top bar of its mobile layout, and the other links, Maison's among them, only inside its menu while that menu is open. So the round button is there while the menu is open and goes half a second after it closes, and the chat goes with it. Use the assistant in a window 1080px wide or more.
 - **The cost of this choice:** it rests on how Strapi 5.55.1 draws its menu (`components/MainNav/MainNavLinks.mjs` and `components/LeftMenu.mjs` in `@strapi/admin`), not on a documented API. A Strapi upgrade can need a fix here. `test/unit/maison-menu-icon.test.tsx` holds the rule: it draws the icon in a stand-in for the menu that follows those files (`test/unit/fake-strapi-menu.tsx` names the files and lines it follows). After a Strapi upgrade, compare those two files of Strapi with the stand-in, run the tests, and open any admin page: the round button must be at the bottom right.
 
@@ -294,13 +294,13 @@ The button is 56px across, 24px from the bottom and right edges, in the primary 
 
 ### Saved chats
 
-Each admin's chats are saved for them, and only they can read them.
+Each admin's chats are saved for them. In the drawer, each admin sees only their own chats. A Super Admin can read every saved chat through Strapi's Content Manager API, because hiding the content type from the Content Manager screens does not close that API.
 - **When it saves:** after each turn ends, however it ends. A cut-off tool call or a turn that failed before anything came back is taken out first, so a reopened chat never shows a spinner.
-- **The list:** **History** opens it. It lists your chats, newest first, at most 100, each with a trash button that deletes the chat at once. While an answer comes, its rows, **New chat** and the trash buttons are off.
+- **The list:** **History** opens it. It lists your chats, newest first. It shows the newest 100 chats. A chat beyond those 100 stays stored and is not listed, so you cannot open or delete it from the list. Each row has a trash button that deletes the chat at once. While an answer comes, its rows, **New chat** and the trash buttons are off.
 - **When the drawer is opened:** the first time in a page load, the assistant is checked and the list loads, and not on every page. Once the assistant is ready, the most recent chat reopens, or the chat you had already begun. With no saved chat, the empty chat shows. Opening the drawer never starts a chat, never saves one and never clears the messages: closing it and opening it again, or moving to another page, shows the same chat with its messages and what you typed. Only the New chat buttons start a new one.
 - **New chat** keeps the old chat in the list, and the next turn saves a chat of its own. What you typed and did not send stays in the box.
 - **The title** is your first message, on one line, cut to 80 characters.
-- **Where it lives:** the content type `plugin::maison.conversation` (table `maison_conversations`), hidden from the Content Manager and the Content-Type Builder. A chat is stored as `{ v: 1, messages }`, with every key of every part kept: the model gets the whole history back each turn, and Anthropic refuses a thinking block whose signature was changed. A stored chat that can't be read opens as an empty chat, and the log says which one.
+- **Where it is stored:** the content type `plugin::maison.conversation` (table `maison_conversations`), hidden from the Content Manager and the Content-Type Builder. A chat is stored as `{ v: 1, messages }`, with every key of every part kept: the model gets the whole history back each turn, and Anthropic refuses a thinking block whose signature was changed. A stored chat that can't be read opens as an empty chat, and the log says which one.
 - **What a saved chat holds:** the messages as you saw them, with the tool results: customers masked, customer text cut and tagged. **Reset demo activity** deletes every admin's saved chats, because they quote the demo customers. Its notice does not count them.
 - **Limits:** a reopened chat still counts toward the 20 messages of a chat.
 
@@ -361,9 +361,7 @@ All of them are for admins who hold "Use the Maison assistant", and are served u
 - `GET /assistant/status`: `{ ready: true, model, tools: [{ name, label }] }`, or `{ ready: false, reason }`. Never the key.
 - `POST /assistant/chat`: one turn, streamed. The page sends the whole history each time.
 - `GET /conversations` (the admin's chats, newest first, at most 100, each `{ documentId, title, updatedAt }`) and `POST /conversations` (`{ title, messages }`).
-- `GET /conversations/:documentId`, `PUT /conversations/:documentId` (`{ title, messages }`, either or both) and `DELETE /conversations/:documentId`. A chat that belongs to another admin answers `404`, as an ID nobody has does. A body that is not a chat answers `400` with "This chat could not be saved."
-
-The chat's tests never reach Anthropic: they use a scripted adapter, set through the service's `adapterFor`.
+- `GET /conversations/:documentId`, `PUT /conversations/:documentId` (`{ title, messages }`, either or both, and at least one) and `DELETE /conversations/:documentId`. A chat that belongs to another admin answers `404`, as an ID nobody has does. A body that parses but is not a chat answers `400` with "This chat could not be saved." So does a `PUT` with an empty body, and a `PUT` whose `title` is not text or has no words.
 
 ### Checking it in the browser
 
@@ -379,6 +377,7 @@ This is for the person who tries the drawer. It needs Strapi running (port 1338 
 9. **Scrolling.** In a long chat, only the message list scrolls up and down: the top bar, the quick questions and the text box stay where they are. While an answer streams, scroll up: the list does not pull you back down. Send a message: it goes to the bottom.
 10. **Light and dark.** Switch the admin theme from the profile menu with the drawer open and a table in the chat: the drawer, the bubbles, the quick questions and the table are readable in both.
 11. **The compact header.** On the Maison page, the title "Maison" and its subtitle are on one row about 56px high, and the tabs start right under it. Make the window narrower: the subtitle wraps under the title. The page has three tabs, and `/plugins/maison?tab=ask` opens the first one.
+12. **A role with no tools.** Use a role that holds "Use the Maison assistant" and "Load and reset demo data" and nothing else. It opens the Maison page and has the drawer, and the assistant has no tool for it. Open the drawer: the top bar says **Tools (0)**, and opening the list says "Your role has no tools, so the assistant can't look anything up."
 
 ## The Homepage widgets
 
@@ -706,7 +705,7 @@ The MCP smoke tests (the last line) need:
 
 The token script also loads the demo catalog, then saves a customer, a staff and an ops token to `test/mcp/.tokens.json`, readable by you only.
 
-The integration tests never reach LINE or a model. The harness keeps the app's `LINE_CHANNEL_ACCESS_TOKEN` and its `AI_*` settings out of Strapi, and stops Strapi's cron so the labelling job doesn't race a suite's own calls. The LINE confirmation suite points `lineApiBaseUrl` at a stand-in on a free local port.
+The assistant's tests never reach Anthropic: they use a scripted adapter, set through the service's `adapterFor`. The integration tests never reach LINE or a model. The harness keeps the app's `LINE_CHANNEL_ACCESS_TOKEN` and its `AI_*` settings out of Strapi, and stops Strapi's cron so the labelling job doesn't race a suite's own calls. The LINE confirmation suite points `lineApiBaseUrl` at a stand-in on a free local port.
 
 `npm test` leaves the live test out. `npm run test:live` sends sample exchanges to the model the `AI_*` environment variables name, through the same code as the sweep, and never prints the key: `AI_API_KEY=… npm run test:live`, or `AI_PROVIDER=openai-compatible AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=<a pulled model> npm run test:live` for Ollama.
 

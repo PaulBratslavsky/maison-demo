@@ -182,6 +182,40 @@ describe('the README outside that section', () => {
   });
 });
 
+describe("the README's account of saved chats and the routes", () => {
+  it('says who can read a saved chat: each admin sees their own, and a Super Admin can read all through the Content Manager API', () => {
+    for (const text of [readme, changelog]) {
+      expect(text).not.toContain('only they can read them');
+      expect(text).toContain('each admin sees only their own chats');
+      expect(text).toContain("Super Admin can read every saved chat through Strapi's Content Manager API");
+    }
+  });
+
+  it('says the History list shows the newest chats, as many as the code lists', () => {
+    expect(SAVED_CHATS.listRows).toBe(100);
+    expect(section).toContain('It shows the newest 100 chats.');
+  });
+
+  it('says a PUT with an empty body, or a title that is not text or has no words, answers 400', () => {
+    expect(section).toContain('So does a `PUT` with an empty body, and a `PUT` whose `title` is not text or has no words.');
+  });
+
+  it('puts the check of a role with no tools, Tools (0), in the checklist for the browser', () => {
+    expect(section).toContain('**Tools (0)**');
+    expect(section).toContain('"Use the Maison assistant" and "Load and reset demo data" and nothing else');
+  });
+
+  it('says where the chats are stored, and keeps the tests out of the routes section', () => {
+    expect(section).toContain('**Where it is stored:**');
+    const routes = section.slice(section.indexOf('### Routes'), section.indexOf('### Checking it in the browser'));
+    expect(routes).not.toContain('tests never reach');
+  });
+
+  it('names each TanStack AI package with its version', () => {
+    for (const pin of ['`@tanstack/ai` 0.52.3', '`@tanstack/ai-anthropic` 0.18.3', '`@tanstack/ai-react` 0.22.4', '`@tanstack/ai-client` 0.29.2']) expect(section, pin).toContain(pin);
+  });
+});
+
 describe('the CHANGELOG', () => {
   it('has an entry for the assistant, with its permission, its setting and its routes', () => {
     expect(changelog).toContain('**The assistant: a chat for staff, in a drawer on every admin page.**');
