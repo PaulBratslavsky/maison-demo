@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { memo, type ComponentProps } from 'react';
 
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -115,11 +115,13 @@ const MarkdownLink = ({ href, children, node: _node, ...props }: ComponentProps<
 
 const components = { a: MarkdownLink, table: MarkdownTable } as ComponentProps<typeof Markdown>['components'];
 
-export const MarkdownBody = ({ text }: { text: string }) => (
+/** Memoized: parsing Markdown is the costly part of a streamed answer, and its only prop is a string. An answer whose text did not change is not parsed again. */
+export const MarkdownBody = memo(({ text }: { text: string }) => (
   // `data-message-part` is a hook for tests: it lets a check read the rendered answer and nothing else in the message.
   <Body data-message-part="text">
     <Markdown remarkPlugins={[remarkGfm]} components={components} disallowedElements={['img']}>
       {text}
     </Markdown>
   </Body>
-);
+));
+MarkdownBody.displayName = 'MarkdownBody';

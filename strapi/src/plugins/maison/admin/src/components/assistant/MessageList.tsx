@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 
 import { Sparkle } from '@strapi/icons';
 import type { UIMessage } from '@tanstack/ai-client';
@@ -146,6 +146,43 @@ const WaitSpinner = styled.span`
   }
 `;
 
+/**
+ * One message of the chat. It is memoized on the message object: the chat library replaces only the message that changed, so while an answer
+ * streams in, the messages before it keep their identity and are not drawn again.
+ */
+const MessageRow = memo(({ message, toolWait }: { message: UIMessage; toolWait: boolean }) => {
+  const parts = message.parts as readonly PartLike[];
+  const drawn = drawableParts(parts);
+  if (drawn.length === 0) return null;
+  const fromStaff = message.role === 'user';
+
+  return (
+    // `data-message-role` is a hook for tests, as in the reference: it lets a check read one side of the chat.
+    <Row data-message-role={message.role} $isUser={fromStaff}>
+      {!fromStaff && (
+        <Avatar aria-hidden="true">
+          <Sparkle />
+        </Avatar>
+      )}
+      <Bubble $isUser={fromStaff}>
+        <Role $isUser={fromStaff}>{fromStaff ? 'You' : 'Assistant'}</Role>
+        {drawn.map((part, partIndex) => {
+          if (part.type === 'text') return fromStaff ? <StaffText key={partIndex}>{part.content}</StaffText> : <MarkdownBody key={partIndex} text={part.content} />;
+          const box = toolBoxOf(part, toolResultOf(parts, part.id));
+          return box ? <ToolBox key={part.id} box={box} /> : null;
+        })}
+        {toolWait && (
+          <ToolWait role="status">
+            <WaitSpinner />
+            Working on it…
+          </ToolWait>
+        )}
+      </Bubble>
+    </Row>
+  );
+});
+MessageRow.displayName = 'MessageRow';
+
 interface MessageListProps {
   messages: readonly UIMessage[];
   /** Whether an answer is on its way. */
@@ -189,37 +226,9 @@ export const MessageList = ({ messages, busy }: MessageListProps) => {
     >
       {messages.length === 0 && <EmptyState />}
 
-      {messages.map((message, index) => {
-        const parts = message.parts as readonly PartLike[];
-        const drawn = drawableParts(parts);
-        if (drawn.length === 0) return null;
-        const fromStaff = message.role === 'user';
-
-        return (
-          // `data-message-role` is a hook for tests, as in the reference: it lets a check read one side of the chat.
-          <Row key={message.id} data-message-role={message.role} $isUser={fromStaff}>
-            {!fromStaff && (
-              <Avatar aria-hidden="true">
-                <Sparkle />
-              </Avatar>
-            )}
-            <Bubble $isUser={fromStaff}>
-              <Role $isUser={fromStaff}>{fromStaff ? 'You' : 'Assistant'}</Role>
-              {drawn.map((part, partIndex) => {
-                if (part.type === 'text') return fromStaff ? <StaffText key={partIndex}>{part.content}</StaffText> : <MarkdownBody key={partIndex} text={part.content} />;
-                const box = toolBoxOf(part, toolResultOf(parts, part.id));
-                return box ? <ToolBox key={part.id} box={box} /> : null;
-              })}
-              {toolWait && index === messages.length - 1 && (
-                <ToolWait role="status">
-                  <WaitSpinner />
-                  Working on it…
-                </ToolWait>
-              )}
-            </Bubble>
-          </Row>
-        );
-      })}
+      {messages.map((message, index) => (
+        <MessageRow key={message.id} message={message} toolWait={toolWait && index === messages.length - 1} />
+      ))}
 
       {working && (
         <Row data-message-role="assistant" $isUser={false}>
