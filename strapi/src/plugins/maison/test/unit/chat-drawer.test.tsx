@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { darkTheme, lightTheme } from '@strapi/design-system';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,6 +176,46 @@ const heldAnswer = () => {
     );
   return { respond, finish: () => finish() };
 };
+
+/**
+ * A stream that has sent `events` and then stays open. When the request is aborted (Stop, or New chat), the stream fails with an abort error, as
+ * a real connection does. Without a signal it stays open for the whole test. `onStart` is called when the stream has sent its events.
+ */
+const openStream = (events: Array<Record<string, unknown>>, signal?: AbortSignal, onStart?: () => void) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+        onStart?.();
+        signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+  );
+/** An answer that has begun with "Looking into it" and does not end. */
+const slow = (signal?: AbortSignal, onStart?: () => void) => openStream(answer('Looking into it').slice(0, 3), signal, onStart);
+/** An answer whose first text has come and whose tool call is cut in the middle of its arguments. */
+const midTool = (signal?: AbortSignal) =>
+  openStream(
+    [
+      event('RUN_STARTED'),
+      event('TEXT_MESSAGE_START', { messageId: 'm1', role: 'assistant' }),
+      event('TEXT_MESSAGE_CONTENT', { messageId: 'm1', delta: 'Looking. ' }),
+      event('TEXT_MESSAGE_END', { messageId: 'm1' }),
+      event('TOOL_CALL_START', { toolCallId: 'c1', toolCallName: 'list_requests', parentMessageId: 'm1' }),
+      event('TOOL_CALL_ARGS', { toolCallId: 'c1', delta: '{"sta' }),
+    ],
+    signal
+  );
+/** A run that has started and sent nothing else. */
+const silent = (signal?: AbortSignal) => openStream([event('RUN_STARTED')], signal);
+/** Makes `fetch` answer every chat request with `make(signal)`, so the stream ends when the request is aborted. */
+const answerWith = (make: (signal?: AbortSignal) => Response) => vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => make(init?.signal)));
+/**
+ * Lets the page finish what it does after a stand-in has answered. A test that proves something did NOT happen has no event to wait for, so it
+ * waits for a timer that is queued after every promise the page is already working through. Where there is an event to wait for, a test waits for it.
+ */
+const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 
 beforeEach(() => {
   localStorage.clear();
@@ -541,19 +581,8 @@ describe('a turn', () => {
   it('stops an answer that is on its way with Stop, keeps what came, and shows no error', async () => {
     let started: () => void = () => {};
     const began = new Promise<void>((resolve) => (started = resolve));
-    const slow = (signal?: AbortSignal) =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-            started();
-            signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-          },
-        }),
-        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-      );
     world();
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+    answerWith((signal) => slow(signal, started));
     await screen.findByRole('textbox', { name: 'Chat message' });
 
     await userEvent.type(box(), 'Which visits are waiting?{Enter}');
@@ -734,7 +763,8 @@ describe('saved chats', () => {
     await userEvent.click(rowOf('Middle chat'));
     await shows('The answer to Middle chat');
     answerFirst();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // There is no event for an answer that is dropped, so the test waits for the work the late answer starts.
+    await settle();
 
     expect(within(region()).getByText('The answer to Middle chat')).toBeTruthy();
     expect(within(region()).queryByText('The answer to Oldest chat')).toBeNull();
@@ -752,7 +782,8 @@ describe('saved chats', () => {
     await openSidebar();
 
     await userEvent.click(rowOf('Older chat'));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // There is no event for a chat that is not opened, so the test waits for the work the click starts.
+    await settle();
     expect(client.get).not.toHaveBeenCalledWith('/maison/conversations/c1');
 
     finishSave();
@@ -887,7 +918,8 @@ describe('saved chats', () => {
     it('does not save a chat again when nothing in it has changed', async () => {
       world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
       await shows('The answer to Which visits are waiting?');
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a save that does not happen.
+      await settle();
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
     });
@@ -942,18 +974,8 @@ describe('saved chats', () => {
     });
 
     it('saves the chat as it is when New chat stops an answer on its way: what had come stays in the chat it belongs to', async () => {
-      const slow = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world();
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      answerWith(slow);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
       await within(region()).findByText('Looking into it');
@@ -988,18 +1010,8 @@ describe('saved chats', () => {
 
     // The save goes to the chat it was made for, so a saved chat is updated and no second chat is made.
     it('updates the saved chat it leaves, and creates no second chat, when New chat stops an answer on its way', async () => {
-      const slow = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      answerWith(slow);
       await shows('The answer to Which visits are waiting?');
       await userEvent.type(box(), 'Another question{Enter}');
       await within(region()).findByText('Looking into it');
@@ -1014,26 +1026,8 @@ describe('saved chats', () => {
 
     // What is saved holds no tool call that was cut off.
     it('saves no cut-off tool call when New chat is pressed while a tool runs', async () => {
-      const midTool = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              const events = [
-                event('RUN_STARTED'),
-                event('TEXT_MESSAGE_START', { messageId: 'm1', role: 'assistant' }),
-                event('TEXT_MESSAGE_CONTENT', { messageId: 'm1', delta: 'Looking. ' }),
-                event('TEXT_MESSAGE_END', { messageId: 'm1' }),
-                event('TOOL_CALL_START', { toolCallId: 'c1', toolCallName: 'list_requests', parentMessageId: 'm1' }),
-                event('TOOL_CALL_ARGS', { toolCallId: 'c1', delta: '{"sta' }),
-              ];
-              for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world();
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => midTool(init?.signal)));
+      answerWith(midTool);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
       await within(region()).findByRole('button', { name: /Tool: list_requests/ });
@@ -1047,24 +1041,16 @@ describe('saved chats', () => {
 
     // A question with no answer yet is not a chat.
     it('saves nothing when New chat is pressed before the answer has begun', async () => {
-      const silent = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event('RUN_STARTED'))}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world();
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => silent(init?.signal)));
+      answerWith(silent);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
       await screen.findByRole('status', { name: 'Assistant is replying' });
 
       await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The turn was never saved, so no event follows New chat. The empty chat is on the screen once New chat has been handled.
+      await screen.findByText('Ask Maison');
+      await settle();
 
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
@@ -1084,7 +1070,8 @@ describe('saved chats', () => {
       expect(await screen.findByText('Ask Maison')).toBeTruthy();
 
       answerOlder();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // There is no event for an answer that is dropped.
+      await settle();
 
       expect(screen.getByText('Ask Maison')).toBeTruthy();
       expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
@@ -1128,25 +1115,16 @@ describe('saved chats', () => {
       await ask('Which visits are waiting?', 'Two visits wait.');
       await screen.findByText("Couldn't save this chat.");
       await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The second save is the event to wait for: the failed chat is stored when New chat is pressed.
+      await waitFor(() => expect(rows).toHaveLength(1));
       expect(rows).toHaveLength(1);
     });
 
     // A turn that begins while a delete is on its way stays on the screen.
     it('keeps a turn that began while the open chat was being deleted', async () => {
       let finishDelete: () => void = () => {};
-      const slow = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      answerWith(slow);
       await shows('The answer to Which visits are waiting?');
       const del = client.del.getMockImplementation() as (...args: any[]) => Promise<unknown>;
       client.del.mockImplementation((...args: any[]) => new Promise((resolve) => (finishDelete = () => resolve(del(...args)))));
@@ -1155,7 +1133,8 @@ describe('saved chats', () => {
       await userEvent.type(box(), 'Another question{Enter}');
       await within(region()).findByText('Looking into it');
       finishDelete();
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      // The delete finishes when its row is gone from the list. The turn that began meanwhile must still be on the screen then.
+      await waitFor(() => expect(titlesInSidebar()).toEqual([]));
       expect(within(region()).queryByText('Another question')).not.toBeNull();
     });
   });
@@ -1211,7 +1190,8 @@ describe('saved chats', () => {
       await openSidebar();
 
       await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Which visits are waiting?' }));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a delete that does not start yet.
+      await settle();
       expect(client.del).not.toHaveBeenCalled();
 
       finishSave(undefined);
@@ -1232,7 +1212,8 @@ describe('saved chats', () => {
       expect(await screen.findByText('Ask Maison')).toBeTruthy();
 
       answerOlder();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // There is no event for an answer that is dropped.
+      await settle();
 
       expect(screen.getByText('Ask Maison')).toBeTruthy();
       expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
@@ -1266,15 +1247,6 @@ describe('saved chats', () => {
 
   describe('while an answer comes', () => {
     it('switches off the sidebar: its rows, New chat and the trash buttons', async () => {
-      const slow = () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [slow] });
       await shows('The answer to Which visits are waiting?');
       await openSidebar();
@@ -1298,15 +1270,6 @@ describe('saved chats', () => {
         </>
       );
     };
-    const slow = () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-          },
-        }),
-        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-      );
     const { rows, show } = world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [slow], mount: false });
     show(
       <>
@@ -2105,7 +2068,8 @@ describe('the drawer', () => {
           </AssistantProvider>
         );
       }
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a status check or a save that does not happen.
+      await settle();
 
       expect(within(region()).getByText('Which visits are waiting?')).toBeTruthy();
       expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
@@ -2117,25 +2081,8 @@ describe('the drawer', () => {
     });
 
     it('keeps an answer that arrives while it is closed, and shows it when it opens', async () => {
-      let finish: () => void = () => {};
-      const encoder = new TextEncoder();
-      const send = (controller: ReadableStreamDefaultController<Uint8Array>, events: Array<Record<string, unknown>>) => {
-        for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-      };
-      const slow = () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              send(controller, [event('RUN_STARTED'), event('TEXT_MESSAGE_START', { messageId: 'slow', role: 'assistant' }), event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: 'Looking into it' })]);
-              finish = () => {
-                send(controller, [event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: ' and found two visits.' }), event('TEXT_MESSAGE_END', { messageId: 'slow' }), event('RUN_FINISHED', { finishReason: 'stop' })]);
-                controller.close();
-              };
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
-      const { show } = world({ chat: [slow], mount: false });
+      const held = heldAnswer();
+      const { show } = world({ chat: [held.respond], mount: false });
       const view = show(<Drawer open />);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
@@ -2146,8 +2093,9 @@ describe('the drawer', () => {
           <Drawer open={false} />
         </AssistantProvider>
       );
-      finish();
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      held.finish();
+      // The turn ends while the drawer is closed, and the chat is saved at the end of a turn: that save is the event to wait for.
+      await waitFor(() => expect(client.post).toHaveBeenCalledTimes(1));
       view.rerender(
         <AssistantProvider started>
           <Drawer open />
