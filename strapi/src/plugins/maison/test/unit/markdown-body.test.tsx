@@ -118,6 +118,23 @@ describe('MarkdownBody', () => {
     expect(body.getAttribute('data-message-part')).toBe('text');
   });
 
+  // remark-gfm marks the heading of a footnote section `sr-only`, for screen readers. The design system has no rule for that class.
+  it('hides the "Footnotes" heading from the eye and keeps it for a screen reader', () => {
+    const { body } = draw('A claim.[^1]\n\n[^1]: Its source.');
+    const heading = within(body).getByText('Footnotes');
+    expect(heading.classList.contains('sr-only')).toBe(true);
+    expect(declarationsOf(body, ' .sr-only')).toMatchObject({
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      overflow: 'hidden',
+      'white-space': 'nowrap',
+    });
+    expect(declarationsOf(body, ' .sr-only').clip).toMatch(/^rect\(0,? ?0,? ?0,? ?0\)$/);
+    // The note itself is still drawn.
+    expect(within(body).getByText(/Its source\./)).toBeTruthy();
+  });
+
   it('draws an empty answer as nothing', () => {
     const { body } = draw('');
     expect(body.textContent).toBe('');

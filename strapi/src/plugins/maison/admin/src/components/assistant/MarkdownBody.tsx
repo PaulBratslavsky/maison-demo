@@ -55,6 +55,18 @@ const Body = styled.div`
     opacity: 0.85;
   }
   a { color: ${({ theme }) => theme.colors.primary600}; }
+  /* remark-gfm marks the heading of a footnote section "sr-only": it is for screen readers. The design system has no rule for the class, so it is hidden here. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   table {
     border-collapse: collapse;
     font-size: 0.9em;
