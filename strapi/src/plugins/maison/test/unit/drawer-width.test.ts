@@ -37,7 +37,8 @@ describe('the drawer width', () => {
     }
   });
 
-  it('never covers the whole screen: it is at most 90vw, whatever its width, and only then does the chat give up the difference', () => {
-    expect(MAX_DRAWER_WIDTH).toBe('90vw');
+  it('never covers the whole screen: it is at most 90vw, whatever its width, and only then does the chat column have less width', () => {
+    // The drawer is a content box with a 1px border, so the width is held 1px under 90vw, and the drawer with its border is at most 90vw.
+    expect(MAX_DRAWER_WIDTH).toBe('calc(90vw - 1px)');
   });
 });

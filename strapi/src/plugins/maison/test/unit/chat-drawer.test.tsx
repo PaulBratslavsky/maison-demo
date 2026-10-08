@@ -1351,7 +1351,7 @@ describe('the drawer', () => {
       world();
       await screen.findByRole('textbox', { name: 'Chat message' });
       const declarations = declarationsOf(drawer());
-      expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': '90vw' });
+      expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': 'calc(90vw - 1px)' });
     });
 
     // The design system makes every box a border box (`box-sizing: border-box` for `*`, in the global style of its provider), and the admin draws it. In
@@ -1726,7 +1726,7 @@ describe('the drawer', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
       expect(declarationsOf(drawer()).width).toBe('960px');
-      expect(declarationsOf(drawer())['max-width']).toBe('90vw');
+      expect(declarationsOf(drawer())['max-width']).toBe('calc(90vw - 1px)');
       expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
       // Expand does not open the list of saved chats, and no list shows.
       expect(savedList().hasAttribute('inert')).toBe(true);
@@ -1904,15 +1904,15 @@ describe('the drawer', () => {
       expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
     });
 
-    // jsdom has no layout, so the limit is held as what the browser is asked for: the drawer is at most 90vw wide however wide it asks to be, the list is
-    // 260px and cannot shrink, and the chat column may shrink, so it gives up the difference and the list keeps its width.
-    it('is held at 90vw when the width it asks for would pass that, and the chat column is what gives up the difference', async () => {
+    // jsdom has no layout, so the limit is held as what the browser is asked for: the drawer is at most 90vw wide, border included, however wide it asks to be, the list is
+    // 260px and cannot shrink, and the chat column may shrink, so it has less width and the list keeps its width.
+    it('is held at 90vw when the width it asks for would pass that, and the chat column is what has less width', async () => {
       world({ saved: chats() });
       await shows('The answer to Any complaints this week?');
       await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
       await userEvent.click(screen.getByRole('button', { name: 'History' }));
 
-      expect(declarationsOf(drawer())).toMatchObject({ width: '1220px', 'max-width': '90vw' });
+      expect(declarationsOf(drawer())).toMatchObject({ width: '1220px', 'max-width': 'calc(90vw - 1px)' });
       const column = declarationsOf(chatColumn());
       expect(column.flex).toMatch(/^1 1 960px$/);
       expect(column['min-width']).toBe('0');

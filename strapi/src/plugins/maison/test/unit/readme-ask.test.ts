@@ -73,7 +73,9 @@ describe("the README's description of the drawer", () => {
     expect(screen).toContain(`${HISTORY_WIDTH}px`);
     expect(screen).toContain(`${drawerWidthOf({ expanded: false, historyOpen: true })}px`);
     expect(screen).toContain(`${drawerWidthOf({ expanded: true, historyOpen: true })}px`);
-    expect(screen).toContain(MAX_DRAWER_WIDTH);
+    // The README says 90vw. The code holds the width 1px under that, so the border is inside the 90vw.
+    expect(MAX_DRAWER_WIDTH).toBe('calc(90vw - 1px)');
+    expect(screen).toContain('90vw');
   });
 
   it('has none of the widths of the first build, 480px and 760px, and says the list is never drawn over the messages', () => {

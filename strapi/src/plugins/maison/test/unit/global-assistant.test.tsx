@@ -89,7 +89,7 @@ describe('GlobalAssistant', () => {
       assistantWorld(client);
       renderInTheme(<GlobalAssistant />);
       await openDrawer();
-      expect(declarationsOf(drawer())).toMatchObject({ width: '600px', 'max-width': '90vw' });
+      expect(declarationsOf(drawer())).toMatchObject({ width: '600px', 'max-width': 'calc(90vw - 1px)' });
     });
 
     it('says why, in the drawer, when the assistant is not set up, and the launcher still opens it', async () => {
