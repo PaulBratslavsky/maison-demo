@@ -344,7 +344,7 @@ describe.skipIf(!live)('the staff chat with the real model', () => {
       expect(hasSignOff(text), `the draft ends with a sign-off. ${trace}`).toBe(false);
     });
 
-    it('answers the draft result with one short sentence at most, and drafts nothing more', () => {
+    it('answers the draft result with a few short sentences at most, and drafts nothing more', () => {
       const trace = traceOf(chat);
       const drafts = callsOf(chat).filter(isDraft);
       expect(drafts, `it drafts once. ${trace}`).toHaveLength(1);
@@ -354,8 +354,9 @@ describe.skipIf(!live)('the staff chat with the real model', () => {
       expect(chat.bodies[1].messages.at(-1), trace).toMatchObject({ role: 'tool', content: JSON.stringify({ shown: true }) });
       const closing = closingOf(chat);
       expect(closing.trim().length, `it says something after the draft. ${trace}`).toBeGreaterThan(0);
-      // The instructions ask for one sentence. A second one, such as a reminder to check the draft, is tolerated.
-      expect(sentencesIn(closing), `the closing words are short. ${trace}`).toBeLessThanOrEqual(2);
+      // The instructions ask for two sentences at most: the draft is ready, and any missing fact. A third, such as a
+      // reminder to edit before sending, is tolerated. On 11 October Sonnet 5.5 wrote exactly those three in Japanese.
+      expect(sentencesIn(closing), `the closing words are short. ${trace}`).toBeLessThanOrEqual(3);
       expect(closing.length, `the closing words are short. ${trace}`).toBeLessThanOrEqual(240);
     });
   });

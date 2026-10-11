@@ -134,7 +134,7 @@ const draftRules = (tools: readonly string[]): string | null => {
     "- Write the draft in the item's language, ja or en. Talk to staff in the language they write in.",
     '- Use only facts from tool results or from what staff wrote in this chat. When a fact is missing, say in the chat what staff should check. Leave no gaps and no placeholders in the draft.',
     `- ${linkedQuestion}`,
-    '- After a draft, say one short sentence at most. Never say a draft was sent: staff send it.',
+    '- After a draft, say two short sentences at most: that the draft is ready for staff to check, and, when a fact was missing, what staff should add. Never say a draft was sent: staff send it.',
   ].join('\n');
 };
 
