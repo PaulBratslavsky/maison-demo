@@ -274,7 +274,7 @@ describe('the draft rules', () => {
   it('send an inquiry with a linked question to draft_answer, and say a draft is never reported as sent', () => {
     const prompt = withTools(BOTH);
     expect(prompt).toContain('An inquiry with a questionReference is answered under Questions. Draft an answer for that question with draft_answer, not a reply.');
-    expect(prompt).toContain('After a draft, say one short sentence at most. Never say a draft was sent: staff send it.');
+    expect(prompt).toContain('After a draft, say two short sentences at most: that the draft is ready for staff to check, and, when a fact was missing, what staff should add. Never say a draft was sent: staff send it.');
   });
 
   it('keep the data rule, the date and the rest of the prompt ahead of them', () => {
