@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { offerDraft, pendingDraft, subscribeDraft, takeDraft } from '../../admin/src/draftStore';
+import { DRAFT_LIFETIME_MS, offerDraft, pendingDraft, subscribeDraft, takeDraft } from '../../admin/src/draftStore';
 import { draftPath, type PageDraft } from '../../admin/src/drafts';
 
 /*
@@ -50,6 +50,59 @@ describe('the store of drafts', () => {
     stop();
     offerDraft(ANSWER);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A draft that no list takes (the admin left the Maison page before its permissions were checked, or has no tab for it) must not stay for the whole page
+// load, or the next visit to that tab, much later and for another task, would open a dialog for it.
+describe('a draft that no list takes', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('is dropped after its lifetime, and the listeners are told', () => {
+    vi.useFakeTimers();
+    const listener = vi.fn();
+    subscribeDraft(listener);
+    offerDraft(REPLY);
+    listener.mockClear();
+
+    vi.advanceTimersByTime(DRAFT_LIFETIME_MS - 1);
+    expect(pendingDraft()).toBe(REPLY);
+
+    vi.advanceTimersByTime(1);
+    expect(pendingDraft()).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('lives long enough for a page to load and check its permissions: 30 seconds', () => {
+    expect(DRAFT_LIFETIME_MS).toBe(30_000);
+  });
+
+  it('is not dropped by the end of an earlier draft\'s lifetime: a newer offer has a lifetime of its own', () => {
+    vi.useFakeTimers();
+    offerDraft(REPLY);
+    vi.advanceTimersByTime(DRAFT_LIFETIME_MS - 1000);
+    offerDraft(ANSWER);
+
+    vi.advanceTimersByTime(2000);
+
+    expect(pendingDraft()).toBe(ANSWER);
+    vi.advanceTimersByTime(DRAFT_LIFETIME_MS);
+    expect(pendingDraft()).toBeNull();
+  });
+
+  it('leaves nothing to fire once the page has taken it: a draft offered later is not dropped by the first one\'s timer', () => {
+    vi.useFakeTimers();
+    offerDraft(REPLY);
+    takeDraft(REPLY);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(DRAFT_LIFETIME_MS - 5000);
+    offerDraft(ANSWER);
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(pendingDraft()).toBe(ANSWER);
   });
 });
 

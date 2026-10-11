@@ -4,6 +4,7 @@ import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
 import type { ActionAnswer } from './inquiries';
 import { replyNotice } from './questions';
+import { sendFailureNotice } from './sendFailure';
 import { singleFlight } from './singleFlight';
 import { useMounted } from './useMounted';
 
@@ -44,7 +45,8 @@ export const useInquiryActions = (afterAction: () => Promise<void>) => {
           latest.current.toggleNotification(replyNotice(data));
           if (mounted.current) onSuccess?.();
         } catch (error) {
-          latest.current.toggleNotification({ type: 'danger', message: (error as Error).message });
+          // A cancelled request (the tab was left while it was on its way) says so, and the send may have gone: see sendFailure.ts.
+          latest.current.toggleNotification(sendFailureNotice(error));
         }
         if (mounted.current) await latest.current.afterAction(); // it reports its own errors
       } finally {

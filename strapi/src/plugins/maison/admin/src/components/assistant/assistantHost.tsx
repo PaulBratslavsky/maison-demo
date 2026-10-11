@@ -52,6 +52,15 @@ export const HOST_GRACE_MS = 500;
 let container: HTMLElement | null = null;
 let root: Root | null = null;
 let environment: HostEnvironment | null = null;
+// What the host gives the chat is kept the same while nothing changed. Strapi draws a new icon on every change of address, and each tells the host again,
+// so the chat is drawn again each time. A new object for the permissions, or a new function for navigate, would reach the chat as a new context value, and
+// every message of the chat would be drawn again with it.
+let access: DraftAccess = NO_DRAFT_ACCESS;
+let routerNavigate: ((to: string) => void) | undefined;
+/** One function for the whole life of the host. It calls the router function of the icon that told the host last. */
+const navigateNow = (to: string): void => routerNavigate?.(to);
+
+const sameAccess = (a: DraftAccess, b: DraftAccess): boolean => a.canView === b.canView && a.canReply === b.canReply && a.canRead === b.canRead && a.canAnswer === b.canAnswer;
 /** How many icons are on the screen and have attached. */
 let attached = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -86,7 +95,7 @@ const draw = () => {
     <DesignSystemProvider theme={environment.theme} locale={environment.locale}>
       <AssistantBoundary>
         <Suspense fallback={null}>
-          <GlobalAssistant access={environment.access ?? NO_DRAFT_ACCESS} navigate={environment.navigate} />
+          <GlobalAssistant access={access} navigate={routerNavigate ? navigateNow : undefined} />
         </Suspense>
       </AssistantBoundary>
     </DesignSystemProvider>
@@ -96,6 +105,9 @@ const draw = () => {
 /** What the owning icon tells the host: each time the theme, the language or the permission changes. */
 export const updateHost = (next: HostEnvironment): void => {
   environment = next;
+  const nextAccess = next.access ?? NO_DRAFT_ACCESS;
+  if (!sameAccess(access, nextAccess)) access = nextAccess;
+  routerNavigate = next.navigate;
   draw();
 };
 
@@ -124,5 +136,7 @@ export const destroyHost = (): void => {
   root = null;
   container = null;
   environment = null;
+  access = NO_DRAFT_ACCESS;
+  routerNavigate = undefined;
   attached = 0;
 };

@@ -30,6 +30,27 @@ describe('the draft card', () => {
     expect(screen.getByRole('group', { name: 'Draft answer for Q-4821' })).toBeTruthy();
   });
 
+  // A label with the same words as the text inside the group makes a screen reader say the title twice on entering the card.
+  it('takes its name from the title that is on the card, and not from a second copy of it', () => {
+    renderInTheme(<DraftCard model={ANSWER} title="Draft answer for Q-4821" canUse onUse={() => {}} />);
+    const card = screen.getByRole('group');
+    const title = screen.getByText('Draft answer for Q-4821');
+    expect(card.getAttribute('aria-label')).toBeNull();
+    expect(title.id).not.toBe('');
+    expect(card.getAttribute('aria-labelledby')).toBe(title.id);
+  });
+
+  it('gives two cards two different title ids', () => {
+    renderInTheme(
+      <>
+        <DraftCard model={ANSWER} title="Draft answer for Q-4821" canUse onUse={() => {}} />
+        <DraftCard model={REPLY} title={TITLE} canUse onUse={() => {}} />
+      </>
+    );
+    const ids = screen.getAllByRole('group').map((card) => card.getAttribute('aria-labelledby'));
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it('shows the text as plain text: Markdown and HTML in it are not drawn', () => {
     const model: DraftCardModel = { callId: 'c', draft: { kind: 'answer', reference: 'Q-4821', text: '**not bold** <b>nor this</b> [a link](https://example.com)' } };
     const { container } = renderInTheme(<DraftCard model={model} title="Draft answer for Q-4821" canUse onUse={() => {}} />);

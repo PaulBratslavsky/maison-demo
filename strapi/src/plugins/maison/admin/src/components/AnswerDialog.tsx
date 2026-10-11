@@ -14,7 +14,7 @@ import {
   Typography,
 } from '@strapi/design-system';
 
-import { DRAFTED_LINE } from '../drafts';
+import { DraftedLine, describedByDraft } from './DraftedLine';
 import {
   ANSWER_LIMIT,
   CATEGORY_OPTIONS,
@@ -64,6 +64,7 @@ export const AnswerDialog = ({
   const [title, setTitle] = React.useState(() => defaultTitle(question.question));
   const form = { text, addToKnowledge, category, title };
   const answerBox = React.useRef<HTMLTextAreaElement>(null);
+  const fieldId = React.useId();
 
   return (
     <Modal.Root
@@ -101,16 +102,13 @@ export const AnswerDialog = ({
             </Box>
 
             {/* A draft from the assistant: staff are told so before they read it, since what they send goes out in their name. */}
-            {initialText !== undefined && (
-              <Typography variant="pi" textColor="warning700">
-                {DRAFTED_LINE}
-              </Typography>
-            )}
+            {initialText !== undefined && <DraftedLine id={`${fieldId}-drafted`} />}
 
-            <Field.Root hint={HINT} error={answerTooLong(text) ? ANSWER_TOO_LONG : undefined}>
+            <Field.Root id={fieldId} hint={HINT} error={answerTooLong(text) ? ANSWER_TOO_LONG : undefined}>
               <Field.Label>Your answer</Field.Label>
               <Textarea
                 ref={answerBox}
+                {...describedByDraft({ drafted: initialText !== undefined, lineId: `${fieldId}-drafted`, fieldId, hasError: answerTooLong(text) })}
                 value={text}
                 disabled={sending}
                 onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setText(event.target.value)}

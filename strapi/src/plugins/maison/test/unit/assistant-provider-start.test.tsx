@@ -125,4 +125,74 @@ describe('AssistantProvider, when a list on the Maison page wants the status', (
     await waitFor(() => expect(callsTo('/maison/conversations')).toBe(1));
     expect(callsTo('/maison/assistant/status')).toBe(1);
   });
+
+  // A list's check at page load can fail (Strapi restarting, a network blip). Before the lists asked, the first opening always checked.
+  it('checks again when the drawer is opened after a list\'s check failed, and then the assistant is ready', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let attempts = 0;
+    client.get.mockImplementation(async (url: string) => {
+      if (url === '/maison/assistant/status') {
+        attempts += 1;
+        if (attempts === 1) throw new Error('Strapi is restarting.');
+        return { data: READY };
+      }
+      if (url === '/maison/conversations') return { data: { conversations: [] } };
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const view = renderInTheme(
+      <AssistantProvider started={false} checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+    await waitFor(() => expect(attempts).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByTestId('probe').textContent).toBe('waiting');
+
+    view.rerender(
+      <AssistantProvider started checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready'));
+    expect(attempts).toBe(2);
+    await waitFor(() => expect(callsTo('/maison/conversations')).toBe(1));
+    quiet.mockRestore();
+  });
+
+  it('does not check a third time: the opening makes one more check after a failed one, and no more', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let attempts = 0;
+    client.get.mockImplementation(async (url: string) => {
+      if (url === '/maison/assistant/status') {
+        attempts += 1;
+        throw new Error('Strapi is down.');
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const view = renderInTheme(
+      <AssistantProvider started={false} checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+    await waitFor(() => expect(attempts).toBe(1));
+    view.rerender(
+      <AssistantProvider started checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+    await waitFor(() => expect(attempts).toBe(2));
+    for (let round = 0; round < 3; round += 1) {
+      view.rerender(
+        <AssistantProvider started checkStatus>
+          <Probe />
+          <span>{round}</span>
+        </AssistantProvider>
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(attempts).toBe(2);
+    quiet.mockRestore();
+  });
 });

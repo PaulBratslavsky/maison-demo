@@ -11,9 +11,24 @@ import type { PageDraft } from './drafts';
  * dialog or by saying why not. The text is held in memory only: it is never in the address.
  *
  * One draft is held at a time. A second Use this draft before the page has taken the first replaces it, because it is the later choice.
+ *
+ * A draft that no list takes does not stay: the admin may leave the Maison page before it has checked their permissions, or may have no tab for the
+ * draft. Left in memory it would open a dialog the next time that tab is drawn, much later and for another task. So it is dropped after
+ * DRAFT_LIFETIME_MS, which is long enough for the page to load and check, and for the list to take it.
  */
 
+/** How long a draft waits for a list to take it, in milliseconds. */
+export const DRAFT_LIFETIME_MS = 30_000;
+
 let pending: PageDraft | null = null;
+let expiry: ReturnType<typeof setTimeout> | null = null;
+
+const stopExpiry = () => {
+  if (expiry !== null) {
+    clearTimeout(expiry);
+    expiry = null;
+  }
+};
 const listeners = new Set<() => void>();
 
 const notify = () => {
@@ -32,6 +47,13 @@ export const subscribeDraft = (listener: () => void): (() => void) => {
 /** The chat offers a draft to the page, in place of any draft the page has not taken yet. */
 export const offerDraft = (draft: PageDraft): void => {
   pending = draft;
+  stopExpiry();
+  expiry = setTimeout(() => {
+    expiry = null;
+    if (pending !== draft) return;
+    pending = null;
+    notify();
+  }, DRAFT_LIFETIME_MS);
   notify();
 };
 
@@ -45,6 +67,7 @@ export const pendingDraft = (): PageDraft | null => pending;
 export const takeDraft = (draft?: PageDraft): void => {
   if (pending === null || (draft !== undefined && pending !== draft)) return;
   pending = null;
+  stopExpiry();
   notify();
 };
 

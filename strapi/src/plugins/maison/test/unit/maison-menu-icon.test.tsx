@@ -507,6 +507,27 @@ describe('Use this draft, from a card in the drawer', () => {
     expect(await useButton()).toBeTruthy();
   });
 
+  // The page's own tab clicks replace the address, because switching tabs is not a place to go back to. Use this draft does the same on the Maison page.
+  // From another page it adds an entry, so Back returns there.
+  it('adds a history entry when it comes from another page, and replaces the current one when the admin is on the Maison page already', async () => {
+    rbac.use.mockReturnValue(checkedWith({ canView: true, canReply: true }));
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    const first = renderInTheme(<FakeAdmin links={[maisonLink(), contentManager]} path="/content-manager" />);
+    await openDrawer();
+    await userEvent.click(await useButton());
+    expect(where()).toBe('/plugins/maison?tab=inquiries');
+    expect(screen.getByTestId('navigation-type').textContent).toBe('PUSH');
+    first.unmount();
+    destroyHost();
+
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink()]} path="/plugins/maison?tab=questions" />);
+    await openDrawer();
+    await userEvent.click(await useButton());
+    expect(where()).toBe('/plugins/maison?tab=inquiries');
+    expect(screen.getByTestId('navigation-type').textContent).toBe('REPLACE');
+  });
+
   it('keeps working after the admin moves to another page: the navigate function is the router\'s, not one from a menu icon that has gone', async () => {
     rbac.use.mockReturnValue(checkedWith({ canView: true, canReply: true }));
     assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });

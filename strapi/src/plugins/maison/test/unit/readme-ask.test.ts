@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { STARTERS, askMessage } from '../../admin/src/assistant';
 import { CHAT_WIDTH, HISTORY_WIDTH, MAX_DRAWER_WIDTH, drawerWidthOf } from '../../admin/src/components/assistant/drawerWidth';
+import { DRAFT_LIFETIME_MS } from '../../admin/src/draftStore';
+import { SEND_MAY_HAVE_STOPPED } from '../../admin/src/sendFailure';
 import { DRAFTED_LINE, NOT_FOUND_NOTICE, answerDraftOutcome, draftPath, replyDraftOutcome } from '../../admin/src/drafts';
 import { PAGE_SUBTITLE, selectTab } from '../../admin/src/tabs';
 import { DRAFT_TOOL_NAMES } from '../../server/src/assistant/tools';
@@ -306,6 +308,25 @@ describe("the README's account of Ask about this, drafts and Use this draft", ()
     for (const subject of ['Ask about this', 'It waits', 'Draft a reply', 'Use this draft', 'Drafted by the Maison assistant', 'Reset demo activity', 'Drafts and the roles', 'A reopened chat', 'Stop on a draft']) {
       expect(checklist, subject).toContain(subject);
     }
+  });
+
+  it('gives how long a draft that no list takes waits, as the code has it', () => {
+    expect(drafts).toContain(`dropped after ${DRAFT_LIFETIME_MS / 1000} seconds`);
+  });
+
+  it('says Use this draft replaces the history entry on the Maison page and adds one from another page', () => {
+    expect(drafts).toContain('adds a history entry, so Back returns there');
+    expect(drafts).toContain('replaces the current one, as a click on a tab does');
+  });
+
+  it('says what staff read when leaving the tab cut off a send, as the code has it', () => {
+    expect(readme).toContain(`"${SEND_MAY_HAVE_STOPPED}"`);
+    expect(changelog).toContain(`"${SEND_MAY_HAVE_STOPPED}"`);
+  });
+
+  it('names each Ask about this button\'s accessible name', () => {
+    expect(ask).toContain('"Ask about this: request APT-4821"');
+    expect(ask).toContain('"Ask about this: question Q-4821"');
   });
 
   it('keeps the checklist off the rows that are the presenter\'s own: a send there reaches a phone', () => {

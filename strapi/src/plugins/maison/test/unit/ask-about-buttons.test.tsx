@@ -6,6 +6,7 @@ import { chatReport, pendingAsk, reportChat, takeAsk, chatStatusWanted } from '.
 import { InquiriesList } from '../../admin/src/components/InquiriesList';
 import { QuestionsList } from '../../admin/src/components/QuestionsList';
 import { RequestsBoard } from '../../admin/src/components/RequestsBoard';
+import { askedAt } from '../../admin/src/questions';
 import { PENDING_VIEW } from './fake-inquiries';
 import { renderInTheme } from './render';
 
@@ -64,7 +65,7 @@ afterEach(() => {
   reportChat(null);
 });
 
-const askButtons = () => screen.queryAllByRole('button', { name: 'Ask about this' });
+const askButtons = () => screen.queryAllByRole('button', { name: /^Ask about this/ });
 const rows = {
   requests: () => renderInTheme(<RequestsBoard canConfirm={false} refreshKey={0} />),
   questions: () => renderInTheme(<QuestionsList canAnswer={false} refreshKey={0} draft={null} onDraftTaken={() => {}} />),
@@ -95,7 +96,7 @@ describe.each(ITEMS)('Ask about this on the %s list', (name, reference, message)
   it('is shown once the assistant is ready, for admins with none of the list\'s own permissions, and leaves the message for the chat when pressed', async () => {
     reportChat({ ready: true, busy: false });
     rows[name]();
-    const [button] = await screen.findAllByRole('button', { name: 'Ask about this' });
+    const [button] = await screen.findAllByRole('button', { name: /^Ask about this/ });
     expect(askButtons()).toHaveLength(1);
     expect((button as HTMLButtonElement).disabled).toBe(false);
     // The row's own buttons need its own permission: this admin has none.
@@ -110,7 +111,7 @@ describe.each(ITEMS)('Ask about this on the %s list', (name, reference, message)
   it('waits while an answer is on its way: shown, switched off, and a click does nothing', async () => {
     reportChat({ ready: true, busy: true });
     rows[name]();
-    const [button] = await screen.findAllByRole('button', { name: 'Ask about this' });
+    const [button] = await screen.findAllByRole('button', { name: /^Ask about this/ });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     await userEvent.click(button);
     expect(pendingAsk()).toBeNull();
@@ -134,6 +135,31 @@ describe.each(ITEMS)('Ask about this on the %s list', (name, reference, message)
     act(() => reportChat(null));
     await waitFor(() => expect(askButtons()).toHaveLength(0));
     expect(chatReport()).toBeNull();
+  });
+});
+
+// A screen reader's list of buttons would show "Ask about this" once for every row. The name starts with the words on the button, so speech input still
+// works, and ends with the item.
+describe('the name of each Ask about this button', () => {
+  it.each([
+    ['requests', 'Ask about this: request APT-4821'],
+    ['questions', 'Ask about this: question Q-4821'],
+    ['inquiries', `Ask about this: inquiry received ${askedAt(PENDING_VIEW.createdAt)}`],
+  ] as const)('on the %s list names its item: %s', async (name, label) => {
+    reportChat({ ready: true, busy: false });
+    rows[name]();
+    expect(await screen.findByRole('button', { name: label })).toBeTruthy();
+  });
+
+  it('is different on each row of a list', async () => {
+    reportChat({ ready: true, busy: false });
+    client.get.mockImplementation(async (url: string) => {
+      if (url === '/maison/appointments') return { data: { appointments: [APPOINTMENT, { ...APPOINTMENT, reference: 'APT-4822' }] } };
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    rows.requests();
+    const buttons = await screen.findAllByRole('button', { name: /^Ask about this/ });
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Ask about this: request APT-4821', 'Ask about this: request APT-4822']);
   });
 });
 

@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { Box, Button, Field, Flex, Modal, Textarea, Typography } from '@strapi/design-system';
 
-import { DRAFTED_LINE } from '../drafts';
+import { DraftedLine, describedByDraft } from './DraftedLine';
 import {
   REPLY_LIMIT,
   canSendReply,
@@ -47,6 +47,7 @@ export const InquiryReplyDialog = ({
   // Empty, unless staff chose Use this draft. Either way, what is in the box when staff press Send on LINE is what the customer gets.
   const [text, setText] = React.useState(initialText ?? '');
   const replyBox = React.useRef<HTMLTextAreaElement>(null);
+  const fieldId = React.useId();
   const suggested = suggestedReply(inquiry.queue, inquiry.language);
 
   return (
@@ -92,16 +93,13 @@ export const InquiryReplyDialog = ({
             </Box>
 
             {/* A draft from the assistant: staff are told so before they read it, since what they send goes out as Maison's. */}
-            {initialText !== undefined && (
-              <Typography variant="pi" textColor="warning700">
-                {DRAFTED_LINE}
-              </Typography>
-            )}
+            {initialText !== undefined && <DraftedLine id={`${fieldId}-drafted`} />}
 
-            <Field.Root hint={HINT} error={replyTooLong(text) ? TOO_LONG : undefined}>
+            <Field.Root id={fieldId} hint={HINT} error={replyTooLong(text) ? TOO_LONG : undefined}>
               <Field.Label>Your reply</Field.Label>
               <Textarea
                 ref={replyBox}
+                {...describedByDraft({ drafted: initialText !== undefined, lineId: `${fieldId}-drafted`, fieldId, hasError: replyTooLong(text) })}
                 value={text}
                 disabled={sending}
                 onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setText(event.target.value)}

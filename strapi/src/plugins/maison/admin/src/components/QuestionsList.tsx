@@ -33,6 +33,7 @@ import {
   type SentReply,
   type StaffQuestion,
 } from '../questions';
+import { sendFailureNotice } from '../sendFailure';
 import { useAskAbout } from '../useAskAbout';
 import { useMounted } from '../useMounted';
 import { AnswerDialog } from './AnswerDialog';
@@ -172,7 +173,7 @@ export const QuestionsList = ({
       if (action === 'answer') setAnswering(null);
     } catch (error) {
       // Why nothing went out, in the server's words: it's taken or answered already, LINE refused it, or the token is missing.
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     }
     onChange?.();
     await load(); // load reports its own errors
@@ -309,6 +310,8 @@ export const QuestionsList = ({
                         <Button
                           size="S"
                           variant="tertiary"
+                          // The name starts with the words on the button and ends with the item, so the buttons of a list can be told apart.
+                          aria-label={`Ask about this: question ${question.reference}`}
                           disabled={askAbout.disabled}
                           onClick={() => askAbout.ask({ kind: 'question', reference: question.reference })}
                         >

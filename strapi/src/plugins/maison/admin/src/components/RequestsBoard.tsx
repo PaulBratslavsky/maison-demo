@@ -28,6 +28,7 @@ import {
   type SendAgainStatus,
 } from '../board';
 import { startPolling } from '../poll';
+import { sendFailureNotice } from '../sendFailure';
 import { useAskAbout } from '../useAskAbout';
 import { YourLineBadge } from './YourLineBadge';
 
@@ -120,7 +121,7 @@ export const RequestsBoard = ({
       // customer is a made-up demo customer, who gets none.
       toggleNotification(confirmedNotice(reference, sentAfterConfirm(data, rows, reference), demoCustomerAfterConfirm(data, rows, reference)));
     } catch (error) {
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     } finally {
       setConfirming(null);
     }
@@ -135,7 +136,7 @@ export const RequestsBoard = ({
       onChange?.();
     } catch (error) {
       // Why nothing went out, in the server's words: what LINE answered, or the setting that's missing.
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     }
     await load(); // load reports its own errors
     setNotifying(null);
@@ -259,6 +260,8 @@ export const RequestsBoard = ({
                         <Button
                           size="S"
                           variant="tertiary"
+                          // The name starts with the words on the button and ends with the item, so the buttons of a list can be told apart.
+                          aria-label={`Ask about this: request ${appointment.reference}`}
                           disabled={askAbout.disabled}
                           onClick={() => askAbout.ask({ kind: 'request', reference: appointment.reference })}
                         >

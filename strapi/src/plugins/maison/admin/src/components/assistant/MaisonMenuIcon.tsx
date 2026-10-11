@@ -3,11 +3,12 @@ import * as React from 'react';
 import { Crown } from '@strapi/icons';
 import { useRBAC } from '@strapi/strapi/admin';
 import { useIntl } from 'react-intl';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from 'styled-components';
 
 import type { DraftAccess } from '../../drafts';
 import { PERMISSIONS } from '../../permissions';
+import { PLUGIN_ID } from '../../pluginId';
 import { attachHost, detachHost, updateHost } from './assistantHost';
 import { claim, owner, release, subscribe } from './menuIconOwner';
 
@@ -25,6 +26,7 @@ const AssistantFeed = () => {
   const theme = useTheme();
   const { locale } = useIntl();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const allowed = allowedActions.canUse === true;
   const { canView, canReply, canRead, canAnswer } = allowedActions;
   // A new object for each change of the four flags, and not for each render: the host draws again for each thing it is told.
@@ -32,11 +34,13 @@ const AssistantFeed = () => {
     () => ({ canView: canView === true, canReply: canReply === true, canRead: canRead === true, canAnswer: canAnswer === true }),
     [canView, canReply, canRead, canAnswer]
   );
-  // Strapi's `navigate` is a new function after each change of address. The host is told one function that calls the latest, so a change of address
-  // does not make the host draw the chat again, and a call after the icon that gave it has gone still reaches the router.
-  const navigateRef = React.useRef(navigate);
-  navigateRef.current = navigate;
-  const go = React.useCallback((to: string) => navigateRef.current(to), []);
+  // Use this draft takes the admin to a tab of the Maison page. From another page that adds a history entry, so Back returns there. On the Maison page
+  // already it replaces the current one, as a click on a tab does, so a run of drafts does not leave a run of entries that Back steps over.
+  // Strapi's `navigate` is a new function after each change of address, and so is this one: Strapi draws a new icon then, which tells the host again.
+  // The host keeps one function of its own that calls the latest, so the chat is not given a new function each time (assistantHost.tsx).
+  const navigateRef = React.useRef({ navigate, onMaisonPage: pathname === `/plugins/${PLUGIN_ID}` });
+  navigateRef.current = { navigate, onMaisonPage: pathname === `/plugins/${PLUGIN_ID}` };
+  const go = React.useCallback((to: string) => navigateRef.current.navigate(to, { replace: navigateRef.current.onMaisonPage }), []);
 
   React.useEffect(() => {
     attachHost();

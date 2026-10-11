@@ -198,6 +198,15 @@ export const AssistantProvider = ({
     void recheck();
   }, [started, checkStatus, recheck]);
 
+  // A list's check at page load can fail (Strapi restarting, a network blip). The first opening of the drawer then checks again, once, so the drawer is not
+  // left with a failure from before staff asked for it. A check that is still on its way is not repeated, and a later failure has Check again.
+  const openChecked = React.useRef(false);
+  React.useEffect(() => {
+    if (!started || openChecked.current) return;
+    openChecked.current = true;
+    if (statusFailed && status === null) void recheck();
+  }, [started, status, statusFailed, recheck]);
+
   const connection = React.useMemo(
     () =>
       fetchServerSentEvents(`${(globalThis as { strapi?: { backendURL?: string } }).strapi?.backendURL ?? ''}${ASSISTANT_PATHS.chat}`, async () => {

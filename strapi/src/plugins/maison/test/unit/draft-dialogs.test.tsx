@@ -74,6 +74,33 @@ describe('Reply on LINE', () => {
     expect(line.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // The dialog puts the focus straight into the box, so a screen reader reads what describes the box. The line about the draft is part of it.
+  it('describes the box by the line about the draft too, so a screen reader user hears it', () => {
+    renderInTheme(replyDialog({ initialText: DRAFT }));
+    const box = screen.getByRole('textbox', { name: 'Your reply' });
+    const line = screen.getByText(DRAFTED_LINE);
+    expect(line.id).not.toBe('');
+    const ids = box.getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids).toContain(line.id);
+    // The box is still described by its hint: the other id is the element that carries the hint's words.
+    const hint = ids.filter((id) => id !== line.id).map((id) => document.getElementById(id)?.textContent);
+    expect(hint).toEqual([expect.stringContaining('sent on LINE as Maison')]);
+  });
+
+  it('describes the box by its hint alone when staff opened it from a row', () => {
+    renderInTheme(replyDialog());
+    const box = screen.getByRole('textbox', { name: 'Your reply' });
+    expect(box.getAttribute('aria-describedby')?.split(' ')).toHaveLength(1);
+    expect(document.getElementById(box.getAttribute('aria-describedby') as string)?.textContent).toContain('sent on LINE as Maison');
+  });
+
+  it('describes a drafted box that is too long by the line and the error, in place of the hint', async () => {
+    renderInTheme(replyDialog({ initialText: 'x'.repeat(2001) }));
+    const box = screen.getByRole('textbox', { name: 'Your reply' });
+    const ids = box.getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids.map((id) => document.getElementById(id)?.textContent)).toEqual([DRAFTED_LINE, 'A reply can have up to 2,000 characters.']);
+  });
+
   it('reads the draft once: a later change of the prop does not replace what staff are writing', async () => {
     const view = renderInTheme(replyDialog({ initialText: DRAFT }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Your reply' }), ' Edited.');
@@ -118,6 +145,17 @@ describe('Answer', () => {
     renderInTheme(answerDialog());
     expect((screen.getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('');
     expect(screen.queryByText(DRAFTED_LINE)).toBeNull();
+  });
+
+  it('describes the box by the line about the draft too, so a screen reader user hears it', () => {
+    renderInTheme(answerDialog({ initialText: DRAFT }));
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const line = screen.getByText(DRAFTED_LINE);
+    expect(line.id).not.toBe('');
+    const ids = box.getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids).toContain(line.id);
+    const hint = ids.filter((id) => id !== line.id).map((id) => document.getElementById(id)?.textContent);
+    expect(hint).toEqual([expect.stringContaining('sent on LINE in your name')]);
   });
 
   it('opens with the draft in the box and says above it that the assistant wrote it', () => {

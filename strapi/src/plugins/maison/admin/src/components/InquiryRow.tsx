@@ -182,7 +182,8 @@ export const InquiryRow = ({
               </>
             )}
             {canAsk && (
-              <Button size="S" variant="tertiary" disabled={askDisabled} onClick={onAsk}>
+              // An inquiry has no reference to read out, so the name gives when it came in, which the row shows too.
+              <Button size="S" variant="tertiary" aria-label={`Ask about this: inquiry received ${askedAt(inquiry.createdAt)}`} disabled={askDisabled} onClick={onAsk}>
                 Ask about this
               </Button>
             )}

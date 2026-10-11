@@ -1,3 +1,5 @@
+import * as React from 'react';
+
 import { Button } from '@strapi/design-system';
 import styled from 'styled-components';
 
@@ -50,16 +52,20 @@ export const DraftCard = ({
   title: string;
   canUse: boolean;
   onUse: (draft: PageDraft) => void;
-}) => (
-  <Frame role="group" aria-label={title} data-message-part="draft">
-    <Title>{title}</Title>
-    <Body>{model.draft.text}</Body>
-    {canUse && (
-      <Actions>
-        <Button type="button" size="S" onClick={() => onUse(model.draft)}>
-          Use this draft
-        </Button>
-      </Actions>
-    )}
-  </Frame>
-);
+}) => {
+  // The group is named by the title on the card, not by a label with the same words, which a screen reader would read twice.
+  const titleId = React.useId();
+  return (
+    <Frame role="group" aria-labelledby={titleId} data-message-part="draft">
+      <Title id={titleId}>{title}</Title>
+      <Body>{model.draft.text}</Body>
+      {canUse && (
+        <Actions>
+          <Button type="button" size="S" onClick={() => onUse(model.draft)}>
+            Use this draft
+          </Button>
+        </Actions>
+      )}
+    </Frame>
+  );
+};
