@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { STARTERS } from '../../admin/src/assistant';
+import { STARTERS, askMessage } from '../../admin/src/assistant';
 import { CHAT_WIDTH, HISTORY_WIDTH, MAX_DRAWER_WIDTH, drawerWidthOf } from '../../admin/src/components/assistant/drawerWidth';
+import { DRAFTED_LINE, NOT_FOUND_NOTICE, answerDraftOutcome, draftPath, replyDraftOutcome } from '../../admin/src/drafts';
 import { PAGE_SUBTITLE, selectTab } from '../../admin/src/tabs';
+import { DRAFT_TOOL_NAMES } from '../../server/src/assistant/tools';
 import { READ_TOOL_NAMES, TOOL_LABELS } from '../../server/src/assistant/tools';
 import { ACTION, ASSISTANT_LIMITS, SAVED_CHATS } from '../../server/src/constants';
 import routes from '../../server/src/routes';
@@ -23,7 +25,7 @@ describe("the README's section on the assistant drawer", () => {
   it('is there, between the admin page and the Homepage widgets', () => {
     expect(start).toBeGreaterThan(readme.indexOf('## The admin page'));
     expect(section.length).toBeGreaterThan(2000);
-    for (const heading of ['### How it is mounted', '### The screen', '### Saved chats', '### Tools', '### What the model sees', '### Limits and errors', '### Routes', '### Checking it in the browser']) {
+    for (const heading of ['### How it is mounted', '### The screen', '### Saved chats', '### Ask about this', '### Drafts and Use this draft', '### Tools', '### What the model sees', '### Limits and errors', '### Routes', '### Checking it in the browser']) {
       expect(section, heading).toContain(heading);
     }
   });
@@ -47,6 +49,14 @@ describe("the README's section on the assistant drawer", () => {
     const served = routes.admin.routes.filter((route) => route.handler.startsWith('assistant.') || route.handler.startsWith('conversations.'));
     expect(served).toHaveLength(7);
     for (const { method, path } of served) expect(section, `${method} ${path}`).toContain(`\`${method} ${path}\``);
+  });
+
+  it('lists the two read routes of Use this draft, as the server serves them, with the permissions of the lists', () => {
+    const served = routes.admin.routes.filter((route) => route.handler === 'inquiries.findOne' || route.handler === 'questions.findOne');
+    expect(served.map((route) => `${route.method} ${route.path}`).sort()).toEqual(['GET /inquiries/:documentId', 'GET /questions/:reference']);
+    for (const { method, path } of served) expect(section, `${method} ${path}`).toContain(`\`${method} ${path}\``);
+    expect(section).toContain('`GET /inquiries/:documentId`, for "Review customer inquiries"');
+    expect(section).toContain('`GET /questions/:reference`, for "Read customer questions"');
   });
 
   it('gives the limits as the code has them', () => {
@@ -238,5 +248,80 @@ describe('the CHANGELOG', () => {
 
   it('has no em dash and no en dash', () => {
     expect(changelog).not.toMatch(/[–—]/);
+  });
+});
+
+describe("the README's account of Ask about this, drafts and Use this draft", () => {
+  const ask = section.slice(section.indexOf('### Ask about this'), section.indexOf('### Drafts and Use this draft'));
+  const drafts = section.slice(section.indexOf('### Drafts and Use this draft'), section.indexOf('### Tools'));
+  const checklist = section.slice(section.indexOf('### Checking it in the browser'));
+
+  it('gives the three messages Ask about this sends, as the code writes them', () => {
+    for (const item of [
+      { kind: 'request', reference: 'APT-4821' },
+      { kind: 'question', reference: 'Q-4821' },
+      { kind: 'inquiry', documentId: '<documentId>' },
+    ] as const) {
+      expect(ask, askMessage(item)).toContain(`"${askMessage(item)}"`);
+    }
+  });
+
+  it('says the button waits while an answer comes, leaves the text box alone, and needs no permission of the row\'s own', () => {
+    expect(ask).toMatch(/waits while an answer comes|switched off then/);
+    expect(ask).toContain('It leaves the text box alone.');
+    expect(ask).toContain('It needs no permission of the row\'s own');
+  });
+
+  it('names both draft tools with the two permissions of each pair, and the labels staff read', () => {
+    expect([...DRAFT_TOOL_NAMES]).toEqual(['draft_reply', 'draft_answer']);
+    for (const name of DRAFT_TOOL_NAMES) expect(drafts, name).toContain(`\`${name}\``);
+    expect(drafts).toContain('"Review customer inquiries" and "Reply to customer inquiries on LINE"');
+    expect(drafts).toContain('"Read customer questions" and "Answer customer questions on LINE"');
+    expect(section).toContain('"Draft a LINE reply" and "Draft an answer"');
+  });
+
+  it('gives the five notices of an item that changed, the line over a drafted box and the address Use this draft goes to, as the code has them', () => {
+    const notices = [
+      (replyDraftOutcome({ status: 'replied', question: null } as never) as { notice: string }).notice,
+      (replyDraftOutcome({ status: 'closed', question: null } as never) as { notice: string }).notice,
+      (replyDraftOutcome({ status: 'open', question: { reference: 'Q-4821', status: 'open' } } as never) as { notice: string }).notice,
+      (answerDraftOutcome({ status: 'answered', reference: 'Q-4821' } as never) as { notice: string }).notice,
+      NOT_FOUND_NOTICE,
+    ];
+    for (const notice of notices) expect(drafts, notice).toContain(`"${notice}"`);
+    expect(drafts).toContain(`"${DRAFTED_LINE}"`);
+    const reply = draftPath({ kind: 'reply', documentId: 'inq4abc', text: 'Thank you.' });
+    const answer = draftPath({ kind: 'answer', reference: 'Q-4821', text: 'Yes.' });
+    expect(drafts).toContain(`\`${reply}\``);
+    expect(answer.endsWith('?tab=questions')).toBe(true);
+    expect(drafts).toContain('`?tab=questions`');
+  });
+
+  it('says what is sent when: nothing until a person presses Send on LINE, and the text is never in the address', () => {
+    expect(drafts).toContain('Nothing is sent until a person presses **Send on LINE**');
+    expect(drafts).toMatch(/never in the address/);
+  });
+
+  it('puts Ask about this, the draft card, Use this draft, the "Drafted by" line, the changed items and the roles in the checklist for the browser', () => {
+    for (const subject of ['Ask about this', 'It waits', 'Draft a reply', 'Use this draft', 'Drafted by the Maison assistant', 'Reset demo activity', 'Drafts and the roles', 'A reopened chat']) {
+      expect(checklist, subject).toContain(subject);
+    }
+  });
+
+  it('keeps the checklist off the rows that are the presenter\'s own: a send there reaches a phone', () => {
+    expect(checklist).toContain('Leave the rows that carry the **Your LINE** label alone');
+  });
+});
+
+describe('the CHANGELOG entry for Ask about this and the drafts', () => {
+  it('names Ask about this, the two draft tools, Use this draft, the two read routes and the dialogs\' initialText', () => {
+    for (const text of ['**Ask about this**', '`draft_reply` and `draft_answer`', '**Use this draft**', 'GET /maison/inquiries/:documentId', 'GET /maison/questions/:reference', '`initialText`']) {
+      expect(changelog, text).toContain(text);
+    }
+  });
+
+  it('gives the messages of Ask about this and the line over a drafted box', () => {
+    expect(changelog).toContain('"Tell me about request APT-4821."');
+    expect(changelog).toContain(`"${DRAFTED_LINE}"`);
   });
 });

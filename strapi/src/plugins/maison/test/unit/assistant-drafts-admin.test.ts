@@ -2,12 +2,14 @@ import { ChatClient, fetchServerSentEvents } from '@tanstack/ai-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DRAFT_TOOLS,
+  UNREADABLE_REQUEST,
   cardTitle,
   draftOf,
   drawableParts,
   showsWorking,
   toolBoxOf,
   toolLineOf,
+  toolResultOf,
   withoutFailedTurn,
   withoutOpenToolCalls,
   type MessageLike,
@@ -442,5 +444,55 @@ describe('a draft, from the model to the card, through the real chat client', ()
     const title = cardTitle(model!.draft, messages as unknown as Array<{ parts: readonly PartLike[] }>);
     expect(title).toBe('Draft reply on LINE: line:U4af…88, received 2026-10-03 10:12');
     expect(title).not.toMatch(/U[0-9a-f]{32}/);
+  });
+});
+
+// The SDK checks a tool's input against its schema before the tool runs, and answers in its own sentence: it names the tool and holds the model's
+// input. That sentence goes to the model, which can correct itself. It must not reach staff, who read Maison's fixed words.
+describe('a tool input the server refuses, through the real chat client', () => {
+  const chatAsking = (turns: Parameters<typeof fakeTextAdapter>[0]) => {
+    const { adapter } = fakeTextAdapter(turns);
+    const service = assistantService({ strapi: fakeStrapi({ config: { aiProvider: 'anthropic', aiApiKey: 'sk-ant-test' } }) });
+    const fetchClient = async (_url: unknown, init?: RequestInit) =>
+      service.turn(await service.parseBody(JSON.parse(String(init?.body))), { ability: { can: () => true }, adminId: 1, responseController: new AbortController(), adapterFor: () => adapter });
+    const errors: Error[] = [];
+    const client = new ChatClient({
+      connection: fetchServerSentEvents('http://strapi.test/maison/assistant/chat', { fetchClient: fetchClient as typeof fetch }),
+      tools: DRAFT_CLIENT_TOOLS,
+      onError: (error) => errors.push(error),
+    });
+    return { client, errors };
+  };
+  const visibleTextOf = (client: ChatClient) =>
+    client.getMessages().flatMap((message) => {
+      const parts = message.parts as PartLike[];
+      return drawableParts(parts).map((part) => {
+        if (part.type === 'text') return part.content as string;
+        const line = toolLineOf(part, toolResultOf(parts, part.id));
+        const box = toolBoxOf(part, toolResultOf(parts, part.id));
+        return `${line?.text ?? ''} ${box?.body ?? ''} ${box?.status ?? ''}`;
+      });
+    });
+
+  it('shows staff the fixed sentence "Maison could not read that request." and never the SDK\'s own words, and no error of the run', async () => {
+    const { client, errors } = chatAsking([toolCallTurn('list_requests', { limit: 999 }), textTurn('I will ask for fewer.')]);
+
+    await client.sendMessage('Which visits are waiting for staff?');
+
+    const call = client.getMessages().flatMap((message) => message.parts as PartLike[]).find((part) => part.type === 'tool-call') as PartLike;
+    expect(call).toMatchObject({ name: 'list_requests', state: 'error' });
+    // The SDK's refusal is a string, which is how the page tells it from Maison's own { error: { message } }.
+    expect(typeof call.output.error).toBe('string');
+    expect(call.output.error).toMatch(/^Input validation failed for tool list_requests: /);
+    const messages = client.getMessages();
+    const parts = messages.find((message) => (message.parts as PartLike[]).includes(call))?.parts as PartLike[];
+    expect(toolLineOf(call, toolResultOf(parts, call.id))).toEqual({ text: `Maison · requests ✕ ${UNREADABLE_REQUEST}`, tone: 'error' });
+    expect(toolBoxOf(call, toolResultOf(parts, call.id))).toMatchObject({ state: 'failed', status: 'failed', body: UNREADABLE_REQUEST });
+    const seen = visibleTextOf(client).join('\n');
+    expect(seen).not.toContain('Input validation failed');
+    expect(seen).not.toContain('limit');
+    expect(seen).not.toContain('999');
+    expect(seen).toContain('I will ask for fewer.');
+    expect(errors).toEqual([]);
   });
 });
