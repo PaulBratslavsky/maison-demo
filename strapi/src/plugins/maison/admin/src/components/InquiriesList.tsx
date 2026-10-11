@@ -17,6 +17,7 @@ import {
   type StaffInquiry,
 } from '../inquiries';
 import { startPolling } from '../poll';
+import { useAskAbout } from '../useAskAbout';
 import { useInquiryActions } from '../useInquiryActions';
 import { useMounted } from '../useMounted';
 import { ChangeLabelDialog } from './ChangeLabelDialog';
@@ -50,6 +51,7 @@ export const InquiriesList = ({
 }) => {
   const { get } = useFetchClient();
   const mounted = useMounted();
+  const askAbout = useAskAbout();
   const [filter, setFilter] = React.useState<InquiryFilter>(DEFAULT_FILTER);
   const [inquiries, setInquiries] = React.useState<StaffInquiry[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -110,6 +112,8 @@ export const InquiriesList = ({
     setFilter(value);
   };
 
+  // The actions column is for the row's own buttons (with canReply) and for Ask about this (once the assistant is ready).
+  const showActions = canReply || askAbout.show;
   const columns = ['Received', 'Message', 'Piece', 'Kind and sentiment', 'Status'];
   const quotaLine = quota ? quotaText(quota) : '';
 
@@ -169,7 +173,7 @@ export const InquiriesList = ({
         </Box>
       ) : (
         <>
-          <Table colCount={columns.length + (canReply ? 1 : 0)} rowCount={inquiries.length + 1}>
+          <Table colCount={columns.length + (showActions ? 1 : 0)} rowCount={inquiries.length + 1}>
             <Thead>
               <Tr>
                 {columns.map((column) => (
@@ -177,7 +181,7 @@ export const InquiriesList = ({
                     <Typography variant="sigma">{column}</Typography>
                   </Th>
                 ))}
-                {canReply && (
+                {showActions && (
                   <Th>
                     <VisuallyHidden>Actions</VisuallyHidden>
                   </Th>
@@ -195,6 +199,9 @@ export const InquiriesList = ({
                   onCloseInquiry={(reason) => run(inquiry.documentId, 'close', { reason })}
                   onChangeLabel={() => setRelabelling(inquiry)}
                   onLabelAgain={() => run(inquiry.documentId, 'label-again')}
+                  canAsk={askAbout.show}
+                  askDisabled={askAbout.disabled}
+                  onAsk={() => askAbout.ask({ kind: 'inquiry', documentId: inquiry.documentId })}
                 />
               ))}
             </Tbody>

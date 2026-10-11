@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { askTheChat, chatReport, pendingAsk, wantChatStatus } from '../../admin/src/askStore';
 import { GlobalAssistant } from '../../admin/src/components/assistant/GlobalAssistant';
 import { READY, answer, assistantWorld, event, getsOf, savedChat, stream } from './fake-assistant-world';
 import { declarationsOf } from './css';
@@ -323,6 +324,134 @@ describe('GlobalAssistant', () => {
       // The answer is over: Stop is gone, and nothing is shown as a failure.
       await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull());
       expect(Array.from(document.querySelectorAll('[role="alert"]')).filter((alert) => alert.textContent)).toEqual([]);
+    });
+  });
+
+  describe('Ask about this, from a row of the Maison page', () => {
+    const ASK = 'Tell me about request APT-4821.';
+    /** The page has a list with an Ask about this button on the screen, so the chat checks the assistant. */
+    let release: () => void = () => {};
+    beforeEach(() => {
+      release = wantChatStatus();
+    });
+    afterEach(() => release());
+
+    it('checks the assistant when a list wants it, and loads nothing else and draws no drawer: the saved chats wait for the drawer to be opened', async () => {
+      assistantWorld(client, { saved: [savedChat('c1', 'Which visits are waiting?')] });
+      renderInTheme(<GlobalAssistant />);
+
+      await waitFor(() => expect(chatReport()).toEqual({ ready: true, busy: false }));
+
+      expect(getsOf(client, '/maison/assistant/status')).toBe(1);
+      expect(getsOf(client, '/maison/conversations')).toBe(0);
+      expect(document.querySelector('aside')).toBeNull();
+      expect(launcher()).toBeTruthy();
+    });
+
+    it('reports a chat that is not set up as not ready, and the page shows no button', async () => {
+      assistantWorld(client, { status: { ready: false, reason: 'No key is set.' } });
+      renderInTheme(<GlobalAssistant />);
+      await waitFor(() => expect(getsOf(client, '/maison/assistant/status')).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(chatReport()).toEqual({ ready: false, busy: false });
+      expect(askTheChat(ASK)).toBe(false);
+    });
+
+    it('opens the closed drawer and sends the message as the staff member\'s, with the focus in the text box', async () => {
+      assistantWorld(client, { chat: [() => stream(answer('APT-4821 is waiting for staff.'))] });
+      renderInTheme(<GlobalAssistant />);
+      await waitFor(() => expect(chatReport()).toEqual({ ready: true, busy: false }));
+
+      act(() => {
+        expect(askTheChat(ASK)).toBe(true);
+      });
+
+      expect(await within(await screen.findByRole('region', { name: 'Chat messages' })).findByText(ASK)).toBeTruthy();
+      expect(await within(region()).findByText('APT-4821 is waiting for staff.')).toBeTruthy();
+      expect(drawer()).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Open the Maison assistant' })).toBeNull();
+      expect(document.activeElement).toBe(box());
+      expect(pendingAsk()).toBeNull();
+      const body = JSON.parse((fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0][1].body as string);
+      expect(body.messages.at(-1)).toMatchObject({ role: 'user' });
+      expect(JSON.stringify(body.messages.at(-1))).toContain(ASK);
+    });
+
+    it('goes into the chat staff began, after its messages, and leaves what they typed in the box as it was', async () => {
+      assistantWorld(client, { chat: [() => stream(answer('Two visits wait.')), () => stream(answer('APT-4821 is waiting for staff.'))] });
+      renderInTheme(<GlobalAssistant />);
+      await userEvent.type(await openDrawer(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByText('Two visits wait.');
+      await userEvent.type(box(), 'half a message');
+
+      act(() => {
+        expect(askTheChat(ASK)).toBe(true);
+      });
+
+      await within(region()).findByText('APT-4821 is waiting for staff.');
+      expect(within(region()).getByText('Which visits are waiting?')).toBeTruthy();
+      expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
+      expect(within(region()).getByText(ASK)).toBeTruthy();
+      expect(box().value).toBe('half a message');
+    });
+
+    it('does not reopen the most recent saved chat over the question: staff began a chat by asking', async () => {
+      assistantWorld(client, { saved: [savedChat('c1', 'An older chat')], chat: [() => stream(answer('APT-4821 is waiting for staff.'))] });
+      renderInTheme(<GlobalAssistant />);
+      await waitFor(() => expect(chatReport()?.ready).toBe(true));
+
+      act(() => {
+        askTheChat(ASK);
+      });
+
+      await within(await screen.findByRole('region', { name: 'Chat messages' })).findByText('APT-4821 is waiting for staff.');
+      await waitFor(() => expect(getsOf(client, '/maison/conversations')).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(within(region()).queryByText('The answer to An older chat')).toBeNull();
+      expect(client.get.mock.calls.filter(([url]) => url === '/maison/conversations/c1')).toHaveLength(0);
+    });
+
+    it('is refused while an answer is on its way, and the message is not kept for later', async () => {
+      let finish: () => void = () => {};
+      const encoder = new TextEncoder();
+      const slow = () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const item of [event('RUN_STARTED'), event('TEXT_MESSAGE_START', { messageId: 'slow', role: 'assistant' }), event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: 'Looking into it' })]) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+              }
+              finish = () => {
+                for (const item of [event('TEXT_MESSAGE_END', { messageId: 'slow' }), event('RUN_FINISHED', { finishReason: 'stop' })]) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+                controller.close();
+              };
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+        );
+      assistantWorld(client, { chat: [slow] });
+      renderInTheme(<GlobalAssistant />);
+      await userEvent.type(await openDrawer(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByText('Looking into it');
+      await waitFor(() => expect(chatReport()).toEqual({ ready: true, busy: true }));
+
+      expect(askTheChat(ASK)).toBe(false);
+
+      act(() => finish());
+      await waitFor(() => expect(chatReport()).toEqual({ ready: true, busy: false }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(within(region()).queryByText(ASK)).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('says the chat is gone when the assistant is taken off the page, so the buttons go', async () => {
+      assistantWorld(client);
+      const view = renderInTheme(<GlobalAssistant />);
+      await waitFor(() => expect(chatReport()).not.toBeNull());
+
+      view.unmount();
+
+      expect(chatReport()).toBeNull();
     });
   });
 

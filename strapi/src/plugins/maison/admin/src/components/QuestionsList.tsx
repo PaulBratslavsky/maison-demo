@@ -32,6 +32,7 @@ import {
   type SentReply,
   type StaffQuestion,
 } from '../questions';
+import { useAskAbout } from '../useAskAbout';
 import { AnswerDialog } from './AnswerDialog';
 import { YourLineBadge } from './YourLineBadge';
 
@@ -74,6 +75,7 @@ export const QuestionsList = ({
 }) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
+  const askAbout = useAskAbout();
   const [filter, setFilter] = React.useState<Filter>('open');
   const [questions, setQuestions] = React.useState<StaffQuestion[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -131,6 +133,8 @@ export const QuestionsList = ({
   const isSending = (question: StaffQuestion, action: Sending['action']) =>
     sending?.reference === question.reference && sending.action === action;
 
+  // The actions column is for the row's own buttons (with canAnswer) and for Ask about this (once the assistant is ready).
+  const showActions = canAnswer || askAbout.show;
   const columns = ['Reference', 'Asked', 'Customer', 'Piece', 'Question', 'Why', 'Status'];
 
   return (
@@ -174,7 +178,7 @@ export const QuestionsList = ({
           <Typography textColor="neutral600">{EMPTY[filter]}</Typography>
         </Box>
       ) : (
-        <Table colCount={columns.length + (canAnswer ? 1 : 0)} rowCount={questions.length + 1}>
+        <Table colCount={columns.length + (showActions ? 1 : 0)} rowCount={questions.length + 1}>
           <Thead>
             <Tr>
               {columns.map((column) => (
@@ -182,7 +186,7 @@ export const QuestionsList = ({
                   <Typography variant="sigma">{column}</Typography>
                 </Th>
               ))}
-              {canAnswer && (
+              {showActions && (
                 <Th>
                   <VisuallyHidden>Actions</VisuallyHidden>
                 </Th>
@@ -228,10 +232,10 @@ export const QuestionsList = ({
                     <LineNoteText line={question.line} />
                   </Flex>
                 </Td>
-                {canAnswer && (
+                {showActions && (
                   <Td>
                     <Flex gap={2}>
-                      {canLetThemKnow(question) && (
+                      {canAnswer && canLetThemKnow(question) && (
                         <Button
                           size="S"
                           variant="secondary"
@@ -242,7 +246,7 @@ export const QuestionsList = ({
                           Let them know
                         </Button>
                       )}
-                      {canAnswerQuestion(question) && (
+                      {canAnswer && canAnswerQuestion(question) && (
                         <Button
                           size="S"
                           loading={isSending(question, 'answer')}
@@ -250,6 +254,16 @@ export const QuestionsList = ({
                           onClick={() => setAnswering(question)}
                         >
                           Answer
+                        </Button>
+                      )}
+                      {askAbout.show && (
+                        <Button
+                          size="S"
+                          variant="tertiary"
+                          disabled={askAbout.disabled}
+                          onClick={() => askAbout.ask({ kind: 'question', reference: question.reference })}
+                        >
+                          Ask about this
                         </Button>
                       )}
                     </Flex>

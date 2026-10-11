@@ -40,10 +40,26 @@ interface InquiryRowProps {
   onCloseInquiry: (reason: CloseReason) => void;
   onChangeLabel: () => void;
   onLabelAgain: () => void;
+  /** Whether Ask about this shows: the assistant is ready. It needs no reply permission. */
+  canAsk: boolean;
+  /** An answer is on its way, so Ask about this waits. */
+  askDisabled: boolean;
+  onAsk: () => void;
 }
 
 /** One inquiry: what the customer wrote, the model's labels, where it stands, and the buttons that apply to it. */
-export const InquiryRow = ({ inquiry, canReply, acting, onReply, onCloseInquiry, onChangeLabel, onLabelAgain }: InquiryRowProps) => {
+export const InquiryRow = ({
+  inquiry,
+  canReply,
+  acting,
+  onReply,
+  onCloseInquiry,
+  onChangeLabel,
+  onLabelAgain,
+  canAsk,
+  askDisabled,
+  onAsk,
+}: InquiryRowProps) => {
   /** Whether "What the concierge said" is open. The row keeps it across the 5-second refreshes, which keep its key. */
   const [showReply, setShowReply] = React.useState(false);
   const busy = acting !== null;
@@ -135,29 +151,39 @@ export const InquiryRow = ({ inquiry, canReply, acting, onReply, onCloseInquiry,
           )}
         </Flex>
       </Td>
-      {canReply && (
+      {(canReply || canAsk) && (
         <Td>
           <Flex gap={2} wrap="wrap">
-            {canReplyTo(inquiry) && (
-              <Button size="S" disabled={busy} onClick={onReply}>
-                Reply on LINE
-              </Button>
+            {/* The row's own buttons need its own permission. */}
+            {canReply && (
+              <>
+                {canReplyTo(inquiry) && (
+                  <Button size="S" disabled={busy} onClick={onReply}>
+                    Reply on LINE
+                  </Button>
+                )}
+                {canClose(inquiry) && (
+                  <SimpleMenu label="Close" size="S" variant="tertiary" loading={isActing('close')} disabled={busy}>
+                    {CLOSE_REASON_OPTIONS.map(({ value, label }) => (
+                      <MenuItem key={value} onSelect={() => onCloseInquiry(value)}>
+                        {label}
+                      </MenuItem>
+                    ))}
+                  </SimpleMenu>
+                )}
+                <Button size="S" variant="tertiary" disabled={busy} onClick={onChangeLabel}>
+                  Change label
+                </Button>
+                {canLabelAgain(inquiry) && (
+                  <Button size="S" variant="tertiary" loading={isActing('label-again')} disabled={busy} onClick={onLabelAgain}>
+                    Label again
+                  </Button>
+                )}
+              </>
             )}
-            {canClose(inquiry) && (
-              <SimpleMenu label="Close" size="S" variant="tertiary" loading={isActing('close')} disabled={busy}>
-                {CLOSE_REASON_OPTIONS.map(({ value, label }) => (
-                  <MenuItem key={value} onSelect={() => onCloseInquiry(value)}>
-                    {label}
-                  </MenuItem>
-                ))}
-              </SimpleMenu>
-            )}
-            <Button size="S" variant="tertiary" disabled={busy} onClick={onChangeLabel}>
-              Change label
-            </Button>
-            {canLabelAgain(inquiry) && (
-              <Button size="S" variant="tertiary" loading={isActing('label-again')} disabled={busy} onClick={onLabelAgain}>
-                Label again
+            {canAsk && (
+              <Button size="S" variant="tertiary" disabled={askDisabled} onClick={onAsk}>
+                Ask about this
               </Button>
             )}
           </Flex>

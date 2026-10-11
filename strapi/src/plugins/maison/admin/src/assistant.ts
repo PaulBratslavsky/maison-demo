@@ -418,8 +418,8 @@ export const withoutFailedTurn = <M extends MessageLike>(messages: M[]): M[] => 
   return messages.slice(0, end);
 };
 
-/** Where a message came from: typed in the text box, or one of the starter buttons. */
-export type MessageSource = 'box' | 'starter';
+/** Where a message came from: typed in the text box, one of the quick questions, or Ask about this on a row of the Maison page. */
+export type MessageSource = 'box' | 'starter' | 'ask';
 
 /** The last question staff sent, kept so a failed turn can put it back. */
 export interface SentQuestion {
@@ -427,13 +427,13 @@ export interface SentQuestion {
   source: MessageSource;
 }
 
-/** The text box after a send. What was in the box is sent from the box, so it is emptied. A starter sends its own text and leaves the box as it was. */
+/** The text box after a send. What was in the box is sent from the box, so it is emptied. A message the page writes itself (a quick question, Ask about this) leaves the box as it was. */
 export const draftAfterSend = (draft: string, source: MessageSource): string => (source === 'box' ? '' : draft);
 
 /**
  * The text box after a turn failed. A question staff typed goes back into the box, when the box is empty, so they don't retype
- * it. A starter doesn't (staff did not type it, and its button is a click away), and a box with text in it is left alone. Stop is
- * not a failure and never gets here.
+ * it. A message the page wrote doesn't (staff did not type it, and its button is a click away), and a box with text in it is left alone.
+ * Stop is not a failure and never gets here.
  */
 export const draftAfterFailure = ({ draft, question }: { draft: string; question: SentQuestion | null }): string =>
   question?.source === 'box' && draft.trim() === '' ? question.text : draft;
@@ -453,6 +453,40 @@ export const composerButtons = ({ text, busy, ready }: { text: string; busy: boo
   sendDisabled: !canSend({ text, busy, ready }),
   showStop: busy,
 });
+
+/** What a row's Ask about this is about: a request or a question by its reference, an inquiry by its documentId, the only reference it has. */
+export type AskItem =
+  | { kind: 'request'; reference: string }
+  | { kind: 'question'; reference: string }
+  | { kind: 'inquiry'; documentId: string };
+
+/**
+ * The one message Ask about this sends. It names the item and nothing else: the chat looks the item up itself, so nothing about the customer
+ * is in the message.
+ */
+export const askMessage = (item: AskItem): string => {
+  switch (item.kind) {
+    case 'request':
+      return `Tell me about request ${item.reference}.`;
+    case 'question':
+      return `Tell me about question ${item.reference}.`;
+    case 'inquiry':
+      return `Tell me about inquiry ${item.documentId}.`;
+  }
+};
+
+/** What the chat tells the page about itself: whether the assistant is set up, and whether an answer is on its way. */
+export interface ChatReport {
+  ready: boolean;
+  busy: boolean;
+}
+
+/**
+ * Ask about this on a row: shown once the assistant is ready, and waiting while it answers, because the chat drops a message sent while an
+ * answer comes, so a click then would do nothing. With no chat (the admin may not use the assistant, or it has not loaded) it shows nothing.
+ */
+export const askButtonState = (chat: ChatReport | null): { show: boolean; disabled: boolean } =>
+  chat !== null && chat.ready ? { show: true, disabled: chat.busy } : { show: false, disabled: false };
 
 /**
  * The admin's token, as the page's own requests send it. Strapi keeps it in localStorage, written as a JSON string (a bare

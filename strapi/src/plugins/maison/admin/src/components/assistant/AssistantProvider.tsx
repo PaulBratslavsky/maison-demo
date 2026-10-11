@@ -84,8 +84,8 @@ export interface AssistantApi {
   /** What staff have typed and not sent. It is kept here, so it is still there when staff come back from another tab. New chat leaves it alone. */
   draft: string;
   setDraft: (text: string) => void;
-  /** Sends a message: from the text box (the default), which empties the box, or from a starter, which leaves it as it was. */
-  send: (text: string, source?: MessageSource) => Promise<void>;
+  /** Sends a message. From the text box it empties the box. A message the page writes itself (a quick question, Ask about this) leaves the box as it was. */
+  send: (text: string, source: MessageSource) => Promise<void>;
   /** Stops the answer where it is, and takes out a tool call that was being written. Stop is no error. */
   stop: () => void;
   /** Starts a new chat. The chat that was open stays saved, and the draft stays. */
@@ -122,13 +122,25 @@ const cookies = (): string => {
  * host is on the screen, which is every admin page (see assistantHost.tsx).
  *
  * It asks the server nothing until `started` is true, which is when staff open the drawer for the first time. It is on every admin page, and
- * the status check and the saved chats are only worth a request to staff who use the assistant.
+ * the status check and the saved chats are only worth a request to staff who use the assistant. One thing besides the drawer asks for the
+ * status: a list on the Maison page that shows Ask about this (`checkStatus`), which shows the button once the assistant is known to be set up.
+ * The saved chats still wait for the drawer.
  *
  * It also keeps the admin's saved chats. Each turn that ends saves the open chat, one save at a time (`createSaveQueue`), with only the
  * messages that were cleaned of cut-off tool calls and failed turns. When the assistant is ready, the list loads and the most recent chat
  * is reopened. A chat is switched with `setMessages`, never by changing the thread: that would build the chat client again.
  */
-export const AssistantProvider = ({ children, started }: { children: React.ReactNode; started: boolean }) => {
+export const AssistantProvider = ({
+  children,
+  started,
+  checkStatus = false,
+}: {
+  children: React.ReactNode;
+  /** The drawer has been opened once: the status is checked and the saved chats load. */
+  started: boolean;
+  /** The status is checked although the drawer has not been opened, because a list on the Maison page wants to know whether it can show Ask about this. */
+  checkStatus?: boolean;
+}) => {
   const fetchClient = useFetchClient();
   const mounted = useMounted();
   // useChat keeps its connection from the first render, and the save queue is made once, so both read the fetch client through a ref.
@@ -176,10 +188,14 @@ export const AssistantProvider = ({ children, started }: { children: React.React
     }
   }, [mounted]);
 
-  // The first check of the assistant waits for the drawer to be opened. Once the status is known, the saved chats load (below).
+  // The first check of the assistant waits for the drawer to be opened, or for a list that wants to know. It is made once. Once the status is
+  // known and the drawer has been opened, the saved chats load (below).
+  const checked = React.useRef(false);
   React.useEffect(() => {
-    if (started) void recheck();
-  }, [started, recheck]);
+    if ((!started && !checkStatus) || checked.current) return;
+    checked.current = true;
+    void recheck();
+  }, [started, checkStatus, recheck]);
 
   const connection = React.useMemo(
     () =>
@@ -369,19 +385,20 @@ export const AssistantProvider = ({ children, started }: { children: React.React
     [queue, showChat, mounted]
   );
 
-  // When the assistant is ready for the first time, the list loads and the most recent chat is reopened, unless staff have begun something.
+  // When the assistant is ready and the drawer has been opened, for the first time, the list loads and the most recent chat is reopened, unless
+  // staff have begun something (typed a message, or pressed Ask about this).
   const loadedFirst = React.useRef(false);
   React.useEffect(() => {
-    if (!ready || loadedFirst.current) return;
+    if (!ready || !started || loadedFirst.current) return;
     loadedFirst.current = true;
     void (async () => {
       const list = await loadList();
       if (list && list.length > 0 && !acted.current && messagesRef.current.length === 0) await openChat(list[0].documentId);
     })();
-  }, [ready, loadList, openChat]);
+  }, [ready, started, loadList, openChat]);
 
   const send = React.useCallback(
-    async (text: string, source: MessageSource = 'box'): Promise<void> => {
+    async (text: string, source: MessageSource): Promise<void> => {
       // useChat would drop a send made while an answer is on its way. Nothing is changed for it: the box keeps its text.
       if (busyRef.current) return;
       acted.current = true;

@@ -103,3 +103,26 @@ describe('AssistantProvider, before the drawer has been opened', () => {
     expect(callsTo('/maison/assistant/status')).toBe(1);
   });
 });
+
+describe('AssistantProvider, when a list on the Maison page wants the status', () => {
+  it('asks for the status although the drawer was not opened, and not for the saved chats, which wait for the drawer', async () => {
+    const view = renderInTheme(
+      <AssistantProvider started={false} checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(callsTo('/maison/assistant/status')).toBe(1);
+    expect(callsTo('/maison/conversations')).toBe(0);
+
+    // The drawer is opened: the status is not asked for again, and the saved chats load.
+    view.rerender(
+      <AssistantProvider started checkStatus>
+        <Probe />
+      </AssistantProvider>
+    );
+    await waitFor(() => expect(callsTo('/maison/conversations')).toBe(1));
+    expect(callsTo('/maison/assistant/status')).toBe(1);
+  });
+});
