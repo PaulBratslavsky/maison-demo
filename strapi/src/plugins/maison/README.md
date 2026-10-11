@@ -315,6 +315,8 @@ Each admin's chats are saved for them. In the drawer, each admin sees only their
 | `search_knowledge` | "MCP: browse the catalog" | Product knowledge |
 | `search_products` | "MCP: browse the catalog" | Product search |
 | `view_product` | "MCP: browse the catalog" | Product details |
+| `draft_reply` | "Review customer inquiries" and "Reply to customer inquiries on LINE" | Draft a LINE reply |
+| `draft_answer` | "Read customer questions" and "Answer customer questions on LINE" | Draft an answer |
 
 A tool is offered only when the admin's role holds its permission, and `disabledTools` can remove the three catalog tools here, as it does on MCP. An admin with the assistant permission and none of these gets no tools: the assistant says so and looks nothing up. `GET /maison/assistant/status` lists the tools the admin's chat really has.
 

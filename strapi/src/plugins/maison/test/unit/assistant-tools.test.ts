@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ACTION, ASSISTANT_LIMITS, INQUIRY_FILTERS, INQUIRY_KINDS } from '../../server/src/constants';
-import { READ_TOOL_NAMES, TOOL_LABELS, assistantTools, toolLabel, type AssistantToolSpec } from '../../server/src/assistant/tools';
+import { DRAFT_TOOL_NAMES, READ_TOOL_NAMES, TOOL_LABELS, assistantTools, toolLabel, type AssistantToolSpec } from '../../server/src/assistant/tools';
 import { DATA_RULE } from '../../server/src/assistant/views';
+import { describeIssues } from '../../server/src/mcp/schemas';
 import { fakeStrapi } from './fake-strapi';
 
 type Doc = Record<string, any>;
@@ -121,7 +122,8 @@ describe('which tools an admin gets', () => {
   it('offers no tool that writes: not confirming, answering, replying, closing, relabelling or any LINE tool', () => {
     const everything = { can: () => true };
     const names = namesOf(assistantTools(fakeStrapi(), everything));
-    expect(names).toEqual([...READ_TOOL_NAMES]);
+    // The seven that read, then the two that show a draft. Neither of those writes.
+    expect(names).toEqual([...READ_TOOL_NAMES, ...DRAFT_TOOL_NAMES]);
     for (const written of ['confirm_appointment', 'request_appointment', 'hand_off_to_staff', 'log_inquiry', 'pending_confirmations', 'record_confirmation']) {
       expect(names).not.toContain(written);
     }
@@ -480,7 +482,7 @@ describe('the catalog tools', () => {
 });
 
 describe('the tool labels', () => {
-  it('are the labels the spec gives each read tool, as staff read them in the list of tools', () => {
+  it('are the labels the spec gives each tool, as staff read them in the list of tools', () => {
     expect(TOOL_LABELS).toEqual({
       list_requests: 'Visit requests',
       list_questions: 'Customer questions',
@@ -489,6 +491,8 @@ describe('the tool labels', () => {
       search_knowledge: 'Product knowledge',
       search_products: 'Product search',
       view_product: 'Product details',
+      draft_reply: 'Draft a LINE reply',
+      draft_answer: 'Draft an answer',
     });
   });
 
@@ -508,5 +512,149 @@ describe('the tool labels', () => {
     expect(toolLabel('list_requests')).toBe('Visit requests');
     expect(toolLabel('something_new')).toBe('something_new');
     for (const name of ['toString', '__proto__', 'constructor']) expect(toolLabel(name), name).toBe(name);
+  });
+});
+
+describe('the draft tools', () => {
+  const mayOnly = (...actions: string[]) => abilityOf(...actions);
+  const draftNamesFor = (granted: string[], config: Doc = {}) => namesOf(toolsFor(granted, {}, config)).filter((name) => (DRAFT_TOOL_NAMES as readonly string[]).includes(name));
+  const ALL_FOUR = [ACTION.inquiriesView, ACTION.inquiriesReply, ACTION.questionsRead, ACTION.questionsAnswer];
+  const draftSpec = (name: (typeof DRAFT_TOOL_NAMES)[number]) => toolNamed(toolsFor(ALL_FOUR), name);
+
+  it('are draft_reply and draft_answer', () => {
+    expect([...DRAFT_TOOL_NAMES]).toEqual(['draft_reply', 'draft_answer']);
+  });
+
+  // Use this draft opens the tab that lists the item and loads the item there, so each draft needs the pair: reading the item and writing to it.
+  it.each([
+    ['both inquiry permissions', [ACTION.inquiriesView, ACTION.inquiriesReply], ['draft_reply']],
+    ['only inquiries.view', [ACTION.inquiriesView], []],
+    ['only inquiries.reply', [ACTION.inquiriesReply], []],
+    ['both question permissions', [ACTION.questionsRead, ACTION.questionsAnswer], ['draft_answer']],
+    ['only questions.read', [ACTION.questionsRead], []],
+    ['only questions.answer', [ACTION.questionsAnswer], []],
+    ['all four', ALL_FOUR, ['draft_reply', 'draft_answer']],
+    ['no permission', [], []],
+  ])('offers, to an admin with %s, the draft tools %j', (_label, granted, expected) => {
+    expect(draftNamesFor(granted as string[])).toEqual(expected);
+  });
+
+  it('gives an admin who may reply and answer, but look nothing up, no tool at all', () => {
+    expect(namesOf(toolsFor([ACTION.inquiriesReply, ACTION.questionsAnswer]))).toEqual([]);
+  });
+
+  it('puts the draft tools after the read tools, and lists no other tool', () => {
+    const names = namesOf(toolsFor([...READ_ACTIONS, ACTION.inquiriesReply, ACTION.questionsAnswer]));
+    expect(names).toEqual([
+      'list_requests',
+      'list_questions',
+      'list_inquiries',
+      'inquiry_counts',
+      'search_knowledge',
+      'search_products',
+      'view_product',
+      'draft_reply',
+      'draft_answer',
+    ]);
+  });
+
+  it('leaves the draft tools alone when disabledTools names catalog tools', () => {
+    expect(draftNamesFor(ALL_FOUR, { disabledTools: ['search_products', 'view_product'] })).toEqual(['draft_reply', 'draft_answer']);
+  });
+
+  it('asks the ability about the actions alone for the draft tools too, never about a subject', () => {
+    const ability = mayOnly(...ALL_FOUR);
+    assistantTools(fakeStrapi(), ability);
+    for (const call of ability.can.mock.calls) expect(call, JSON.stringify(call)).toHaveLength(1);
+  });
+
+  // A tool with no execute is a client tool: when the model calls it, chat() ends the run, and the page draws the draft. Nothing runs on the server.
+  it('have no execute, and the read tools do', () => {
+    for (const name of DRAFT_TOOL_NAMES) {
+      const spec = draftSpec(name);
+      expect(spec.execute, name).toBeUndefined();
+      expect('execute' in spec, name).toBe(false);
+    }
+    for (const spec of toolsFor(READ_ACTIONS)) expect(typeof spec.execute, spec.name).toBe('function');
+  });
+
+  it('say that they show staff a draft and send nothing, and end with the data rule', () => {
+    for (const name of DRAFT_TOOL_NAMES) {
+      const { description } = draftSpec(name);
+      expect(description, name).toContain('Use this draft');
+      expect(description, name).toContain('sends nothing');
+      expect(description.endsWith(DATA_RULE), name).toBe(true);
+    }
+  });
+
+  it('turn into JSON Schema for the model, with the text limited to 1 to 2,000 characters', () => {
+    for (const name of DRAFT_TOOL_NAMES) {
+      const json = (draftSpec(name).inputSchema as any)['~standard'].jsonSchema.input({ target: 'draft-07' });
+      expect(json.type, name).toBe('object');
+      expect(json.required, name).toEqual([name === 'draft_reply' ? 'documentId' : 'reference', 'text']);
+      expect(json.properties.text, name).toMatchObject({ type: 'string', minLength: 1, maxLength: ASSISTANT_LIMITS.draftChars });
+    }
+  });
+
+  describe('draft_reply takes', () => {
+    const input = (fields: Doc) => draftSpec('draft_reply').inputSchema.safeParse(fields);
+
+    it('a documentId and a text, both trimmed', () => {
+      expect(input({ documentId: ' inq4abc ', text: '  Thank you for telling us.\n' })).toMatchObject({
+        success: true,
+        data: { documentId: 'inq4abc', text: 'Thank you for telling us.' },
+      });
+    });
+
+    it('a text of exactly 2,000 characters, and counts them after trimming', () => {
+      expect(input({ documentId: 'inq4abc', text: 'x'.repeat(2000) }).success).toBe(true);
+      expect(input({ documentId: 'inq4abc', text: `${'x'.repeat(2000)}   ` }).success).toBe(true);
+    });
+
+    it.each([
+      ['no text', { documentId: 'inq4abc' }],
+      ['a text of spaces', { documentId: 'inq4abc', text: '   ' }],
+      ['a text of 2,001 characters', { documentId: 'inq4abc', text: 'x'.repeat(2001) }],
+      ['a text that is not text', { documentId: 'inq4abc', text: 7 }],
+      ['no documentId', { text: 'Thank you.' }],
+      ['a blank documentId', { documentId: '  ', text: 'Thank you.' }],
+      ['a documentId of 65 characters', { documentId: 'x'.repeat(65), text: 'Thank you.' }],
+    ])('and refuses %s', (_label, fields) => {
+      expect(input(fields as Doc).success).toBe(false);
+    });
+  });
+
+  describe('draft_answer takes', () => {
+    const input = (fields: Doc) => draftSpec('draft_answer').inputSchema.safeParse(fields);
+
+    it('a reference and a text, both trimmed', () => {
+      expect(input({ reference: 'Q-4821', text: '  Yes, a watch up to 42 mm fits.  ' })).toMatchObject({
+        success: true,
+        data: { reference: 'Q-4821', text: 'Yes, a watch up to 42 mm fits.' },
+      });
+    });
+
+    it('a text of exactly 2,000 characters', () => {
+      expect(input({ reference: 'Q-4821', text: 'x'.repeat(2000) }).success).toBe(true);
+    });
+
+    it.each([
+      ['no reference', { text: 'Yes.' }],
+      ['a reference in lower case', { reference: 'q-4821', text: 'Yes.' }],
+      ['a reference of three digits', { reference: 'Q-482', text: 'Yes.' }],
+      ['a reference of five digits', { reference: 'Q-48210', text: 'Yes.' }],
+      ['a request reference', { reference: 'APT-4821', text: 'Yes.' }],
+      ['no text', { reference: 'Q-4821' }],
+      ['a text of spaces', { reference: 'Q-4821', text: '  ' }],
+      ['a text of 2,001 characters', { reference: 'Q-4821', text: 'x'.repeat(2001) }],
+    ])('and refuses %s', (_label, fields) => {
+      expect(input(fields as Doc).success).toBe(false);
+    });
+
+    it('answers a bad reference with the hint the page uses', () => {
+      const result = input({ reference: 'Q-48', text: 'Yes.' });
+      expect(result.success).toBe(false);
+      expect(describeIssues(result.error as never)).toBe('reference: Use a reference like Q-4821.');
+    });
   });
 });

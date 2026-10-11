@@ -39,6 +39,8 @@ export default {
         config: { policies: allow(ACTION.appointmentsConfirm) },
       },
       { method: 'GET', path: '/questions', handler: 'questions.list', config: { policies: allow(ACTION.questionsRead) } },
+      // One question, for Use this draft.
+      { method: 'GET', path: '/questions/:reference', handler: 'questions.findOne', config: { policies: allow(ACTION.questionsRead) } },
       // Let them know and Answer: whoever may answer a customer may let them know first.
       {
         method: 'POST',
@@ -64,6 +66,13 @@ export default {
         method: 'GET',
         path: '/inquiries/quota',
         handler: 'inquiries.quota',
+        config: { policies: allow(ACTION.inquiriesView) },
+      },
+      // One inquiry, for Use this draft. After summary and quota, so neither is taken for a :documentId.
+      {
+        method: 'GET',
+        path: '/inquiries/:documentId',
+        handler: 'inquiries.findOne',
         config: { policies: allow(ACTION.inquiriesView) },
       },
       // Reply on LINE, Close, Change label and Label again: whoever may reply to customers works the queue.

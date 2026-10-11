@@ -21,13 +21,13 @@ export interface AssistantToolSpec {
   name: string;
   description: string;
   inputSchema: z.ZodObject<z.ZodRawShape>;
-  /** Runs on the server. A draft tool has none: the browser runs it. */
+  /** Runs on the server. A draft tool has none: the browser runs it, and it shows staff the draft. */
   execute?: (args: unknown) => Promise<unknown>;
 }
 
 export const READ_TOOL_NAMES = ['list_requests', 'list_questions', 'list_inquiries', 'inquiry_counts', 'search_knowledge', 'search_products', 'view_product'] as const;
 
-/** What staff call each tool, in the Ask tab's list of tools. A tool with no entry here is shown under its own name. */
+/** What staff call each tool, in the drawer's list of tools. A tool with no entry here is shown under its own name. */
 export const TOOL_LABELS: Record<string, string> = {
   list_requests: 'Visit requests',
   list_questions: 'Customer questions',
@@ -36,6 +36,8 @@ export const TOOL_LABELS: Record<string, string> = {
   search_knowledge: 'Product knowledge',
   search_products: 'Product search',
   view_product: 'Product details',
+  draft_reply: 'Draft a LINE reply',
+  draft_answer: 'Draft an answer',
 };
 
 export const toolLabel = (name: string): string => (Object.prototype.hasOwnProperty.call(TOOL_LABELS, name) ? TOOL_LABELS[name] : name);
@@ -184,7 +186,7 @@ const catalogTools = (strapi: Core.Strapi): Array<{ tool: McpTool; spec: Assista
  * allows its action, and the catalog tools only when `disabledTools` doesn't name them. An admin with no permission
  * gets none.
  */
-export const assistantTools = (strapi: Core.Strapi, ability: Ability): AssistantToolSpec[] => {
+const readTools = (strapi: Core.Strapi, ability: Ability): AssistantToolSpec[] => {
   const disabled = new Set<string>(getConfig(strapi).disabledTools);
   const staff = staffTools(strapi)
     .filter((tool) => ability.can(tool.action))
@@ -200,3 +202,53 @@ export const assistantTools = (strapi: Core.Strapi, ability: Ability): Assistant
   const catalog = ability.can(ACTION.catalogRead) ? catalogTools(strapi).filter(({ tool }) => !disabled.has(tool.name)).map(({ spec }) => spec) : [];
   return [...staff, ...catalog];
 };
+
+/** The tools that draft. Each shows staff a draft in the chat, and neither sends anything. */
+export const DRAFT_TOOL_NAMES = ['draft_reply', 'draft_answer'] as const;
+
+/** A draft's text: 1 to 2,000 characters after trimming, as Reply on LINE and Answer take it. */
+const draftText = z.string().trim().min(1).max(ASSISTANT_LIMITS.draftChars);
+
+/**
+ * The draft tools an admin may use. They have no `execute`: a call to one ends the run for the browser, which draws the draft as a card and
+ * sends nothing. Each needs two permissions, because Use this draft goes to the tab that lists the item and loads the item there:
+ * `inquiries.view` and `inquiries.reply` for a reply, `questions.read` and `questions.answer` for an answer. The card holds itself to the same
+ * pairs.
+ */
+const draftTools = (ability: Ability): AssistantToolSpec[] => {
+  const specs: AssistantToolSpec[] = [];
+  if (ability.can(ACTION.inquiriesView) && ability.can(ACTION.inquiriesReply)) {
+    specs.push({
+      name: 'draft_reply',
+      description: [
+        'Shows staff a draft reply to one inquiry, as a card in the chat with a Use this draft button. It sends nothing: staff read the draft, edit it and send it themselves.',
+        "Pass the inquiry's documentId, exactly as list_inquiries gave it, and the text of the reply.",
+        "Write only the body of the message: Maison adds the quote of the customer's words and its own name.",
+        DATA_RULE,
+      ].join(' '),
+      inputSchema: z.object({
+        documentId: z.string().trim().min(1).max(64).describe("The inquiry's documentId, exactly as list_inquiries gave it."),
+        text: draftText.describe('The reply for the customer: plain text of 1 to 2,000 characters, with no greeting and no signature.'),
+      }),
+    });
+  }
+  if (ability.can(ACTION.questionsRead) && ability.can(ACTION.questionsAnswer)) {
+    specs.push({
+      name: 'draft_answer',
+      description: [
+        'Shows staff a draft answer to one customer question, as a card in the chat with a Use this draft button. It sends nothing: staff read the draft, edit it and send it themselves.',
+        "Pass the question's reference, such as Q-4821, and the text of the answer.",
+        'Write only the body of the message: Maison adds the greeting, the quote of the question, an invitation to reply and the signature.',
+        DATA_RULE,
+      ].join(' '),
+      inputSchema: z.object({
+        reference: questionReferenceInput.describe("The question's reference, such as Q-4821."),
+        text: draftText.describe('The answer for the customer: plain text of 1 to 2,000 characters, with no greeting and no signature.'),
+      }),
+    });
+  }
+  return specs;
+};
+
+/** The tools one admin may use in the assistant: the read tools their role allows, then the draft tools it allows. */
+export const assistantTools = (strapi: Core.Strapi, ability: Ability): AssistantToolSpec[] => [...readTools(strapi, ability), ...draftTools(ability)];

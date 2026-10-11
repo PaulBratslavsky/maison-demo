@@ -93,6 +93,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       ctx.body = await inquiries().quota();
     },
 
+    /** GET /inquiries/:documentId: one inquiry as staff see it now, or a 404. Use this draft loads it again before Reply on LINE opens. */
+    async findOne(ctx) {
+      const result = await inquiries().view(ctx.params.documentId);
+      if (result.ok === false) return fail(ctx, result);
+      ctx.body = { inquiry: result.value };
+    },
+
     /** POST /inquiries/:documentId/reply, with `{ text }`: the dialog's Send on LINE. */
     async reply(ctx) {
       const reply = replyInquiryInput.safeParse(ctx.request.body ?? {});

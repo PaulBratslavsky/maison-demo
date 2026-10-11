@@ -43,8 +43,8 @@ const LIST_TOOLS = ['list_requests', 'list_questions', 'list_inquiries'];
 const toolLine = (name: string, offered: (tool: string) => boolean): string | undefined =>
   name === 'view_product' && offered('search_products') ? "One product's details, by its slug from search_products." : TOOL_LINES[name];
 
-/** The system prompt for one turn. */
-export const instructions = ({ today, timezone, tools }: InstructionsInput): string => {
+/** The system prompt for one turn, without the rules for drafting. */
+const baseInstructions = ({ today, timezone, tools }: InstructionsInput): string => {
   const { date, weekday } = dayInZone(today, timezone);
   const offered = (name: string) => tools.includes(name);
   const lines: string[] = [
@@ -99,4 +99,47 @@ export const instructions = ({ today, timezone, tools }: InstructionsInput): str
   }
   lines.push('- When a tool answers with an error, tell staff what it said. Never read a failed lookup as an empty list, and never say nothing exists because a lookup failed.');
   return lines.join('\n');
+};
+
+/** The two draft tools, named here so this file stays pure. A test holds the names equal to `DRAFT_TOOL_NAMES` in `tools.ts`. */
+const DRAFT_REPLY = 'draft_reply';
+const DRAFT_ANSWER = 'draft_answer';
+
+/**
+ * The rules for drafting, for an admin who is offered a draft tool, and null for one who is not. A draft is a card in the chat: staff read it,
+ * edit it and send it with the page's own dialog, which adds the rest of the message (`inquiry-replies.ts` and `question-messages.ts`). So the
+ * draft is the body only. A rule that names a tool the admin is not offered is changed to fit, so the model is never pointed at a tool it doesn't have.
+ */
+const draftRules = (tools: readonly string[]): string | null => {
+  const reply = tools.includes(DRAFT_REPLY);
+  const answer = tools.includes(DRAFT_ANSWER);
+  if (!reply && !answer) return null;
+
+  const offered = [
+    ...(reply ? [`${DRAFT_REPLY} (a reply to an inquiry)`] : []),
+    ...(answer ? [`${DRAFT_ANSWER} (an answer to a customer question)`] : []),
+  ].join(' and ');
+  const maisonAdds = [
+    ...(reply ? ['for a reply, the quote of the customer\'s words and "Maison"'] : []),
+    ...(answer ? ["for an answer, the greeting with the staff member's name, the quote of the question, an invitation to reply and the signature"] : []),
+  ].join('; ');
+  const linkedQuestion = answer
+    ? `An inquiry with a questionReference is answered under Questions. Draft an answer for that question with ${DRAFT_ANSWER}${reply ? ', not a reply' : ''}.`
+    : 'An inquiry with a questionReference is answered under Questions. Never draft a reply for it: tell staff to answer it there.';
+
+  return [
+    `Drafts: you can show staff a draft with ${offered}. A draft is a card in the chat. You never send it: staff read it, edit it and send it with the page's buttons.`,
+    '- Look the item up before you draft it. Draft only for an item you looked up in this chat.',
+    `- Write only the body of the message. Maison adds the rest: ${maisonAdds}. So write no greeting and no signature.`,
+    "- Write the draft in the item's language, ja or en. Talk to staff in the language they write in.",
+    '- Use only facts from tool results or from what staff wrote in this chat. When a fact is missing, say in the chat what staff should check. Leave no gaps and no placeholders in the draft.',
+    `- ${linkedQuestion}`,
+    '- After a draft, say one short sentence at most. Never say a draft was sent: staff send it.',
+  ].join('\n');
+};
+
+/** The system prompt for one turn: the rules for looking things up, then the rules for drafting when the admin may draft. */
+export const instructions = (input: InstructionsInput): string => {
+  const rules = draftRules(input.tools);
+  return rules === null ? baseInstructions(input) : `${baseInstructions(input)}\n\n${rules}`;
 };

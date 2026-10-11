@@ -312,6 +312,18 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     /**
+     * One question as staff see it, or `not_found`. Use this draft loads the question again with it, to see whether it can
+     * still be answered.
+     */
+    async view(reference: string): Promise<ServiceResult<StaffQuestionView>> {
+      const row = (await strapi.documents(UID.question).findFirst({ filters: { reference: { $eq: reference } } })) as Doc | null;
+      if (!row) return failure('not_found', `No question ${reference}.`, 'Reload the Questions tab: it may have been deleted.');
+      const { demoLineUserId } = getConfig(strapi);
+      const product = row.productSlug ? await findProduct(row.productSlug, row.language) : null;
+      return { ok: true, value: toStaffView(row, product, demoLineUserId) };
+    },
+
+    /**
      * Let them know: sends the customer one LINE message in the staff member's name, saying a person has the question
      * and will reply in the chat, and marks the question taken. Only an open question: a taken one is `already_taken`,
      * and nothing is sent twice. `staffName` is the staff member's first name, or null to speak for the team. A made-up

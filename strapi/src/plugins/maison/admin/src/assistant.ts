@@ -305,6 +305,8 @@ export const TOOL_NOTES: Record<string, string> = {
   search_knowledge: 'Searches the product knowledge Maison wrote for customers.',
   search_products: 'Finds products, with prices and stock.',
   view_product: "Shows one product's details.",
+  draft_reply: 'Writes a draft reply to an inquiry. You read it, edit it and send it yourself.',
+  draft_answer: 'Writes a draft answer to a customer question. You read it, edit it and send it yourself.',
 };
 
 /** The line for a tool in the list of tools, or null for a tool with none. */

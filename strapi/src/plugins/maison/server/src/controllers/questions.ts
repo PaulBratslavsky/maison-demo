@@ -50,6 +50,17 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       ctx.body = { questions: result.value };
     },
 
+    /** GET /questions/:reference: one question as staff see it now, or a 404. Use this draft loads it again before Answer opens. */
+    async findOne(ctx) {
+      const reference = questionReferenceInput.safeParse(ctx.params.reference);
+      if (!reference.success) {
+        return ctx.badRequest(describeIssues(reference.error), { code: 'invalid_input', hint: REFERENCE_HINT });
+      }
+      const result = await questions().view(reference.data);
+      if (result.ok === false) return ctx.notFound(result.message, { code: result.code, hint: result.hint });
+      ctx.body = { question: result.value };
+    },
+
     /** POST /questions/:reference/notify: the section's Let them know. */
     async notify(ctx) {
       const reference = questionReferenceInput.safeParse(ctx.params.reference);
