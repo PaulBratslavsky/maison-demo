@@ -85,8 +85,8 @@ export interface ErrorNotice {
 }
 
 // These two texts are the server's own (CHAT_TOO_LONG_TEXT and SOMETHING_WRONG_TEXT in server/src/assistant/errors.ts).
-// A unit test holds them to it.
-const SOMETHING_WRONG = 'Something went wrong. Try again.';
+// A unit test holds them to it. drafts.ts also shows SOMETHING_WRONG, when a failed load of the item a draft is for has no message.
+export const SOMETHING_WRONG = 'Something went wrong. Try again.';
 const CHAT_TOO_LONG = 'This chat is long. Start a new chat.';
 
 /** A 401 on the chat request means the admin's session ended while the page was open. Strapi's own sign-in shows only for requests made through its fetch client, and the chat is a plain fetch, so the page says what to do. */

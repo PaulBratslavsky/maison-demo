@@ -1,8 +1,9 @@
 import * as React from 'react';
 
 import { Box, Button, Flex, Table, Tbody, Th, Thead, Tr, Typography, VisuallyHidden } from '@strapi/design-system';
-import { useFetchClient } from '@strapi/strapi/admin';
+import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
+import { replyDraftOutcome, resolveDraft, type PageDraft } from '../drafts';
 import {
   DEFAULT_FILTER,
   FILTERS,
@@ -40,6 +41,8 @@ export const InquiriesList = ({
   summary,
   summaryError,
   onChange,
+  draft,
+  onDraftTaken,
 }: {
   canReply: boolean;
   refreshKey: number;
@@ -48,6 +51,10 @@ export const InquiriesList = ({
   summaryError: string | null;
   /** Called after an action, so what shows the counts loads them again at once. */
   onChange: () => void;
+  /** The draft staff chose with Use this draft, or null. A draft for a question is not this list's: it is left alone. */
+  draft: PageDraft | null;
+  /** Called once the list has dealt with the draft, whether the dialog opened or a notice said why not, so it is never taken again. */
+  onDraftTaken: (draft: PageDraft) => void;
 }) => {
   const { get } = useFetchClient();
   const mounted = useMounted();
@@ -61,6 +68,14 @@ export const InquiriesList = ({
   const [relabelling, setRelabelling] = React.useState<StaffInquiry | null>(null);
   /** The filter on screen, updated the moment staff pick another. A response for any other filter is dropped. */
   const shownFilter = React.useRef<InquiryFilter>(filter);
+  /** The text a draft gave the reply dialog, or undefined when staff opened it from a row. */
+  const [replyDraft, setReplyDraft] = React.useState<string | undefined>(undefined);
+  /** The draft this list has taken, so a refresh, or a second run of the effect below, never takes it twice. */
+  const takenDraft = React.useRef<PageDraft | null>(null);
+  const { toggleNotification } = useNotification();
+  /** What the effect below uses, as of the latest render: it runs only when the draft changes. */
+  const latest = React.useRef({ get, toggleNotification, onDraftTaken });
+  latest.current = { get, toggleNotification, onDraftTaken };
 
   // A response that comes back after the tab was left sets nothing: every load, here and in the quota, checks `mounted` first.
   const load = React.useCallback(async (): Promise<void> => {
@@ -111,6 +126,39 @@ export const InquiriesList = ({
     setLoadError(null);
     setFilter(value);
   };
+
+  /** Opens Reply on LINE for an inquiry: with a draft's text, or empty when staff chose it from a row. */
+  const openReply = (inquiry: StaffInquiry, text?: string) => {
+    setReplyDraft(text);
+    setReplying(inquiry);
+  };
+
+  // Use this draft: the inquiry is loaded again, since the row on screen may be old. Reply on LINE opens over whatever rows the filter shows, with
+  // the text, when the inquiry can still take a reply. Otherwise a notice says why, and nothing opens. Either way the page is told, so the draft is
+  // never taken again, and the list's next refresh never opens it again.
+  React.useEffect(() => {
+    if (draft === null) {
+      takenDraft.current = null;
+      return;
+    }
+    if (draft.kind !== 'reply' || takenDraft.current === draft) return;
+    takenDraft.current = draft;
+    const taken = draft;
+    void (async () => {
+      const result = await resolveDraft(
+        async () => (await latest.current.get<{ inquiry?: StaffInquiry }>(`/maison/inquiries/${encodeURIComponent(taken.documentId)}`)).data.inquiry ?? null,
+        replyDraftOutcome
+      );
+      if (result.action === 'open') {
+        // Staff who left the tab while the inquiry loaded get no dialog on a tab that is gone. The draft stays on its card in the chat.
+        if (mounted.current) openReply(result.item, taken.text);
+      } else if (result.action === 'notify') {
+        latest.current.toggleNotification({ type: result.type, message: result.message });
+      }
+      // Cancelled: the tab was left while the inquiry loaded. Nothing is wrong, so there is no notice.
+      latest.current.onDraftTaken(taken);
+    })();
+  }, [draft, mounted]);
 
   // The actions column is for the row's own buttons (with canReply) and for Ask about this (once the assistant is ready).
   const showActions = canReply || askAbout.show;
@@ -195,7 +243,7 @@ export const InquiriesList = ({
                   inquiry={inquiry}
                   canReply={canReply}
                   acting={acting}
-                  onReply={() => setReplying(inquiry)}
+                  onReply={() => openReply(inquiry)}
                   onCloseInquiry={(reason) => run(inquiry.documentId, 'close', { reason })}
                   onChangeLabel={() => setRelabelling(inquiry)}
                   onLabelAgain={() => run(inquiry.documentId, 'label-again')}
@@ -218,6 +266,7 @@ export const InquiriesList = ({
         <InquiryReplyDialog
           key={replying.documentId}
           inquiry={replying}
+          initialText={replyDraft}
           sending={acting !== null}
           cannotSendBecause={noTokenNotice(quota)}
           onSend={(body) =>

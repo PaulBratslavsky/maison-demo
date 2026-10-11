@@ -67,8 +67,8 @@ afterEach(() => {
 const askButtons = () => screen.queryAllByRole('button', { name: 'Ask about this' });
 const rows = {
   requests: () => renderInTheme(<RequestsBoard canConfirm={false} refreshKey={0} />),
-  questions: () => renderInTheme(<QuestionsList canAnswer={false} refreshKey={0} />),
-  inquiries: () => renderInTheme(<InquiriesList canReply={false} refreshKey={0} summary={null} summaryError={null} onChange={() => {}} />),
+  questions: () => renderInTheme(<QuestionsList canAnswer={false} refreshKey={0} draft={null} onDraftTaken={() => {}} />),
+  inquiries: () => renderInTheme(<InquiriesList canReply={false} refreshKey={0} summary={null} summaryError={null} onChange={() => {}} draft={null} onDraftTaken={() => {}} />),
 };
 const ITEMS = [
   ['requests', 'APT-4821', 'Tell me about request APT-4821.'],
@@ -148,7 +148,7 @@ describe('Ask about this next to a row\'s own buttons', () => {
 
   it('sits after Answer on a question, for an admin who may answer', async () => {
     reportChat({ ready: true, busy: false });
-    renderInTheme(<QuestionsList canAnswer refreshKey={0} />);
+    renderInTheme(<QuestionsList canAnswer refreshKey={0} draft={null} onDraftTaken={() => {}} />);
     const answer = await screen.findByRole('button', { name: 'Answer' });
     const cell = answer.closest('td') as HTMLElement;
     expect(within(cell).getAllByRole('button').map((button) => button.textContent)).toEqual(['Let them know', 'Answer', 'Ask about this']);
@@ -156,7 +156,7 @@ describe('Ask about this next to a row\'s own buttons', () => {
 
   it('sits after Change label on an inquiry, for an admin who may reply', async () => {
     reportChat({ ready: true, busy: false });
-    renderInTheme(<InquiriesList canReply refreshKey={0} summary={null} summaryError={null} onChange={() => {}} />);
+    renderInTheme(<InquiriesList canReply refreshKey={0} summary={null} summaryError={null} onChange={() => {}} draft={null} onDraftTaken={() => {}} />);
     const change = await screen.findByRole('button', { name: 'Change label' });
     const cell = change.closest('td') as HTMLElement;
     const labels = within(cell).getAllByRole('button').map((button) => button.textContent);

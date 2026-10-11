@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { Box, Button, Field, Flex, Modal, Textarea, Typography } from '@strapi/design-system';
 
+import { DRAFTED_LINE } from '../drafts';
 import {
   REPLY_LIMIT,
   canSendReply,
@@ -22,16 +23,20 @@ const TOO_LONG = `A reply can have up to ${REPLY_LIMIT.toLocaleString('en-US')} 
 /**
  * Reply on LINE: the customer's message, a box for the reply, and a button that puts in the suggested text when there is
  * one for the inquiry's queue and language. It sends nothing itself: `onSend` gets the body, and whoever opened the
- * dialog posts it and closes the dialog once it went.
+ * dialog posts it and closes the dialog once it went. With `initialText`, the box starts with a draft the assistant wrote
+ * (Use this draft), and a line above it says so.
  */
 export const InquiryReplyDialog = ({
   inquiry,
+  initialText,
   sending,
   cannotSendBecause,
   onSend,
   onClose,
 }: {
   inquiry: StaffInquiry;
+  /** The text of a draft from Use this draft. Read once, when the dialog opens. Without it the box starts empty. */
+  initialText?: string;
   /** True from the click on Send on LINE until the answer comes back. Nothing in the dialog can be pressed then, and it stays open. */
   sending: boolean;
   /** Why no reply can be sent, whatever is written: shown above the box, with Send on LINE disabled. Null when one can. */
@@ -39,8 +44,8 @@ export const InquiryReplyDialog = ({
   onSend: (body: ReplyBody) => void;
   onClose: () => void;
 }) => {
-  // Never pre-filled: whatever staff write is what the customer gets.
-  const [text, setText] = React.useState('');
+  // Empty, unless staff chose Use this draft. Either way, what is in the box when staff press Send on LINE is what the customer gets.
+  const [text, setText] = React.useState(initialText ?? '');
   const replyBox = React.useRef<HTMLTextAreaElement>(null);
   const suggested = suggestedReply(inquiry.queue, inquiry.language);
 
@@ -85,6 +90,13 @@ export const InquiryReplyDialog = ({
                 )}
               </Flex>
             </Box>
+
+            {/* A draft from the assistant: staff are told so before they read it, since what they send goes out as Maison's. */}
+            {initialText !== undefined && (
+              <Typography variant="pi" textColor="warning700">
+                {DRAFTED_LINE}
+              </Typography>
+            )}
 
             <Field.Root hint={HINT} error={replyTooLong(text) ? TOO_LONG : undefined}>
               <Field.Label>Your reply</Field.Label>

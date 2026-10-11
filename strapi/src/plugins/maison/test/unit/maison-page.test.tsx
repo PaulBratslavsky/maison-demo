@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { lightTheme } from '@strapi/design-system';
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { offerDraft, pendingDraft, takeDraft } from '../../admin/src/draftStore';
+import type { PageDraft } from '../../admin/src/drafts';
 import MaisonPage from '../../admin/src/pages/MaisonPage';
 import { PAGE_SUBTITLE } from '../../admin/src/tabs';
 import { renderInTheme } from './render';
@@ -30,8 +32,34 @@ vi.mock('@strapi/strapi/admin', () => ({
 }));
 vi.mock('../../admin/src/components/RequestsBoard', () => ({ RequestsBoard: () => <section aria-label="Requests board">The board</section> }));
 vi.mock('../../admin/src/components/RequestCounts', () => ({ RequestCounts: () => <section aria-label="Request counts">The counts</section> }));
-vi.mock('../../admin/src/components/QuestionsList', () => ({ QuestionsList: () => <section aria-label="Questions list">The questions</section> }));
-vi.mock('../../admin/src/components/InquiriesList', () => ({ InquiriesList: () => <section aria-label="Inquiries list">The inquiries</section> }));
+// The lists that take a draft show the one they are given, and a button that stands for the list having dealt with it.
+type StandInProps = { draft?: { text: string } | null; onDraftTaken?: (draft: unknown) => void };
+vi.mock('../../admin/src/components/QuestionsList', () => ({
+  QuestionsList: (props: StandInProps) => (
+    <section aria-label="Questions list">
+      The questions
+      {props.draft && <p data-testid="Questions list-draft">{props.draft.text}</p>}
+      {props.draft && (
+        <button type="button" onClick={() => props.onDraftTaken?.(props.draft)}>
+          Questions list took it
+        </button>
+      )}
+    </section>
+  ),
+}));
+vi.mock('../../admin/src/components/InquiriesList', () => ({
+  InquiriesList: (props: StandInProps) => (
+    <section aria-label="Inquiries list">
+      The inquiries
+      {props.draft && <p data-testid="Inquiries list-draft">{props.draft.text}</p>}
+      {props.draft && (
+        <button type="button" onClick={() => props.onDraftTaken?.(props.draft)}>
+          Inquiries list took it
+        </button>
+      )}
+    </section>
+  ),
+}));
 vi.mock('../../admin/src/components/DemoData', () => ({ DemoData: () => <section aria-label="Demo data">The demo data</section> }));
 vi.mock('../../admin/src/useRequestsSummary', () => ({ useRequestsSummary: () => loaded.requests }));
 vi.mock('../../admin/src/useOpenQuestions', () => ({ useOpenQuestions: () => loaded.questions }));
@@ -69,6 +97,7 @@ const cssOf = (element: Element): string => {
     .join('\n');
 };
 
+afterEach(() => takeDraft());
 beforeEach(() => {
   loaded.requests = { summary: null, loadError: null };
   loaded.questions = { count: null, loadError: null, reload: () => {} };
@@ -236,5 +265,78 @@ describe('the Maison page', () => {
     expect(screen.getByText('Loading')).toBeTruthy();
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
     expect(within(document.body).queryByRole('tab')).toBeNull();
+  });
+});
+
+describe('a draft from the assistant', () => {
+  const REPLY: PageDraft = { kind: 'reply', documentId: 'inq4abc', text: 'Thank you for telling us.' };
+  const ANSWER: PageDraft = { kind: 'answer', reference: 'Q-4821', text: 'Yes. A watch up to 42 mm fits.' };
+
+  it('goes to the Inquiries list when the page opens on the Inquiries tab with a reply waiting, which is how Use this draft arrives from another page', () => {
+    offerDraft(REPLY);
+    showPage('/plugins/maison?tab=inquiries');
+    expect(screen.getByTestId('Inquiries list-draft').textContent).toBe('Thank you for telling us.');
+    expect(screen.queryByLabelText('Questions list')).toBeNull();
+  });
+
+  it('goes to the Questions list when an answer is waiting', () => {
+    offerDraft(ANSWER);
+    showPage('/plugins/maison?tab=questions');
+    expect(screen.getByTestId('Questions list-draft').textContent).toBe('Yes. A watch up to 42 mm fits.');
+  });
+
+  it('reaches a list of a page that is open already, when the assistant offers the draft', () => {
+    showPage('/plugins/maison?tab=inquiries');
+    expect(screen.queryByTestId('Inquiries list-draft')).toBeNull();
+
+    act(() => offerDraft(REPLY));
+
+    expect(screen.getByTestId('Inquiries list-draft').textContent).toBe('Thank you for telling us.');
+  });
+
+  it('gives the lists no draft when none was offered', () => {
+    showPage('/plugins/maison?tab=inquiries');
+    expect(screen.queryByTestId('Inquiries list-draft')).toBeNull();
+  });
+
+  it('holds the draft until the list has dealt with it, and then holds none, so no list opens it again', async () => {
+    offerDraft(REPLY);
+    showPage('/plugins/maison?tab=inquiries');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Inquiries list took it' }));
+
+    expect(pendingDraft()).toBeNull();
+    expect(screen.queryByTestId('Inquiries list-draft')).toBeNull();
+  });
+
+  it('does not put the draft in the address', () => {
+    offerDraft(REPLY);
+    showPage('/plugins/maison?tab=inquiries');
+    expect(screen.getByTestId('location').textContent).toBe('/plugins/maison?tab=inquiries');
+  });
+
+  it('drops a draft for a tab the admin may not see, so it does not open when they get that tab later', () => {
+    asAdmin({ canReview: true });
+    offerDraft(REPLY);
+    showPage('/plugins/maison');
+    expect(pendingDraft()).toBeNull();
+  });
+
+  it('holds the draft while the permissions are checked, and gives it to the list afterwards', () => {
+    rbac.use.mockReturnValue({ isLoading: true, allowedActions: {}, permissions: [], error: undefined });
+    offerDraft(REPLY);
+    const view = showPage('/plugins/maison?tab=inquiries');
+    expect(pendingDraft()).toBe(REPLY);
+
+    asAdmin(EVERYTHING);
+    view.rerender(
+      <MemoryRouter initialEntries={['/plugins/maison?tab=inquiries']}>
+        <MaisonPage />
+        <Where />
+      </MemoryRouter>
+    );
+
+    expect(pendingDraft()).toBe(REPLY);
+    expect(screen.getByTestId('Inquiries list-draft').textContent).toBe('Thank you for telling us.');
   });
 });

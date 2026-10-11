@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@strapi/design-system';
 
+import { DRAFTED_LINE } from '../drafts';
 import {
   ANSWER_LIMIT,
   CATEGORY_OPTIONS,
@@ -37,21 +38,26 @@ const TITLE_TOO_LONG = `A title can have up to ${TITLE_LIMIT} characters.`;
  * Answer: the question, a box for the answer, and whether it also becomes product knowledge, under a title and a
  * category. The title starts as the customer's own question, which staff can edit: customers see it in the concierge.
  * It sends nothing itself: `onSend` gets the body, and whoever opened the dialog posts it and closes the dialog once it went.
+ * With `initialText`, the box starts with a draft the assistant wrote (Use this draft), and a line above it says so.
  */
 export const AnswerDialog = ({
   question,
+  initialText,
   sending,
   onSend,
   onClose,
 }: {
   question: StaffQuestion;
+  /** The text of a draft from Use this draft. Read once, when the dialog opens. Without it the box starts empty. */
+  initialText?: string;
   /** True from the click on Send on LINE until the answer comes back. Nothing in the dialog can be pressed then, and it stays open. */
   sending: boolean;
   onSend: (body: AnswerBody) => void;
   onClose: () => void;
 }) => {
-  // Never pre-filled: whatever staff write is what the customer gets. Ticked, because most answers are worth keeping.
-  const [text, setText] = React.useState('');
+  // Empty, unless staff chose Use this draft. Either way, what is in the box when staff press Send on LINE is what the customer gets.
+  // Add to product knowledge starts ticked, because most answers are worth keeping, and a drafted one is no exception: staff read it first.
+  const [text, setText] = React.useState(initialText ?? '');
   const [addToKnowledge, setAddToKnowledge] = React.useState(true);
   const [category, setCategory] = React.useState('');
   // The title starts as the question, which is what an entry was titled before staff could write one.
@@ -93,6 +99,13 @@ export const AnswerDialog = ({
                 )}
               </Flex>
             </Box>
+
+            {/* A draft from the assistant: staff are told so before they read it, since what they send goes out in their name. */}
+            {initialText !== undefined && (
+              <Typography variant="pi" textColor="warning700">
+                {DRAFTED_LINE}
+              </Typography>
+            )}
 
             <Field.Root hint={HINT} error={answerTooLong(text) ? ANSWER_TOO_LONG : undefined}>
               <Field.Label>Your answer</Field.Label>

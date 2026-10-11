@@ -18,6 +18,7 @@ import {
 } from '@strapi/design-system';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
+import { answerDraftOutcome, resolveDraft, type PageDraft } from '../drafts';
 import { LINE_NOTE_COLORS, lineNote } from '../line-note';
 import { startPolling } from '../poll';
 import {
@@ -33,6 +34,7 @@ import {
   type StaffQuestion,
 } from '../questions';
 import { useAskAbout } from '../useAskAbout';
+import { useMounted } from '../useMounted';
 import { AnswerDialog } from './AnswerDialog';
 import { YourLineBadge } from './YourLineBadge';
 
@@ -67,15 +69,22 @@ export const QuestionsList = ({
   canAnswer,
   refreshKey,
   onChange,
+  draft,
+  onDraftTaken,
 }: {
   canAnswer: boolean;
   refreshKey: number;
   /** Called after Let them know or Answer went, or was refused, so what shows the number of open questions loads it again at once. */
   onChange?: () => void;
+  /** The draft staff chose with Use this draft, or null. A draft for an inquiry is not this list's: it is left alone. */
+  draft: PageDraft | null;
+  /** Called once the list has dealt with the draft, whether the dialog opened or a notice said why not, so it is never taken again. */
+  onDraftTaken: (draft: PageDraft) => void;
 }) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
   const askAbout = useAskAbout();
+  const mounted = useMounted();
   const [filter, setFilter] = React.useState<Filter>('open');
   const [questions, setQuestions] = React.useState<StaffQuestion[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -86,6 +95,13 @@ export const QuestionsList = ({
   const [sending, setSending] = React.useState<Sending | null>(null);
   /** The question whose Answer dialog is open. */
   const [answering, setAnswering] = React.useState<StaffQuestion | null>(null);
+  /** The text a draft gave the Answer dialog, or undefined when staff opened it from a row. */
+  const [answerDraft, setAnswerDraft] = React.useState<string | undefined>(undefined);
+  /** The draft this list has taken, so a refresh, or a second run of the effect below, never takes it twice. */
+  const takenDraft = React.useRef<PageDraft | null>(null);
+  /** What the effect below uses, as of the latest render: it runs only when the draft changes. */
+  const latest = React.useRef({ get, toggleNotification, onDraftTaken });
+  latest.current = { get, toggleNotification, onDraftTaken };
   /** The filter on screen, updated the moment staff pick another. A response for any other filter is dropped. */
   const shownFilter = React.useRef<Filter>(filter);
 
@@ -108,6 +124,39 @@ export const QuestionsList = ({
     shownFilter.current = value;
     setFilter(value);
   };
+
+  /** Opens Answer for a question: with a draft's text, or empty when staff chose it from a row. */
+  const openAnswer = (question: StaffQuestion, text?: string) => {
+    setAnswerDraft(text);
+    setAnswering(question);
+  };
+
+  // Use this draft: the question is loaded again, since the row on screen may be old. Answer opens over whatever rows the filter shows, with the
+  // text, when the question can still be answered. Otherwise a notice says why, and nothing opens. Either way the page is told, so the draft is
+  // never taken again, and the list's next refresh never opens it again.
+  React.useEffect(() => {
+    if (draft === null) {
+      takenDraft.current = null;
+      return;
+    }
+    if (draft.kind !== 'answer' || takenDraft.current === draft) return;
+    takenDraft.current = draft;
+    const taken = draft;
+    void (async () => {
+      const result = await resolveDraft(
+        async () => (await latest.current.get<{ question?: StaffQuestion }>(`/maison/questions/${encodeURIComponent(taken.reference)}`)).data.question ?? null,
+        answerDraftOutcome
+      );
+      if (result.action === 'open') {
+        // Staff who left the tab while the question loaded get no dialog on a tab that is gone. The draft stays on its card in the chat.
+        if (mounted.current) openAnswer(result.item, taken.text);
+      } else if (result.action === 'notify') {
+        latest.current.toggleNotification({ type: result.type, message: result.message });
+      }
+      // Cancelled: the tab was left while the question loaded. Nothing is wrong, so there is no notice.
+      latest.current.onDraftTaken(taken);
+    })();
+  }, [draft, mounted]);
 
   /**
    * Let them know, or Answer (with its body): Strapi sends the LINE message in the signed-in admin's name. The notice is
@@ -251,7 +300,7 @@ export const QuestionsList = ({
                           size="S"
                           loading={isSending(question, 'answer')}
                           disabled={sending !== null}
-                          onClick={() => setAnswering(question)}
+                          onClick={() => openAnswer(question)}
                         >
                           Answer
                         </Button>
@@ -279,6 +328,7 @@ export const QuestionsList = ({
         <AnswerDialog
           key={answering.reference}
           question={answering}
+          initialText={answerDraft}
           sending={sending !== null}
           onSend={(body) => send(answering.reference, 'answer', body)}
           onClose={() => setAnswering(null)}
