@@ -8,7 +8,7 @@ import { assistantWorld } from './fake-assistant-world';
 import './render';
 
 /*
- * The assistant's host: the one place on the screen where the chat lives, in a React root of its own, added to the body. The chat cannot live in
+ * The assistant's host: the one place on the screen where the chat is kept, in a React root of its own, added to the body. The chat cannot be kept in
  * Maison's menu icon, because Strapi draws that icon again on every change of address (see fake-strapi-menu.tsx). The host is told what the icon
  * knows (the theme, the language, whether the admin may use the assistant) and is kept for as long as an icon is on the screen.
  */
@@ -95,7 +95,7 @@ describe('the assistant host', () => {
       expect(cssOf(screen.getByRole('complementary', { name: 'Maison assistant' }))).toContain(`background:${darkTheme.colors.neutral0};`);
     });
 
-    it('takes the chat away when the admin may no longer use the assistant, and draws a new one if they may again', async () => {
+    it('removes the chat when the admin may no longer use the assistant, and draws a new one if they may again', async () => {
       attachHost();
       act(() => updateHost(allowed));
       await userEvent.click(await launcher());

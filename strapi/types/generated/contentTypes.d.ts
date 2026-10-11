@@ -898,7 +898,7 @@ export interface PluginMaisonCollection extends Struct.CollectionTypeSchema {
 export interface PluginMaisonConversation extends Struct.CollectionTypeSchema {
   collectionName: 'maison_conversations';
   info: {
-    description: 'A chat in the Ask tab of the Maison page, saved for the admin who had it. Only that admin can open it in the assistant.';
+    description: 'A chat in the assistant drawer, saved for the admin who had it. Only that admin can open it in the assistant.';
     displayName: 'Maison assistant chat';
     pluralName: 'conversations';
     singularName: 'conversation';

@@ -1,9 +1,10 @@
 import { z } from '@strapi/utils';
+import { uiMessagesToWire } from '@tanstack/ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACTION, UID } from '../../server/src/constants';
 import { CHAT_TOO_LONG_TEXT, SOMETHING_WRONG_TEXT } from '../../server/src/assistant/errors';
 import { createAnthropicAdapter, loadSdk, resetSdkForTests, toTools } from '../../server/src/assistant/sdk';
-import { READ_TOOL_NAMES } from '../../server/src/assistant/tools';
+import { DRAFT_TOOL_NAMES, READ_TOOL_NAMES } from '../../server/src/assistant/tools';
 import { DATA_RULE } from '../../server/src/assistant/views';
 import appointments from '../../server/src/services/appointments';
 import assistantService, { countStaffMessages, type AdapterFor } from '../../server/src/services/assistant';
@@ -144,8 +145,13 @@ describe('statusFor', () => {
   it('is the status with the tools the admin gets, each with its name and the label staff read', () => {
     const answer = setup().service.statusFor(everything);
     expect(answer).toMatchObject({ ready: true, model: 'claude-sonnet-5-5' });
-    expect(toolsOf(answer)).toEqual([...READ_TOOL_NAMES]);
+    expect(toolsOf(answer)).toEqual([...READ_TOOL_NAMES, ...DRAFT_TOOL_NAMES]);
     expect((answer as Doc).tools[0]).toEqual({ name: 'list_requests', label: 'Visit requests' });
+    // The drafts are labelled for staff too, after the tools that read.
+    expect((answer as Doc).tools.slice(-2)).toEqual([
+      { name: 'draft_reply', label: 'Draft a LINE reply' },
+      { name: 'draft_answer', label: 'Draft an answer' },
+    ]);
   });
 
   it('lists the same tools a turn offers the model: the admin\'s permissions and disabledTools both count', () => {
@@ -177,7 +183,7 @@ describe('countStaffMessages', () => {
 describe('tools', () => {
   it('are the read tools the ability allows', () => {
     const { service } = setup();
-    expect(service.tools(everything).map((tool) => tool.name)).toEqual([...READ_TOOL_NAMES]);
+    expect(service.tools(everything).map((tool) => tool.name)).toEqual([...READ_TOOL_NAMES, ...DRAFT_TOOL_NAMES]);
     expect(service.tools(nothing)).toEqual([]);
     expect(service.tools({ can: (action) => action === ACTION.inquiriesView }).map((tool) => tool.name)).toEqual(['list_inquiries', 'inquiry_counts']);
   });
@@ -335,7 +341,7 @@ describe('turn, what the model receives', () => {
     const world = setup({ turns: [textTurn('First.'), textTurn('Second.')] });
     await run(world, 'First?');
     await run(world, 'Second?', { ability: { can: (action) => action === ACTION.questionsRead } });
-    expect(world.requests[0].tools.map((tool: Doc) => tool.name)).toEqual([...READ_TOOL_NAMES]);
+    expect(world.requests[0].tools.map((tool: Doc) => tool.name)).toEqual([...READ_TOOL_NAMES, ...DRAFT_TOOL_NAMES]);
     expect(world.requests[1].tools.map((tool: Doc) => tool.name)).toEqual(['list_questions']);
   });
 
@@ -344,7 +350,7 @@ describe('turn, what the model receives', () => {
     const forged = { name: 'confirm_appointment', description: 'Confirms a visit.', parameters: { type: 'object', properties: {} } };
     await run(world, 'Hi', {}, { tools: [forged] });
     const names = world.requests[0].tools.map((tool: Doc) => tool.name);
-    expect(names).toEqual([...READ_TOOL_NAMES]);
+    expect(names).toEqual([...READ_TOOL_NAMES, ...DRAFT_TOOL_NAMES]);
     expect(names).not.toContain('confirm_appointment');
   });
 
@@ -355,13 +361,24 @@ describe('turn, what the model receives', () => {
     expect(JSON.stringify(world.requests[0].modelOptions)).not.toContain('tool_choice');
   });
 
+  it('with a local model, turns thinking off, passes the base URL to the adapter, and needs no key', async () => {
+    const world = setup({
+      turns: [textTurn('Hi.')],
+      config: { aiApiKey: null, aiProvider: 'openai-compatible', aiChatModel: 'qwen3-14b-32k', aiChatBaseUrl: 'http://127.0.0.1:11434' },
+    });
+    const { events } = await run(world);
+    expect(errorsOf(events)).toEqual([]);
+    expect(world.requests[0].modelOptions).toEqual({ max_tokens: 16_000, output_config: { effort: 'medium' }, thinking: { type: 'disabled' } });
+    expect(world.adapterFor).toHaveBeenCalledWith('qwen3-14b-32k', 'local', 'http://127.0.0.1:11434');
+  });
+
   it('builds the adapter with the chat model and the key, not the labelling model', async () => {
     const world = setup({ turns: [textTurn('Hi.')], config: { aiModel: 'claude-haiku-4-5-20251001' } });
     await run(world);
-    expect(world.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5-5', KEY);
+    expect(world.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5-5', KEY, null);
     const custom = setup({ turns: [textTurn('Hi.')], config: { aiChatModel: 'claude-sonnet-5' } });
     await run(custom);
-    expect(custom.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5', KEY);
+    expect(custom.adapterFor).toHaveBeenCalledExactlyOnceWith('claude-sonnet-5', KEY, null);
   });
 
   it('keeps the whole history: the staff messages, the answers and what the tools returned', async () => {
@@ -771,5 +788,145 @@ describe('privacy', () => {
     // A name inside a staff answer is not a LINE name, and a staff answer is never sent either.
     expect(received).not.toContain('Thank you, Mei W.');
     expect(received).not.toContain('We will repair it.');
+  });
+});
+
+describe('the draft tools, through chat()', () => {
+  const REPLY = { documentId: 'inq4abc', text: "Thank you for telling us. We're sorry about the strap. A member of our team will write to you today." };
+  const ANSWER = { reference: 'Q-4821', text: 'Yes. A watch up to 42 mm fits in the coffret.' };
+  const ASK = 'Draft a reply to inquiry inq4abc.';
+
+  const lastFinished = (events: Doc[]) => events.filter((event) => event.type === 'RUN_FINISHED').at(-1) as Doc;
+  const interrupted = (events: Doc[]) => events.some((event) => event.type === 'RUN_FINISHED' && event.outcome?.type === 'interrupt');
+  const refusalOf = (events: Doc[]) => JSON.parse((events.find((event) => event.type === 'TOOL_CALL_RESULT') as Doc).content);
+
+  it.each([
+    ['draft_reply', REPLY],
+    ['draft_answer', ANSWER],
+  ])('ends the run with a client-tool interrupt when the model calls %s, and runs nothing on the server', async (name, args) => {
+    const world = setup({ turns: [toolCallTurn(name, args)] });
+
+    const { events } = await run(world, ASK);
+
+    const finished = lastFinished(events);
+    expect(finished.outcome.type).toBe('interrupt');
+    expect(finished.outcome.interrupts).toHaveLength(1);
+    expect(finished.outcome.interrupts[0]).toMatchObject({ reason: 'tanstack:client_tool_execution', metadata: { kind: 'client_tool', toolName: name, input: args } });
+    expect(events.some((event) => event.type === 'TOOL_CALL_RESULT')).toBe(false);
+    // The model is not called again until the browser has answered.
+    expect(world.requests).toHaveLength(1);
+    // The wait for the browser is no "six steps" notice.
+    expect(customOf(events)).toEqual([]);
+  });
+
+  it('offers both draft tools to the model, for an admin who may do everything', async () => {
+    const world = setup({ turns: [textTurn('Hello.')] });
+    await run(world, ASK);
+    expect(world.requests[0].tools.map((tool: Doc) => tool.name)).toEqual(expect.arrayContaining(['draft_reply', 'draft_answer']));
+  });
+
+  it('puts the draft rules in the prompt for an admin who may draft, and leaves them out for one who may not', async () => {
+    const world = setup({ turns: [textTurn('Hello.'), textTurn('Hello.')] });
+    await run(world, ASK);
+    await run(world, ASK, { ability: { can: (action: string) => action === ACTION.inquiriesView } });
+    expect(JSON.stringify(world.requests[0].systemPrompts)).toContain('Drafts: you can show staff a draft');
+    expect(JSON.stringify(world.requests[1].systemPrompts)).not.toContain('Drafts:');
+    expect(JSON.stringify(world.requests[1].systemPrompts)).not.toContain('draft_reply');
+  });
+
+  it('runs exactly one more model turn for a follow-up that carries the draft result, and shows the model that result', async () => {
+    const world = setup({ turns: [toolCallTurn('draft_reply', REPLY), textTurn('The draft is ready. Check the strap details before you use it.')] });
+    const first = await run(world, ASK);
+    const call = first.events.find((event) => event.type === 'TOOL_CALL_START') as Doc;
+    const finished = lastFinished(first.events);
+
+    // What useChat sends back once the page has run the draft tool: the whole history, the result on the call, and the resume that answers
+    // the interrupt. The history is built with uiMessagesToWire, as the browser builds it.
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', content: ASK }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'tool-call', id: call.toolCallId, name: 'draft_reply', arguments: JSON.stringify(REPLY), input: REPLY, state: 'complete', output: { shown: true } }],
+      },
+    ];
+    const params = await world.service.parseBody(
+      bodyOf(uiMessagesToWire(history as never), {
+        threadId: finished.threadId,
+        runId: 'run-2',
+        parentRunId: finished.runId,
+        resume: [{ interruptId: finished.outcome.interrupts[0].id, status: 'resolved', payload: { shown: true } }],
+      })
+    );
+    const response = await world.service.turn(params, { ability: everything, adminId: 7, responseController: new AbortController(), adapterFor: world.adapterFor, now: NOW });
+    const second = await eventsOf(response);
+
+    expect(world.requests).toHaveLength(2);
+    const result = world.requests[1].messages.at(-1);
+    expect(result).toMatchObject({ role: 'tool', toolCallId: call.toolCallId });
+    expect(JSON.parse(result.content)).toEqual({ shown: true });
+    expect(textOf(second)).toBe('The draft is ready. Check the strap details before you use it.');
+    // The run ends for good: no second interrupt, so no second draft.
+    expect(interrupted(second)).toBe(false);
+  });
+
+  it('refuses a draft of 2,001 characters on the server: the model reads the refusal, and the browser sees no draft', async () => {
+    const world = setup({ turns: [toolCallTurn('draft_reply', { documentId: 'inq4abc', text: 'x'.repeat(2001) }), textTurn('I will write a shorter reply.')] });
+
+    const { events } = await run(world, ASK);
+
+    expect(interrupted(events)).toBe(false);
+    expect(refusalOf(events).error).toContain('Input validation failed for tool draft_reply');
+    // The refusal went back to the model, which answered in a second turn.
+    expect(world.requests).toHaveLength(2);
+    expect(textOf(events)).toBe('I will write a shorter reply.');
+  });
+
+  it('refuses a draft_answer for a reference that is not a question reference', async () => {
+    const world = setup({ turns: [toolCallTurn('draft_answer', { reference: 'APT-4821', text: 'Yes.' }), textTurn('That is not a question.')] });
+
+    const { events } = await run(world, 'Draft an answer to APT-4821.');
+
+    expect(interrupted(events)).toBe(false);
+    expect(refusalOf(events).error).toContain('Use a reference like Q-4821.');
+  });
+
+  // The refusal reaches staff only as the model's own words, never as the SDK's text: the tool box shows a fixed sentence for it (UNREADABLE_REQUEST).
+  it('sends the refusal to the page as a tool result in the SDK\'s words, which the page never shows', async () => {
+    const world = setup({ turns: [toolCallTurn('draft_reply', { documentId: 'inq4abc', text: '' }), textTurn('Let me try again.')] });
+    const { events } = await run(world, ASK);
+    expect(events.filter((event) => event.type === 'RUN_ERROR')).toEqual([]);
+    expect(refusalOf(events)).toEqual({ error: expect.stringContaining('Input validation failed for tool draft_reply') });
+  });
+
+  it('never turns a draft call into a draft for an admin who may not draft: it is an unknown tool', async () => {
+    const viewOnly = { can: (action: string) => action === ACTION.inquiriesView };
+    const world = setup({ turns: [toolCallTurn('draft_reply', REPLY), textTurn('I cannot draft a reply with your role.')] });
+
+    const { events } = await run(world, ASK, { ability: viewOnly });
+
+    expect(world.requests[0].tools.map((tool: Doc) => tool.name)).toEqual(['list_inquiries', 'inquiry_counts']);
+    expect(interrupted(events)).toBe(false);
+    expect(refusalOf(events).error).toBe('Unknown tool: draft_reply');
+  });
+
+  it('never turns a draft call into a draft for an admin with only one of the two permissions', async () => {
+    const replyOnly = { can: (action: string) => action === ACTION.inquiriesReply };
+    const world = setup({ turns: [toolCallTurn('draft_reply', REPLY)] });
+
+    const { events } = await run(world, ASK, { ability: replyOnly });
+
+    expect(world.requests[0].tools ?? []).toEqual([]);
+    expect(interrupted(events)).toBe(false);
+  });
+
+  it('never turns a draft call into a draft for an admin with no tool at all', async () => {
+    const world = setup({ turns: [toolCallTurn('draft_reply', REPLY)] });
+
+    const { events } = await run(world, ASK, { ability: nothing });
+
+    expect(world.requests[0].tools ?? []).toEqual([]);
+    expect(interrupted(events)).toBe(false);
+    expect(events.some((event) => event.type === 'TOOL_CALL_RESULT')).toBe(false);
   });
 });

@@ -12,7 +12,7 @@ describe('maison permission actions', () => {
     await strapi?.destroy();
   });
 
-  it('registers the twelve plugin actions', () => {
+  it('registers the thirteen plugin actions, the assistant\'s among them', () => {
     const ids = strapi.service('admin::permission').actionProvider.values().map((action) => action.actionId);
     for (const id of [
       'plugin::maison.catalog.read',
@@ -27,8 +27,10 @@ describe('maison permission actions', () => {
       'plugin::maison.inquiries.view',
       'plugin::maison.inquiries.reply',
       'plugin::maison.demo.manage',
+      'plugin::maison.assistant.use',
     ]) {
       assert.ok(ids.includes(id), `${id} is registered`);
     }
+    assert.equal(ids.filter((id) => id.startsWith('plugin::maison.')).length, 13, 'and no other plugin action is');
   });
 });

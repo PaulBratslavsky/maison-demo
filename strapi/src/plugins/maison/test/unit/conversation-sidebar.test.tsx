@@ -31,6 +31,12 @@ const cssOf = (element: Element): string => {
 };
 
 describe('ConversationSidebar', () => {
+  it('is a landmark that has a name, so a screen reader can speak it: an aside called "Saved chats"', () => {
+    renderInTheme(sidebar());
+    expect(root().tagName).toBe('ASIDE');
+    expect(screen.getByRole('complementary', { name: 'Saved chats' })).toBe(root());
+  });
+
   it('lists the chats in the order it is given, newest first, each as a button with its title', () => {
     renderInTheme(sidebar());
     const titles = within(root())

@@ -79,7 +79,7 @@ describe('Launcher', () => {
     expect(cssOf(button())).toMatch(/[{;]z-index:299;/);
   });
 
-  it('hands its button to a ref, so the drawer can give it the focus back when it closes', () => {
+  it('sets its button on the ref, so the drawer can give it the focus back when it closes', () => {
     const ref = createRef<HTMLButtonElement>();
     renderInTheme(<Launcher ref={ref} open={false} onOpen={() => {}} />);
     expect(ref.current).toBe(button());

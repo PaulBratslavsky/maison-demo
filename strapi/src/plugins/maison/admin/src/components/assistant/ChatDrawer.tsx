@@ -76,6 +76,11 @@ interface ChatDrawerProps {
   open: boolean;
   /** Whether the chat is wide (960px) and not narrow (600px). It changes the width of the chat and nothing else. */
   expanded: boolean;
+  /**
+   * Changes each time the page sent a message to the chat (Ask about this). The button staff pressed is switched off while the answer comes, so the focus
+   * would be lost with it: the text box takes it, in a drawer that was open already as well as in one that opens for the message.
+   */
+  focusSignal?: number;
   onToggleExpanded: () => void;
   /** Close was pressed, or Escape. The parent hides the drawer and gives the focus back to the launcher. */
   onClose: () => void;
@@ -95,12 +100,12 @@ interface ChatDrawerProps {
  * - Expand makes the chat wider and does nothing else. History alone shows and hides the saved chats, as a column beside the chat, and the drawer
  *   is wider by that column while it is open.
  */
-export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDrawerProps) => {
+export const ChatDrawer = ({ open, expanded, focusSignal = 0, onToggleExpanded, onClose }: ChatDrawerProps) => {
   const assistant = useAssistant();
   const box = React.useRef<HTMLTextAreaElement>(null);
   const root = React.useRef<HTMLElement>(null);
 
-  const state = assistant ? askTabState(assistant.status, assistant.statusError) : null;
+  const state = assistant ? askTabState(assistant.status, assistant.statusFailed) : null;
   const showsChat = state?.kind === 'chat';
 
   // When the drawer opens, the focus goes to the text box, or to the drawer if there is no text box yet. A closed drawer is hidden, and can't take it.
@@ -109,6 +114,11 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
     if (box.current) box.current.focus();
     else root.current?.focus();
   }, [open]);
+
+  // A message from a row of the page: the focus goes to the text box.
+  React.useEffect(() => {
+    if (open && focusSignal > 0) box.current?.focus();
+  }, [open, focusSignal]);
 
   // When the text box comes, it takes the focus if the focus is on the drawer or nowhere: still on the drawer, in a button that has just gone
   // (Check again), or lost with it. Staff may have moved the focus into the page meanwhile, and that is not taken from them.
@@ -232,7 +242,7 @@ export const ChatDrawer = ({ open, expanded, onToggleExpanded, onClose }: ChatDr
       onClose={onClose}
     >
       <MessageList messages={assistant.messages} busy={busy} />
-      {/* A turn's error wins over a problem with the saved chats: it is about what staff are watching. */}
+      {/* A turn's error is shown in place of a problem with the saved chats, because it is about what staff are watching. */}
       {(notice?.text ?? history.error) && <ErrorBox>{notice?.text ?? history.error}</ErrorBox>}
       {note && <NoteBox>{note}</NoteBox>}
       {/* The five quick questions, directly above the text box and outside the list, for the whole chat. Pressing one sends it as a starter. */}

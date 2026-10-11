@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dayInZone, instructions } from '../../server/src/assistant/instructions';
-import { READ_TOOL_NAMES } from '../../server/src/assistant/tools';
+import { DRAFT_TOOL_NAMES, READ_TOOL_NAMES } from '../../server/src/assistant/tools';
 import { DATA_RULE } from '../../server/src/assistant/views';
 import { FENCED_TAGS } from '../../server/src/domain/fence';
 
@@ -218,5 +218,89 @@ describe('an admin with no read permission', () => {
     expect(prompt).toContain('Today is Tuesday 2026-10-06 (Asia/Tokyo).');
     expect(prompt).toContain(DATA_RULE);
     expect(prompt).toContain('You never send, confirm, answer, close or relabel anything.');
+  });
+});
+
+describe('the draft rules', () => {
+  const READ_ONLY = ['list_requests', 'list_questions', 'list_inquiries', 'inquiry_counts'];
+  const BOTH = [...READ_ONLY, ...DRAFT_TOOL_NAMES];
+  const withTools = (tools: readonly string[]) => text({ tools });
+
+  it('name the same two tools as the server offers', () => {
+    expect([...DRAFT_TOOL_NAMES]).toEqual(['draft_reply', 'draft_answer']);
+    expect(withTools(BOTH)).toContain('draft_reply (a reply to an inquiry) and draft_answer (an answer to a customer question)');
+  });
+
+  it.each([[[]], [READ_ONLY], [ALL]])('are left out for an admin who is offered no draft tool (%j)', (tools) => {
+    const prompt = withTools(tools);
+    expect(prompt).not.toContain('draft_reply');
+    expect(prompt).not.toContain('draft_answer');
+    expect(prompt).not.toContain('Look the item up before you draft');
+  });
+
+  it('say that a draft is a card, that the assistant never sends it, and that staff send it with the buttons', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain('A draft is a card in the chat.');
+    expect(prompt).toContain("You never send it: staff read it, edit it and send it with the page's buttons.");
+  });
+
+  it('say to look the item up first, and to draft only for an item looked up in this chat', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain('Look the item up before you draft it.');
+    expect(prompt).toContain('Draft only for an item you looked up in this chat.');
+  });
+
+  it('say to write only the body, and what Maison adds to a reply and to an answer', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain('Write only the body of the message.');
+    expect(prompt).toContain('for a reply, the quote of the customer\'s words and "Maison"');
+    expect(prompt).toContain("for an answer, the greeting with the staff member's name, the quote of the question, an invitation to reply and the signature");
+    expect(prompt).toContain('So write no greeting and no signature.');
+  });
+
+  it("say to write in the item's language, and to talk to staff in theirs", () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain("Write the draft in the item's language, ja or en.");
+    expect(prompt).toContain('Talk to staff in the language they write in.');
+  });
+
+  it('say to use only facts from the chat, to say what staff should check, and to leave no gaps', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain('Use only facts from tool results or from what staff wrote in this chat.');
+    expect(prompt).toContain('say in the chat what staff should check');
+    expect(prompt).toContain('Leave no gaps and no placeholders in the draft.');
+  });
+
+  it('send an inquiry with a linked question to draft_answer, and say a draft is never reported as sent', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).toContain('An inquiry with a questionReference is answered under Questions. Draft an answer for that question with draft_answer, not a reply.');
+    expect(prompt).toContain('After a draft, say one short sentence at most. Never say a draft was sent: staff send it.');
+  });
+
+  it('keep the data rule, the date and the rest of the prompt ahead of them', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt.indexOf(DATA_RULE)).toBeGreaterThanOrEqual(0);
+    expect(prompt.indexOf(DATA_RULE)).toBeLessThan(prompt.indexOf('Drafts: you can show staff a draft'));
+    expect(prompt).toContain('Today is Tuesday 2026-10-06 (Asia/Tokyo).');
+  });
+
+  it('name only the draft tool the admin is offered, so the model is never pointed at one it does not have', () => {
+    const replyOnly = withTools([...READ_ONLY, 'draft_reply']);
+    expect(replyOnly).toContain('draft_reply (a reply to an inquiry)');
+    expect(replyOnly).not.toContain('draft_answer');
+    expect(replyOnly).not.toContain('for an answer');
+    expect(replyOnly).toContain('Never draft a reply for it: tell staff to answer it there.');
+
+    const answerOnly = withTools([...READ_ONLY, 'draft_answer']);
+    expect(answerOnly).toContain('draft_answer (an answer to a customer question)');
+    expect(answerOnly).not.toContain('draft_reply');
+    expect(answerOnly).not.toContain('for a reply');
+    expect(answerOnly).toContain('Draft an answer for that question with draft_answer.');
+  });
+
+  it('leave no gap where a line was never written, and have no Markdown, no em dash and no en dash', () => {
+    const prompt = withTools(BOTH);
+    expect(prompt).not.toContain('undefined');
+    expect(prompt).not.toMatch(/\*\*|^#|\u2014|\u2013/m);
   });
 });

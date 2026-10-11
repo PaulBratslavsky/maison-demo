@@ -32,6 +32,21 @@ describe('toStoredMessages', () => {
     expect(stored.value?.messages[0].parts[1]).toHaveProperty('metadata', { anthropic: { citations: [] } });
   });
 
+  // A saved chat that holds a draft keeps the card when it is opened again: the draft call with its input and its output, and its result.
+  it('keeps a draft call with its input and its { shown: true } output, and its result, so a reopened chat shows the card', () => {
+    const draft = { documentId: 'inq4abc', text: 'Thank you for telling us.\nA member of our team will write to you today.' };
+    const messages = [
+      message([
+        { type: 'tool-call', id: 'c1', name: 'draft_reply', arguments: JSON.stringify(draft), input: draft, state: 'complete', output: { shown: true } },
+        { type: 'tool-result', toolCallId: 'c1', content: '{"shown":true}', state: 'complete' },
+      ]),
+    ];
+    const stored = toStoredMessages(messages);
+    expect(stored.ok).toBe(true);
+    expect(stored.value?.messages).toEqual(messages);
+    expect(readStoredMessages(stored.value).messages).toEqual(messages);
+  });
+
   it('keeps a part of a type it does not know, as it is, instead of refusing the chat', () => {
     const messages = [message([{ type: 'structured-output', status: 'complete', raw: '{}', data: { a: 1 } }, text('Done.')])];
     expect(toStoredMessages(messages).value?.messages).toEqual(messages);

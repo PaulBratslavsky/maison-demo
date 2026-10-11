@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Box, Flex, Tabs } from '@strapi/design-system';
 import { Page, useRBAC } from '@strapi/strapi/admin';
@@ -10,6 +10,7 @@ import { PageHeader } from '../components/PageHeader';
 import { QuestionsList } from '../components/QuestionsList';
 import { RequestCounts } from '../components/RequestCounts';
 import { RequestsBoard } from '../components/RequestsBoard';
+import { takeDraft, usePendingDraft } from '../draftStore';
 import { PERMISSIONS } from '../permissions';
 import { PAGE_SUBTITLE, selectTab, tabCounts, tabLabel, visibleTabs } from '../tabs';
 import { useInquiriesSummary } from '../useInquiriesSummary';
@@ -22,6 +23,9 @@ const MaisonPage = () => {
   // The tab is in the address (`?tab=inquiries`), so a link can open it. With none named, or one the admin may not see,
   // the page opens on the first tab the admin may see.
   const [searchParams, setSearchParams] = useSearchParams();
+  // The draft staff chose with Use this draft in the assistant's drawer. The drawer is a React root of its own, outside this page, so the draft
+  // comes through a small store both share (draftStore.ts), not through a prop or the address. It is held until a list has dealt with it.
+  const draft = usePendingDraft();
 
   // The number on each tab: polled for the admins who may see the tab, whichever tab is open, since staff land on one
   // tab and need to see where the work is on the others. The cards and the lists read these same answers, so each is
@@ -32,17 +36,25 @@ const MaisonPage = () => {
   const questions = useOpenQuestions(refreshKey, ready && allowedActions.canRead === true);
   const inquiries = useInquiriesSummary(refreshKey, ready && allowedActions.canView === true);
 
-  if (isLoading) return <Page.Loading />;
-
-  /** A new refreshKey makes the board, the counts and the lists load again at once. */
-  const refresh = () => setRefreshKey((key) => key + 1);
-
   // Each tab is for the admins who may see what is in it.
   const tabs = visibleTabs({
     canReview: allowedActions.canReview,
     canRead: allowedActions.canRead,
     canView: allowedActions.canView,
   });
+
+  // A draft for a tab this admin does not have has no list to take it. It is dropped, so it does not open by surprise when they get the tab later.
+  // The permissions are checked first: until then no tab is known, and the draft waits.
+  useEffect(() => {
+    if (!ready || draft === null) return;
+    if (!tabs.includes(draft.kind === 'reply' ? 'inquiries' : 'questions')) takeDraft(draft);
+  }, [ready, draft, tabs]);
+
+  if (isLoading) return <Page.Loading />;
+
+  /** A new refreshKey makes the board, the counts and the lists load again at once. */
+  const refresh = () => setRefreshKey((key) => key + 1);
+
   const activeTab = selectTab(tabs, searchParams.get('tab'));
   const waiting = tabCounts({ requests: requests.summary, questions: questions.count, inquiries: inquiries.summary });
 
@@ -85,7 +97,13 @@ const MaisonPage = () => {
                 {tabs.includes('questions') && (
                   <Tabs.Content value="questions">
                     <Box paddingTop={4}>
-                      <QuestionsList canAnswer={allowedActions.canAnswer} refreshKey={refreshKey} onChange={questions.reload} />
+                      <QuestionsList
+                        canAnswer={allowedActions.canAnswer}
+                        refreshKey={refreshKey}
+                        onChange={questions.reload}
+                        draft={draft}
+                        onDraftTaken={takeDraft}
+                      />
                     </Box>
                   </Tabs.Content>
                 )}
@@ -98,6 +116,8 @@ const MaisonPage = () => {
                         summary={inquiries.summary}
                         summaryError={inquiries.loadError}
                         onChange={inquiries.reload}
+                        draft={draft}
+                        onDraftTaken={takeDraft}
                       />
                     </Box>
                   </Tabs.Content>

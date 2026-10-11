@@ -98,7 +98,7 @@ describe('ChatArea', () => {
     });
 
     // History adds width to the drawer and the chat keeps its own: the column is 600px, or 960px when the drawer is expanded, and it is the one
-    // that gives up width when the drawer is at its limit of 90vw (it may shrink, and has nothing under it).
+    // that has less width when the drawer is at its limit of 90vw (it may shrink, and has nothing under it).
     it('give the chat column the width of the chat, 600px or 960px expanded, as the width it starts from, and let it shrink', () => {
       const view = renderInTheme(area());
       const column = screen.getByText('The messages and the composer').parentElement as HTMLElement;

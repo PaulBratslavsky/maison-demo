@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolsPopover } from '../../admin/src/components/assistant/ToolsPopover';
 import { TOOL_NOTES } from '../../admin/src/assistant';
-import { TOOL_LABELS, READ_TOOL_NAMES } from '../../server/src/assistant/tools';
+import { DRAFT_TOOL_NAMES, TOOL_LABELS, READ_TOOL_NAMES } from '../../server/src/assistant/tools';
 import { renderInTheme } from './render';
 
 const ALL = READ_TOOL_NAMES.map((name) => ({ name, label: TOOL_LABELS[name] }));
@@ -55,6 +55,25 @@ describe('ToolsPopover', () => {
     await open();
     expect(screen.getByRole('button', { name: 'Tools (0)' })).toBeTruthy();
     expect(within(screen.getByRole('dialog')).getByText("Your role has no tools, so the assistant can't look anything up.")).toBeTruthy();
+  });
+
+  it('lists the two draft tools, as Draft a LINE reply and Draft an answer, with a line each, for an admin who has them', async () => {
+    const withDrafts = [...ALL, ...DRAFT_TOOL_NAMES.map((name) => ({ name, label: TOOL_LABELS[name] }))];
+    renderInTheme(<ToolsPopover tools={withDrafts} />);
+    expect(screen.getByRole('button', { name: 'Tools (9)' })).toBeTruthy();
+    await open();
+
+    const dialog = screen.getByRole('dialog');
+    for (const [name, label] of [
+      ['draft_reply', 'Draft a LINE reply'],
+      ['draft_answer', 'Draft an answer'],
+    ] as const) {
+      expect(within(dialog).getByText(label), name).toBeTruthy();
+      expect(within(dialog).getByText(name).tagName, name).toBe('CODE');
+      expect(within(dialog).getByText(TOOL_NOTES[name]), name).toBeTruthy();
+    }
+    // The sentence at the top is still true: a draft is shown to staff and sent by them.
+    expect(within(dialog).getByText('The assistant looks things up. It never sends, confirms or changes anything.')).toBeTruthy();
   });
 
   it('shows a tool the page has no line for by its label and name alone', async () => {

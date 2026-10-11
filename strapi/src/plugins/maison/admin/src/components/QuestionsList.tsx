@@ -18,6 +18,7 @@ import {
 } from '@strapi/design-system';
 import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 
+import { answerDraftOutcome, resolveDraft, type PageDraft } from '../drafts';
 import { LINE_NOTE_COLORS, lineNote } from '../line-note';
 import { startPolling } from '../poll';
 import {
@@ -32,6 +33,9 @@ import {
   type SentReply,
   type StaffQuestion,
 } from '../questions';
+import { sendFailureNotice } from '../sendFailure';
+import { useAskAbout } from '../useAskAbout';
+import { useMounted } from '../useMounted';
 import { AnswerDialog } from './AnswerDialog';
 import { YourLineBadge } from './YourLineBadge';
 
@@ -66,14 +70,22 @@ export const QuestionsList = ({
   canAnswer,
   refreshKey,
   onChange,
+  draft,
+  onDraftTaken,
 }: {
   canAnswer: boolean;
   refreshKey: number;
   /** Called after Let them know or Answer went, or was refused, so what shows the number of open questions loads it again at once. */
   onChange?: () => void;
+  /** The draft staff chose with Use this draft, or null. A draft for an inquiry is not this list's: it is left alone. */
+  draft: PageDraft | null;
+  /** Called once the list has dealt with the draft, whether the dialog opened or a notice said why not, so it is never taken again. */
+  onDraftTaken: (draft: PageDraft) => void;
 }) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
+  const askAbout = useAskAbout();
+  const mounted = useMounted();
   const [filter, setFilter] = React.useState<Filter>('open');
   const [questions, setQuestions] = React.useState<StaffQuestion[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -84,6 +96,13 @@ export const QuestionsList = ({
   const [sending, setSending] = React.useState<Sending | null>(null);
   /** The question whose Answer dialog is open. */
   const [answering, setAnswering] = React.useState<StaffQuestion | null>(null);
+  /** The text a draft gave the Answer dialog, or undefined when staff opened it from a row. */
+  const [answerDraft, setAnswerDraft] = React.useState<string | undefined>(undefined);
+  /** The draft this list has taken, so a refresh, or a second run of the effect below, never takes it twice. */
+  const takenDraft = React.useRef<PageDraft | null>(null);
+  /** What the effect below uses, as of the latest render: it runs only when the draft changes. */
+  const latest = React.useRef({ get, toggleNotification, onDraftTaken });
+  latest.current = { get, toggleNotification, onDraftTaken };
   /** The filter on screen, updated the moment staff pick another. A response for any other filter is dropped. */
   const shownFilter = React.useRef<Filter>(filter);
 
@@ -107,6 +126,39 @@ export const QuestionsList = ({
     setFilter(value);
   };
 
+  /** Opens Answer for a question: with a draft's text, or empty when staff chose it from a row. */
+  const openAnswer = (question: StaffQuestion, text?: string) => {
+    setAnswerDraft(text);
+    setAnswering(question);
+  };
+
+  // Use this draft: the question is loaded again, since the row on screen may be old. Answer opens over whatever rows the filter shows, with the
+  // text, when the question can still be answered. Otherwise a notice says why, and nothing opens. Either way the page is told, so the draft is
+  // never taken again, and the list's next refresh never opens it again.
+  React.useEffect(() => {
+    if (draft === null) {
+      takenDraft.current = null;
+      return;
+    }
+    if (draft.kind !== 'answer' || takenDraft.current === draft) return;
+    takenDraft.current = draft;
+    const taken = draft;
+    void (async () => {
+      const result = await resolveDraft(
+        async () => (await latest.current.get<{ question?: StaffQuestion }>(`/maison/questions/${encodeURIComponent(taken.reference)}`)).data.question ?? null,
+        answerDraftOutcome
+      );
+      if (result.action === 'open') {
+        // Staff who left the tab while the question loaded get no dialog on a tab that is gone. The draft stays on its card in the chat.
+        if (mounted.current) openAnswer(result.item, taken.text);
+      } else if (result.action === 'notify') {
+        latest.current.toggleNotification({ type: result.type, message: result.message });
+      }
+      // Cancelled: the tab was left while the question loaded. Nothing is wrong, so there is no notice.
+      latest.current.onDraftTaken(taken);
+    })();
+  }, [draft, mounted]);
+
   /**
    * Let them know, or Answer (with its body): Strapi sends the LINE message in the signed-in admin's name. The notice is
    * the server's own message: a warning when it says LINE took the message but something after it went wrong, a
@@ -121,7 +173,7 @@ export const QuestionsList = ({
       if (action === 'answer') setAnswering(null);
     } catch (error) {
       // Why nothing went out, in the server's words: it's taken or answered already, LINE refused it, or the token is missing.
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     }
     onChange?.();
     await load(); // load reports its own errors
@@ -131,6 +183,8 @@ export const QuestionsList = ({
   const isSending = (question: StaffQuestion, action: Sending['action']) =>
     sending?.reference === question.reference && sending.action === action;
 
+  // The actions column is for the row's own buttons (with canAnswer) and for Ask about this (once the assistant is ready).
+  const showActions = canAnswer || askAbout.show;
   const columns = ['Reference', 'Asked', 'Customer', 'Piece', 'Question', 'Why', 'Status'];
 
   return (
@@ -174,7 +228,7 @@ export const QuestionsList = ({
           <Typography textColor="neutral600">{EMPTY[filter]}</Typography>
         </Box>
       ) : (
-        <Table colCount={columns.length + (canAnswer ? 1 : 0)} rowCount={questions.length + 1}>
+        <Table colCount={columns.length + (showActions ? 1 : 0)} rowCount={questions.length + 1}>
           <Thead>
             <Tr>
               {columns.map((column) => (
@@ -182,7 +236,7 @@ export const QuestionsList = ({
                   <Typography variant="sigma">{column}</Typography>
                 </Th>
               ))}
-              {canAnswer && (
+              {showActions && (
                 <Th>
                   <VisuallyHidden>Actions</VisuallyHidden>
                 </Th>
@@ -228,10 +282,10 @@ export const QuestionsList = ({
                     <LineNoteText line={question.line} />
                   </Flex>
                 </Td>
-                {canAnswer && (
+                {showActions && (
                   <Td>
                     <Flex gap={2}>
-                      {canLetThemKnow(question) && (
+                      {canAnswer && canLetThemKnow(question) && (
                         <Button
                           size="S"
                           variant="secondary"
@@ -242,14 +296,26 @@ export const QuestionsList = ({
                           Let them know
                         </Button>
                       )}
-                      {canAnswerQuestion(question) && (
+                      {canAnswer && canAnswerQuestion(question) && (
                         <Button
                           size="S"
                           loading={isSending(question, 'answer')}
                           disabled={sending !== null}
-                          onClick={() => setAnswering(question)}
+                          onClick={() => openAnswer(question)}
                         >
                           Answer
+                        </Button>
+                      )}
+                      {askAbout.show && (
+                        <Button
+                          size="S"
+                          variant="tertiary"
+                          // The name starts with the words on the button and ends with the item, so the buttons of a list can be told apart.
+                          aria-label={`Ask about this: question ${question.reference}`}
+                          disabled={askAbout.disabled}
+                          onClick={() => askAbout.ask({ kind: 'question', reference: question.reference })}
+                        >
+                          Ask about this
                         </Button>
                       )}
                     </Flex>
@@ -265,6 +331,7 @@ export const QuestionsList = ({
         <AnswerDialog
           key={answering.reference}
           question={answering}
+          initialText={answerDraft}
           sending={sending !== null}
           onSend={(body) => send(answering.reference, 'answer', body)}
           onClose={() => setAnswering(null)}

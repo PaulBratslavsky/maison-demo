@@ -46,19 +46,22 @@ describe('admin routes', () => {
 
   it('each require a signed-in admin with the matching Maison permission', () => {
     expect(routes.admin.type).toBe('admin');
-    expect(routes.admin.routes).toHaveLength(24);
+    expect(routes.admin.routes).toHaveLength(26);
     expect(policiesOf('GET', '/appointments')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('GET', '/appointments/summary')).toEqual(gate('plugin::maison.appointments.review'));
     expect(policiesOf('POST', '/appointments/:reference/confirm')).toEqual(gate('plugin::maison.appointments.confirm'));
     // Send again: whoever may confirm a visit may send its confirmation again.
     expect(policiesOf('POST', '/appointments/:reference/notify')).toEqual(gate('plugin::maison.appointments.confirm'));
     expect(policiesOf('GET', '/questions')).toEqual(gate('plugin::maison.questions.read'));
+    // Use this draft loads one question, and one inquiry, again: the same permissions as the lists.
+    expect(policiesOf('GET', '/questions/:reference')).toEqual(gate('plugin::maison.questions.read'));
     // Let them know and Answer are one permission: whoever may answer a customer may let them know first.
     expect(policiesOf('POST', '/questions/:reference/notify')).toEqual(gate('plugin::maison.questions.answer'));
     expect(policiesOf('POST', '/questions/:reference/answer')).toEqual(gate('plugin::maison.questions.answer'));
     expect(policiesOf('GET', '/inquiries')).toEqual(gate('plugin::maison.inquiries.view'));
     expect(policiesOf('GET', '/inquiries/summary')).toEqual(gate('plugin::maison.inquiries.view'));
     expect(policiesOf('GET', '/inquiries/quota')).toEqual(gate('plugin::maison.inquiries.view'));
+    expect(policiesOf('GET', '/inquiries/:documentId')).toEqual(gate('plugin::maison.inquiries.view'));
     // Reply, Close, Change label and Label again are one permission: whoever may reply to customers works the queue.
     expect(policiesOf('POST', '/inquiries/:documentId/reply')).toEqual(gate('plugin::maison.inquiries.reply'));
     expect(policiesOf('POST', '/inquiries/:documentId/close')).toEqual(gate('plugin::maison.inquiries.reply'));
@@ -86,15 +89,16 @@ describe('admin routes', () => {
     expect(routeOf('GET', '/inquiries')?.handler).toBe('inquiries.list');
     expect(routeOf('GET', '/inquiries/summary')?.handler).toBe('inquiries.summary');
     expect(routeOf('GET', '/inquiries/quota')?.handler).toBe('inquiries.quota');
+    expect(routeOf('GET', '/inquiries/:documentId')?.handler).toBe('inquiries.findOne');
     expect(routeOf('POST', '/inquiries/:documentId/reply')?.handler).toBe('inquiries.reply');
     expect(routeOf('POST', '/inquiries/:documentId/close')?.handler).toBe('inquiries.close');
     expect(routeOf('POST', '/inquiries/:documentId/label')?.handler).toBe('inquiries.label');
     expect(routeOf('POST', '/inquiries/:documentId/label-again')?.handler).toBe('inquiries.labelAgain');
   });
 
-  it('give every inquiry route but the three reads a :documentId, and the reads none', () => {
+  it('give every inquiry route but the list, the counts and the quota a :documentId', () => {
     const inquiryRoutes = routes.admin.routes.filter((route) => route.path.startsWith('/inquiries'));
-    expect(inquiryRoutes).toHaveLength(7);
+    expect(inquiryRoutes).toHaveLength(8);
     expect(inquiryRoutes.filter((route) => !route.path.includes(':documentId')).map((route) => `${route.method} ${route.path}`)).toEqual([
       'GET /inquiries',
       'GET /inquiries/summary',
@@ -109,6 +113,7 @@ describe('admin routes', () => {
 
   it('send the customer questions to the questions controller', () => {
     expect(routeOf('GET', '/questions')?.handler).toBe('questions.list');
+    expect(routeOf('GET', '/questions/:reference')?.handler).toBe('questions.findOne');
     expect(routeOf('POST', '/questions/:reference/notify')?.handler).toBe('questions.notify');
     expect(routeOf('POST', '/questions/:reference/answer')?.handler).toBe('questions.answer');
   });
@@ -138,7 +143,7 @@ describe('admin routes', () => {
   it('list the inquiries summary and quota ahead of every inquiry route that takes a :documentId, whatever its method', () => {
     const at = (path: string) => routes.admin.routes.findIndex((route) => route.path === path);
     const withId = routes.admin.routes.flatMap((route, index) => (route.path.startsWith('/inquiries') && route.path.includes(':documentId') ? [index] : []));
-    expect(withId).toHaveLength(4);
+    expect(withId).toHaveLength(5);
     for (const path of ['/inquiries/summary', '/inquiries/quota']) {
       expect(at(path), path).toBeGreaterThanOrEqual(0);
       for (const index of withId) expect(at(path), `${path} before ${routes.admin.routes[index].path}`).toBeLessThan(index);

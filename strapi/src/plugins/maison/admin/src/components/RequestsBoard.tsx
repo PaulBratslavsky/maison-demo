@@ -28,6 +28,8 @@ import {
   type SendAgainStatus,
 } from '../board';
 import { startPolling } from '../poll';
+import { sendFailureNotice } from '../sendFailure';
+import { useAskAbout } from '../useAskAbout';
 import { YourLineBadge } from './YourLineBadge';
 
 type Status = 'requested' | 'confirmed' | 'all';
@@ -74,6 +76,7 @@ export const RequestsBoard = ({
 }) => {
   const { get, post } = useFetchClient();
   const { toggleNotification } = useNotification();
+  const askAbout = useAskAbout();
   const [status, setStatus] = React.useState<Status>('requested');
   const [appointments, setAppointments] = React.useState<StaffAppointment[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -118,7 +121,7 @@ export const RequestsBoard = ({
       // customer is a made-up demo customer, who gets none.
       toggleNotification(confirmedNotice(reference, sentAfterConfirm(data, rows, reference), demoCustomerAfterConfirm(data, rows, reference)));
     } catch (error) {
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     } finally {
       setConfirming(null);
     }
@@ -133,13 +136,15 @@ export const RequestsBoard = ({
       onChange?.();
     } catch (error) {
       // Why nothing went out, in the server's words: what LINE answered, or the setting that's missing.
-      toggleNotification({ type: 'danger', message: (error as Error).message });
+      toggleNotification(sendFailureNotice(error));
     }
     await load(); // load reports its own errors
     setNotifying(null);
   };
 
-  const columns = ['Reference', 'Customer', 'Boutique', 'Visit', 'Products', 'Note', 'Status', 'LINE', 'Created via', ...(canConfirm ? [''] : [])];
+  // The actions column is for the row's own buttons (with canConfirm) and for Ask about this (once the assistant is ready).
+  const showActions = canConfirm || askAbout.show;
+  const columns = ['Reference', 'Customer', 'Boutique', 'Visit', 'Products', 'Note', 'Status', 'LINE', 'Created via', ...(showActions ? [''] : [])];
 
   return (
     <Flex direction="column" alignItems="stretch" gap={4}>
@@ -227,29 +232,43 @@ export const RequestsBoard = ({
                 <Td>
                   <Typography>{appointment.createdVia}</Typography>
                 </Td>
-                {canConfirm && (
+                {showActions && (
                   <Td>
-                    {canStillConfirm(appointment) && (
-                      <Button
-                        size="S"
-                        loading={confirming === appointment.reference}
-                        disabled={confirming !== null}
-                        onClick={() => confirm(appointment.reference)}
-                      >
-                        Confirm
-                      </Button>
-                    )}
-                    {canSendAgain(appointment) && (
-                      <Button
-                        size="S"
-                        variant="secondary"
-                        loading={notifying === appointment.reference}
-                        disabled={notifying !== null}
-                        onClick={() => sendAgain(appointment.reference)}
-                      >
-                        Send again
-                      </Button>
-                    )}
+                    <Flex gap={2}>
+                      {canConfirm && canStillConfirm(appointment) && (
+                        <Button
+                          size="S"
+                          loading={confirming === appointment.reference}
+                          disabled={confirming !== null}
+                          onClick={() => confirm(appointment.reference)}
+                        >
+                          Confirm
+                        </Button>
+                      )}
+                      {canConfirm && canSendAgain(appointment) && (
+                        <Button
+                          size="S"
+                          variant="secondary"
+                          loading={notifying === appointment.reference}
+                          disabled={notifying !== null}
+                          onClick={() => sendAgain(appointment.reference)}
+                        >
+                          Send again
+                        </Button>
+                      )}
+                      {askAbout.show && (
+                        <Button
+                          size="S"
+                          variant="tertiary"
+                          // The name starts with the words on the button and ends with the item, so the buttons of a list can be told apart.
+                          aria-label={`Ask about this: request ${appointment.reference}`}
+                          disabled={askAbout.disabled}
+                          onClick={() => askAbout.ask({ kind: 'request', reference: appointment.reference })}
+                        >
+                          Ask about this
+                        </Button>
+                      )}
+                    </Flex>
                   </Td>
                 )}
               </Tr>

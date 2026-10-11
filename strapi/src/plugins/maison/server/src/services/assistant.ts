@@ -189,7 +189,7 @@ export async function* wrapStream(source: AsyncIterable<Chunk>, options: WrapOpt
   }
 }
 
-export type AdapterFor = (model: string, apiKey: string) => ChatAdapter | Promise<ChatAdapter>;
+export type AdapterFor = (model: string, apiKey: string, baseURL?: string | null) => ChatAdapter | Promise<ChatAdapter>;
 
 export interface TurnRequest {
   ability: Ability;
@@ -323,7 +323,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         const names = specs.map((spec) => spec.name);
         const tools = await toTools(specs);
         const system = instructions({ today: request.now ?? new Date(), timezone: config.timezone, tools: names });
-        const adapter = await (request.adapterFor ?? createAnthropicAdapter)(config.aiChatModel, config.aiApiKey as string);
+        // A local model takes no key, but the SDK wants a string.
+        const adapter = await (request.adapterFor ?? createAnthropicAdapter)(config.aiChatModel, config.aiApiKey ?? 'local', config.aiChatBaseUrl);
 
         // Held only by chat() and the wrapper, so the wrapper can send its timeout error before chat() is stopped.
         const chatController = new AbortController();
@@ -341,7 +342,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           abortController: chatController,
           // The SDK's own logging would write the provider's errors to the console, without going through withoutKey.
           debug: false,
-          modelOptions: { max_tokens: ASSISTANT_LIMITS.maxTokens, output_config: { effort: 'medium' } },
+          // A local model, e.g. Qwen3 on Ollama, thinks before every reply unless told not to, which is slow on a laptop.
+          modelOptions: {
+            max_tokens: ASSISTANT_LIMITS.maxTokens,
+            output_config: { effort: 'medium' },
+            ...(config.aiChatBaseUrl ? { thinking: { type: 'disabled' } } : {}),
+          },
         } as never);
 
         const wrapped = wrapStream(stream as unknown as AsyncIterable<Chunk>, {

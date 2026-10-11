@@ -3,20 +3,27 @@ import { Suspense, lazy } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DefaultTheme } from 'styled-components';
 
+import { NO_DRAFT_ACCESS, type DraftAccess } from '../../drafts';
+import { AssistantBoundary } from './AssistantBoundary';
+
 /**
- * The assistant's host: the one place on the screen where the assistant lives, in a React root of its own, in an element added to the body.
+ * The assistant's host: the one place on the screen where the assistant is kept, in a React root of its own, in an element added to the body.
  *
  * Why it is not in the menu icon. Strapi has no place for something that is on every admin page, but it draws every menu link's icon on every
  * signed-in page (`LeftMenu` and `MainNavLinks` in @strapi/admin 5.55.1), so Maison's menu icon is how the assistant gets onto every page. But
  * Strapi draws the icon again on every change of address: `LeftMenu` reads the location, and `MainNavIcons` makes a new component type for each
- * link on every render, so React throws the old icon away and draws a new one. Anything the icon held, the chat among it, would be lost at
+ * link on every render, so React removes the old icon and draws a new one. Anything the icon held, the chat among it, would be lost at
  * each click on a menu link, and at each change of tab on the Maison page. And an answer on its way would be stopped.
  *
  * So the icon holds nothing. It tells the host what Strapi's providers say and the host cannot read (the theme, the language and whether the
  * admin may use the assistant), and it keeps the host in place for as long as an icon is on the screen. The host's own React root has no
  * Strapi provider, which the chat does not need: it reads the theme and the language from what the icon tells it, and it calls the server with
- * `useFetchClient`, which does not read a provider. When no icon has been drawn for a short time, the admin has left the signed-in pages
- * (they signed out), and the host takes the assistant away with its chat.
+ * `useFetchClient`, which does not read a provider. The icon also tells the host which drafts the admin may use, and gives it the router's `navigate`,
+ * which is how Use this draft takes the admin to the Maison page: the host has no router of its own. When no icon has been drawn for a short time, the admin has left the signed-in pages
+ * (they signed out), and the host removes the assistant and its chat.
+ *
+ * A failure inside the host, while drawing or while loading the chunk, would unmount the whole root and take the launcher with it. The root is
+ * inside an error boundary (AssistantBoundary.tsx) that keeps the launcher and shows a short fixed text instead.
  *
  * The chat is loaded when it is needed. Its code (the Markdown, TanStack AI and the rest) is a chunk of its own, loaded the first time an admin
  * who may use the assistant is on a page, and not in the admin's first bundle for everyone.
@@ -28,6 +35,10 @@ export interface HostEnvironment {
   allowed: boolean;
   theme: DefaultTheme;
   locale: string;
+  /** Which drafts the admin may use. Without it, none. */
+  access?: DraftAccess;
+  /** Strapi's router: takes the admin to an address inside the admin, such as `/plugins/maison?tab=inquiries`. Without it, Use this draft goes nowhere. */
+  navigate?: (to: string) => void;
 }
 
 const GlobalAssistant = lazy(() => import('./GlobalAssistant').then((module) => ({ default: module.GlobalAssistant })));
@@ -41,6 +52,15 @@ export const HOST_GRACE_MS = 500;
 let container: HTMLElement | null = null;
 let root: Root | null = null;
 let environment: HostEnvironment | null = null;
+// What the host gives the chat is kept the same while nothing changed. Strapi draws a new icon on every change of address, and each tells the host again,
+// so the chat is drawn again each time. A new object for the permissions, or a new function for navigate, would reach the chat as a new context value, and
+// every message of the chat would be drawn again with it.
+let access: DraftAccess = NO_DRAFT_ACCESS;
+let routerNavigate: ((to: string) => void) | undefined;
+/** One function for the whole life of the host. It calls the router function of the icon that told the host last. */
+const navigateNow = (to: string): void => routerNavigate?.(to);
+
+const sameAccess = (a: DraftAccess, b: DraftAccess): boolean => a.canView === b.canView && a.canReply === b.canReply && a.canRead === b.canRead && a.canAnswer === b.canAnswer;
 /** How many icons are on the screen and have attached. */
 let attached = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -73,9 +93,11 @@ const draw = () => {
   if (!container.isConnected) document.body.appendChild(container);
   root.render(
     <DesignSystemProvider theme={environment.theme} locale={environment.locale}>
-      <Suspense fallback={null}>
-        <GlobalAssistant />
-      </Suspense>
+      <AssistantBoundary>
+        <Suspense fallback={null}>
+          <GlobalAssistant access={access} navigate={routerNavigate ? navigateNow : undefined} />
+        </Suspense>
+      </AssistantBoundary>
     </DesignSystemProvider>
   );
 };
@@ -83,6 +105,9 @@ const draw = () => {
 /** What the owning icon tells the host: each time the theme, the language or the permission changes. */
 export const updateHost = (next: HostEnvironment): void => {
   environment = next;
+  const nextAccess = next.access ?? NO_DRAFT_ACCESS;
+  if (!sameAccess(access, nextAccess)) access = nextAccess;
+  routerNavigate = next.navigate;
   draw();
 };
 
@@ -103,7 +128,7 @@ export const detachHost = (): void => {
   }, HOST_GRACE_MS);
 };
 
-/** Takes the assistant away now, with its chat, and forgets everything. The next icon starts a new chat. */
+/** Removes the assistant and its chat now, and clears everything. The next icon starts a new chat. */
 export const destroyHost = (): void => {
   stopTimer();
   root?.unmount();
@@ -111,5 +136,7 @@ export const destroyHost = (): void => {
   root = null;
   container = null;
   environment = null;
+  access = NO_DRAFT_ACCESS;
+  routerNavigate = undefined;
   attached = 0;
 };

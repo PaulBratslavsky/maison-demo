@@ -71,7 +71,7 @@ describe('MarkdownBody', () => {
     expect(body.textContent).toBe('<img src=x onerror="alert(1)"> and <script>alert(2)</script> and <b>bold</b>');
   });
 
-  it('draws an http or https link that opens in a new tab and keeps the window to itself', () => {
+  it('draws an http or https link that opens in a new tab and gives the page no way back to its window', () => {
     const { body } = draw('[Care guide](https://example.com/care) and [plain](http://example.com)');
     const [care, plain] = Array.from(body.querySelectorAll('a'));
     expect(care.getAttribute('href')).toBe('https://example.com/care');
@@ -116,6 +116,23 @@ describe('MarkdownBody', () => {
   it('is the text of the answer only, so a check can read it apart from the rest of the message', () => {
     const { body } = draw('Hello');
     expect(body.getAttribute('data-message-part')).toBe('text');
+  });
+
+  // remark-gfm marks the heading of a footnote section `sr-only`, for screen readers. The design system has no rule for that class.
+  it('hides the "Footnotes" heading from the eye and keeps it for a screen reader', () => {
+    const { body } = draw('A claim.[^1]\n\n[^1]: Its source.');
+    const heading = within(body).getByText('Footnotes');
+    expect(heading.classList.contains('sr-only')).toBe(true);
+    expect(declarationsOf(body, ' .sr-only')).toMatchObject({
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      overflow: 'hidden',
+      'white-space': 'nowrap',
+    });
+    expect(declarationsOf(body, ' .sr-only').clip).toMatch(/^rect\(0,? ?0,? ?0,? ?0\)$/);
+    // The note itself is still drawn.
+    expect(within(body).getByText(/Its source\./)).toBeTruthy();
   });
 
   it('draws an empty answer as nothing', () => {

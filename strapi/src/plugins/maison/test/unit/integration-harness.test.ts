@@ -21,13 +21,13 @@ exports.createStrapi = () => ({
   cron: { stop: () => events.push({ cron: 'stopped' }) },
   async load() {
     events.push({
-      loaded: Object.fromEntries(['AI_PROVIDER', 'AI_MODEL', 'AI_API_KEY', 'AI_BASE_URL', 'LINE_CHANNEL_ACCESS_TOKEN'].map((name) => [name, process.env[name]])),
+      loaded: Object.fromEntries(['AI_PROVIDER', 'AI_MODEL', 'AI_CHAT_MODEL', 'AI_CHAT_BASE_URL', 'AI_API_KEY', 'AI_BASE_URL', 'LINE_CHANNEL_ACCESS_TOKEN'].map((name) => [name, process.env[name]])),
     });
   },
 });
 `;
 
-const ENVIRONMENT = ['STRAPI_APP_DIR', 'DATABASE_FILENAME', 'LINE_CHANNEL_ACCESS_TOKEN', 'AI_PROVIDER', 'AI_MODEL', 'AI_API_KEY', 'AI_BASE_URL'];
+const ENVIRONMENT = ['STRAPI_APP_DIR', 'DATABASE_FILENAME', 'LINE_CHANNEL_ACCESS_TOKEN', 'AI_PROVIDER', 'AI_MODEL', 'AI_CHAT_MODEL', 'AI_CHAT_BASE_URL', 'AI_API_KEY', 'AI_BASE_URL'];
 
 describe('the integration harness', () => {
   const keptEnvironment = Object.fromEntries(ENVIRONMENT.map((name) => [name, process.env[name]]));
@@ -48,6 +48,9 @@ describe('the integration harness', () => {
       LINE_CHANNEL_ACCESS_TOKEN: 'a-line-token',
       AI_PROVIDER: 'openai',
       AI_MODEL: 'a-model',
+      AI_CHAT_MODEL: 'a-chat-model',
+      // A local model for the assistant, as the offline demo sets one: it makes the assistant ready with no key, so no suite may inherit it.
+      AI_CHAT_BASE_URL: 'http://127.0.0.1:11434',
       AI_API_KEY: 'sk-a-real-key',
       AI_BASE_URL: 'https://models.example.test/v1',
     });
@@ -69,7 +72,7 @@ describe('the integration harness', () => {
     await bootStrapi('harness');
 
     expect(appOf().events[0]).toEqual({
-      loaded: { AI_PROVIDER: '', AI_MODEL: '', AI_API_KEY: '', AI_BASE_URL: '', LINE_CHANNEL_ACCESS_TOKEN: '' },
+      loaded: { AI_PROVIDER: '', AI_MODEL: '', AI_CHAT_MODEL: '', AI_CHAT_BASE_URL: '', AI_API_KEY: '', AI_BASE_URL: '', LINE_CHANNEL_ACCESS_TOKEN: '' },
     });
   });
 
@@ -79,6 +82,8 @@ describe('the integration harness', () => {
     const { config } = appOf();
     expect(config.get('plugin::maison.aiApiKey')).toBeNull();
     expect(config.get('plugin::maison.aiBaseUrl')).toBeNull();
+    // The assistant's local model is off too: with a base URL it would be ready with no key.
+    expect(config.get('plugin::maison.aiChatBaseUrl')).toBeNull();
     expect(config.get('plugin::maison.lineChannelAccessToken')).toBeNull();
   });
 

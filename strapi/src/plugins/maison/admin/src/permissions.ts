@@ -18,6 +18,11 @@ export const PERMISSIONS = {
    * page has no drawer (the icon is not drawn for them).
    */
   assistant: [ASSISTANT_USE],
+  /**
+   * What the menu icon checks for the assistant's host: the assistant itself (canUse), and the four permissions that decide whether Use this draft
+   * shows on a draft's card (canView and canReply for a reply, canRead and canAnswer for an answer).
+   */
+  assistantHost: [ASSISTANT_USE, INQUIRIES_VIEW, INQUIRIES_REPLY, QUESTIONS_READ, QUESTIONS_ANSWER],
   /** The Homepage widget, which shows the requests board's numbers: staff who review requests. */
   widget: [REVIEW],
   /** The second Homepage widget, which shows the open inquiries by queue: staff who review inquiries. */

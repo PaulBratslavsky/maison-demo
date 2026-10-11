@@ -1,4 +1,4 @@
-import { useLayoutEffect, type ChangeEvent, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, type ChangeEvent, type KeyboardEvent, type RefObject } from 'react';
 
 import { Box, Button, Textarea } from '@strapi/design-system';
 import { Cross, Sparkle } from '@strapi/icons';
@@ -26,7 +26,7 @@ const InputArea = styled.div`
 `;
 
 interface ComposerProps {
-  /** What staff have typed and not sent. It lives in the provider, so it is still there when staff come back from another tab. */
+  /** What staff have typed and not sent. It is kept in the provider, so it is still there when staff come back from another tab. */
   draft: string;
   onDraft: (text: string) => void;
   /** Whether an answer is on its way. */
@@ -50,6 +50,25 @@ export const Composer = ({ draft, onDraft, busy, ready, onSend, onStop, textarea
     box.style.height = 'auto';
     box.style.height = `${box.scrollHeight}px`;
   }, [draft, textareaRef]);
+
+  // A text box does not measure itself again when its width changes, and the same text takes more or fewer lines at 600px, at 960px and when
+  // the window is resized. So the height is measured again when the width changes. A report of the same width is its own height change and is ignored.
+  useEffect(() => {
+    const box = textareaRef.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    let width: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[entries.length - 1]?.contentRect.width;
+      if (next === undefined || next === width) return;
+      const first = width === null;
+      width = next;
+      if (first) return;
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight}px`;
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [textareaRef]);
 
   const submit = () => {
     if (canSend({ text: draft, busy, ready })) onSend(draft);

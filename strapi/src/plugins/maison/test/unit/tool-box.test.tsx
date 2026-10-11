@@ -70,7 +70,7 @@ describe('ToolBox', () => {
 
   it('shows a spinner while the call runs, with no count, and the wait when it is opened', async () => {
     renderInTheme(<ToolBox box={RUNNING} />);
-    expect(screen.getByLabelText('running')).toBeTruthy();
+    expect(screen.getByRole('progressbar', { name: 'running' })).toBeTruthy();
     const header = screen.getByRole('button', { name: /Tool: list_requests/ });
     expect(header.textContent).not.toMatch(/result|done|failed/);
     await userEvent.click(header);

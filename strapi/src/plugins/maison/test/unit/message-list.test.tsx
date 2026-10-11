@@ -82,6 +82,18 @@ describe('the messages', () => {
     expect(cssOf(row)).toContain('align-self:flex-start');
   });
 
+  it('draws the avatar as a 28px round disc in the primary colour, with a 16px icon in white', () => {
+    const { container } = renderInTheme(list([staff('u1'), assistant('a1', [text('Three visits wait.')])]));
+    const avatar = rows(container, 'assistant')[0].querySelector('svg')?.parentElement as HTMLElement;
+    expect(declarationsOf(avatar)).toMatchObject({ width: '28px', height: '28px', 'border-radius': '50%', background: lightTheme.colors.primary600 });
+    expect(declarationsOf(avatar, ' svg')).toMatchObject({ width: '16px', height: '16px', fill: lightTheme.colors.neutral0 });
+  });
+
+  it('keeps 24px of space around the messages, and a 12px gap between them', () => {
+    renderInTheme(list([staff('u1'), assistant('a1', [text('Three visits wait.')])]));
+    expect(declarationsOf(screen.getByRole('region', { name: 'Chat messages' }))).toMatchObject({ padding: '24px', gap: '12px' });
+  });
+
   it("draws an assistant answer as Markdown: a table, which an answer of items with the same fields uses", () => {
     const table = ['| Reference | Status |', '| --- | --- |', '| APT-4821 | requested |'].join('\n');
     const { container } = renderInTheme(list([staff('u1'), assistant('a1', [text(table)])]));

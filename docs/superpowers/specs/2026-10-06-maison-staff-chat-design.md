@@ -696,12 +696,20 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 
 - **Strapi has no documented place for UI on every admin page.** Its admin panel API offers menu links, settings links, Content Manager panels and actions, injection zones, and Homepage widgets (docs.strapi.io, "Admin Panel API for plugins").
 - **Strapi draws each menu link's icon on every page.** In 5.55.1 the left menu is part of the signed-in layout, around every page (`@strapi/admin` `layouts/AuthenticatedLayout.mjs`). It draws each menu link's icon as `<LinkIcon width="20" height="20" fill="neutral500" />` (`components/MainNav/MainNavLinks.mjs:51-70`, and `:108-130` in the mobile menu).
-- **So Maison's menu icon carries the chat.**
+- **So Maison's menu icon keeps the chat on the page, but does not hold it.**
   - Maison's menu link gets its own icon component. It draws the Crown as today.
-  - It also renders the chat (the launcher and the drawer) into `document.body` with a React portal. A portal keeps Strapi's providers: the theme, the router, the admin's sign-in and the fetch client.
-- **One chat only.** Strapi may draw the icon more than once, on desktop and in the mobile menu. A small module-level owner rule makes the first mounted icon the only one that renders the chat. When it unmounts, the next one takes over.
-- **Events stay inside the chat.** React passes events from a portal up to its React parents, and the icon's parent is the menu link. The chat's root stops clicks, pointer, mouse, key and focus events from going further, so a click in the drawer never follows the menu link.
-- **The cost of this choice.** It rests on how Strapi 5.55.1 draws its menu, not on a documented API. A Strapi upgrade can need a fix here, and a unit test holds the rule.
+  - Strapi draws a new icon component on every change of address: `LeftMenu` reads the location, and `MainNavIcons` makes a new component type for each link on every render, so React removes the old icon and mounts a new one. A chat inside the icon, or inside a portal from it, would be lost at each click on a menu link, and an answer on its way would stop.
+- **The chat lives in a host: a React root of its own.** (Amended 9 October 2026. The first version of this section said a portal from the icon. Paul accepted the host after the drawer review.)
+  - The host is one element added to `document.body`, with its own React root (`assistantHost.tsx`). The chat (the launcher and the drawer) renders there.
+  - The icon tells the host what Strapi's providers know and the host cannot read: the theme, the language, and whether the admin may use the assistant. The host draws inside `DesignSystemProvider` with that theme and language.
+  - The host has no router and no other Strapi provider. The chat does not need them: it calls the server with `useFetchClient`, which reads no provider.
+  - Each icon attaches to the host when it mounts and detaches when it unmounts. When the last icon has gone for 500ms, the admin has left the signed-in pages, and the host removes the chat. A change of page replaces the icon within that time, so the chat stays.
+  - The chat's code is a chunk of its own, loaded the first time an admin who may use the assistant is on a page.
+  - An error boundary in the host keeps the launcher on the page when the chunk fails to load or the chat fails to render. Staff see "The assistant could not load. Reload the page to try again." and the error goes to the console.
+- **One icon reports to the host.** Strapi may draw the icon more than once, on desktop and in the mobile menu. A small module-level owner rule makes the first mounted icon the one that tells the host the theme, the language and the permission. When it unmounts, the next one takes over.
+- **Events.** The host is a separate React root, so its events never reach the menu link through React. No event needs stopping.
+- **The page and the host talk through module functions, not React context.** Task 11 ("Ask about this") and Task 14 ("Use this draft") need it: a row on the Maison page must open the drawer and send a message, and a draft card in the drawer must open the page's own Reply on LINE or Answer dialog. Both go through small functions exported by the host's modules, not through the router.
+- **The cost of this choice.** It rests on how Strapi 5.55.1 draws its menu, not on a documented API. A Strapi upgrade can need a fix here, and unit tests hold the host and the owner rule.
 - **Who sees it.** Only admins with "Use the Maison assistant" (`useRBAC`), and the menu link itself needs the Maison page permission. So an admin with the assistant permission but no Maison page permission has no drawer. That is noted in the README.
 
 ### What staff see
@@ -765,8 +773,9 @@ Paul tried the rebuilt Ask tab on 7 October. He asked for two things:
 ### Tests
 
 - **Unit tests:**
-  - the owner rule (one chat however many icons mount, and the next icon takes over)
-  - that events stop at the chat's root
+  - the owner rule (one icon reports to the host however many icons mount, and the next icon takes over)
+  - the host keeps the chat across a change of icon, and removes it when no icon has been on the page for 500ms
+  - the host's error boundary keeps the launcher and shows the fixed text
 - **Component tests:**
   - the launcher shows only with the permission, opens the drawer and hides
   - Close and Escape close the drawer, and the focus returns to the launcher

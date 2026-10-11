@@ -45,14 +45,16 @@ export const loadSdk = async (): Promise<Sdk> => {
  * not used: it reads ANTHROPIC_API_KEY from the environment, and Maison's key is its own setting. The model is cast
  * because the adapter's list of model IDs is older than `claude-sonnet-5-5`: the ID passes through to Anthropic unchanged.
  */
-export const createAnthropicAdapter = async (model: string, apiKey: string): Promise<ChatAdapter> => {
+export const createAnthropicAdapter = async (model: string, apiKey: string, baseURL?: string | null): Promise<ChatAdapter> => {
   let anthropic: typeof import('@tanstack/ai-anthropic');
   try {
     anthropic = await import('@tanstack/ai-anthropic');
   } catch (error) {
     throw notLoaded('@tanstack/ai-anthropic', error);
   }
-  return anthropic.createAnthropicChat(model as never, apiKey) as unknown as ChatAdapter;
+  // A base URL sends the same Messages API calls to a local model, e.g. Ollama's at http://127.0.0.1:11434. The third
+  // argument is the Anthropic SDK's client options.
+  return anthropic.createAnthropicChat(model as never, apiKey, baseURL ? { baseURL } : undefined) as unknown as ChatAdapter;
 };
 
 /**

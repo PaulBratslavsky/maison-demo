@@ -28,6 +28,12 @@ export interface MaisonConfig {
    * classification. The chat is Anthropic only, so this is an Anthropic model ID.
    */
   aiChatModel: string;
+  /**
+   * Where a local model answers the assistant through the Anthropic Messages API (AI_CHAT_BASE_URL), e.g.
+   * http://127.0.0.1:11434 for Ollama. When it's set, the assistant runs offline: it needs no Anthropic key, and
+   * AI_PROVIDER, which is for labelling, doesn't matter to it. Null: Anthropic's own API.
+   */
+  aiChatBaseUrl: string | null;
   aiApiKey: string | null;
   /** Where an openai-compatible server answers, e.g. http://127.0.0.1:11434/v1 for Ollama. Only that provider uses it. */
   aiBaseUrl: string | null;
@@ -51,6 +57,7 @@ export const defaultConfig: MaisonConfig = {
   aiProvider: 'anthropic',
   aiModel: null,
   aiChatModel: 'claude-sonnet-5-5',
+  aiChatBaseUrl: null,
   aiApiKey: null,
   aiBaseUrl: null,
   demoLineUserId: null,
@@ -141,6 +148,10 @@ export function validateConfig(config: Partial<MaisonConfig>): void {
   if (isSet(aiBase) && (typeof aiBase !== 'string' || !AI_BASE_URL.test(aiBase) || aiBase.endsWith('/'))) {
     fail('config.aiBaseUrl must be an http or https URL without a trailing slash, e.g. http://127.0.0.1:11434/v1');
   }
+  const chatBase: unknown = merged.aiChatBaseUrl;
+  if (isSet(chatBase) && (typeof chatBase !== 'string' || !AI_BASE_URL.test(chatBase) || chatBase.endsWith('/'))) {
+    fail('config.aiChatBaseUrl must be an http or https URL without a trailing slash, e.g. http://127.0.0.1:11434 for Ollama');
+  }
   // demoLineUserId is checked by demoLineUserIdProblem instead: a bad value only warns, so it never stops Strapi starting.
 }
 
@@ -167,6 +178,7 @@ export const getConfig = (strapi: Core.Strapi): MaisonConfig => {
     aiProvider: config.aiProvider || defaultConfig.aiProvider,
     aiModel: config.aiModel || null,
     aiChatModel: config.aiChatModel || defaultConfig.aiChatModel,
+    aiChatBaseUrl: config.aiChatBaseUrl || null,
     aiApiKey: config.aiApiKey || null,
     aiBaseUrl: config.aiBaseUrl || null,
     demoLineUserId: config.demoLineUserId && demoLineUserIdProblem(config.demoLineUserId) === null ? config.demoLineUserId : null,

@@ -64,10 +64,12 @@ export const staffErrorOf = (raw: RawRunError, context: ErrorContext): StaffErro
 };
 
 /**
- * Why the chat can't run, in the words staff read, or null when it can: the provider is anthropic and there is a key.
- * The provider is checked first, since another provider's key is not an Anthropic key.
+ * Why the chat can't run, in the words staff read, or null when it can: a local model is set (aiChatBaseUrl), or the
+ * provider is anthropic and there is a key. The provider is checked first, since another provider's key is not an
+ * Anthropic key. A local model needs neither: AI_PROVIDER is labelling's setting, and Ollama takes no key.
  */
-export const notReadyReason = (settings: { aiProvider: string; aiApiKey: string | null }): string | null => {
+export const notReadyReason = (settings: { aiProvider: string; aiApiKey: string | null; aiChatBaseUrl?: string | null }): string | null => {
+  if (settings.aiChatBaseUrl) return null;
   if (settings.aiProvider !== 'anthropic') return `The assistant works with Anthropic only. AI_PROVIDER is set to ${settings.aiProvider}.`;
   return settings.aiApiKey ? null : NO_KEY_TEXT;
 };

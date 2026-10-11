@@ -36,6 +36,7 @@ import {
   type ChatSnapshot,
   type SavedChatRow,
 } from '../../conversations';
+import { draftClientTools } from '../../assistant-client-tools';
 import { useMounted } from '../../useMounted';
 
 /**
@@ -70,7 +71,8 @@ export interface AssistantHistory {
 export interface AssistantApi {
   /** null until GET /maison/assistant/status answers. */
   status: AssistantStatus | null;
-  statusError: string | null;
+  /** Whether the last check of the assistant failed and there is no status to show. */
+  statusFailed: boolean;
   /** Whether the assistant is set up: the status says ready. */
   ready: boolean;
   messages: UIMessage[];
@@ -83,8 +85,8 @@ export interface AssistantApi {
   /** What staff have typed and not sent. It is kept here, so it is still there when staff come back from another tab. New chat leaves it alone. */
   draft: string;
   setDraft: (text: string) => void;
-  /** Sends a message: from the text box (the default), which empties the box, or from a starter, which leaves it as it was. */
-  send: (text: string, source?: MessageSource) => Promise<void>;
+  /** Sends a message. From the text box it empties the box. A message the page writes itself (a quick question, Ask about this) leaves the box as it was. */
+  send: (text: string, source: MessageSource) => Promise<void>;
   /** Stops the answer where it is, and takes out a tool call that was being written. Stop is no error. */
   stop: () => void;
   /** Starts a new chat. The chat that was open stays saved, and the draft stays. */
@@ -117,17 +119,29 @@ const cookies = (): string => {
 
 /**
  * The chat, kept above the drawer. The drawer is closed and opened as staff please, and the chat, its saved chats and the text staff have
- * typed must be as they left them, so they live here and the drawer only reads them. This provider stays for as long as the assistant's
+ * typed must be as they left them, so they are kept here and the drawer only reads them. This provider stays for as long as the assistant's
  * host is on the screen, which is every admin page (see assistantHost.tsx).
  *
  * It asks the server nothing until `started` is true, which is when staff open the drawer for the first time. It is on every admin page, and
- * the status check and the saved chats are only worth a request to staff who use the assistant.
+ * the status check and the saved chats are only worth a request to staff who use the assistant. One thing besides the drawer asks for the
+ * status: a list on the Maison page that shows Ask about this (`checkStatus`), which shows the button once the assistant is known to be set up.
+ * The saved chats still wait for the drawer.
  *
  * It also keeps the admin's saved chats. Each turn that ends saves the open chat, one save at a time (`createSaveQueue`), with only the
  * messages that were cleaned of cut-off tool calls and failed turns. When the assistant is ready, the list loads and the most recent chat
  * is reopened. A chat is switched with `setMessages`, never by changing the thread: that would build the chat client again.
  */
-export const AssistantProvider = ({ children, started }: { children: React.ReactNode; started: boolean }) => {
+export const AssistantProvider = ({
+  children,
+  started,
+  checkStatus = false,
+}: {
+  children: React.ReactNode;
+  /** The drawer has been opened once: the status is checked and the saved chats load. */
+  started: boolean;
+  /** The status is checked although the drawer has not been opened, because a list on the Maison page wants to know whether it can show Ask about this. */
+  checkStatus?: boolean;
+}) => {
   const fetchClient = useFetchClient();
   const mounted = useMounted();
   // useChat keeps its connection from the first render, and the save queue is made once, so both read the fetch client through a ref.
@@ -135,7 +149,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
   clientRef.current = fetchClient;
 
   const [status, setStatus] = React.useState<AssistantStatus | null>(null);
-  const [statusError, setStatusError] = React.useState<string | null>(null);
+  const [statusFailed, setStatusFailed] = React.useState(false);
   const [notice, setNotice] = React.useState<ErrorNotice | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
@@ -161,21 +175,37 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       if (!mounted.current) return;
       if (isStatus(data)) {
         setStatus(data);
-        setStatusError(null);
+        setStatusFailed(false);
         // A "not set up" notice from an earlier send is stale once the assistant is ready.
         setNotice((current) => noticeAfterStatus(current, data));
       } else {
-        setStatusError('The answer was not a status.');
+        console.error('Maison assistant: the status check answered with something that is not a status.');
+        setStatusFailed(true);
       }
     } catch (error) {
-      if (mounted.current) setStatusError((error as Error).message);
+      // Staff read a fixed text (askTabState). What went wrong is written to the console.
+      console.error('Maison assistant: the status check failed.', error);
+      if (mounted.current) setStatusFailed(true);
     }
   }, [mounted]);
 
-  // The first check of the assistant waits for the drawer to be opened. Once the status is known, the saved chats load (below).
+  // The first check of the assistant waits for the drawer to be opened, or for a list that wants to know. It is made once. Once the status is
+  // known and the drawer has been opened, the saved chats load (below).
+  const checked = React.useRef(false);
   React.useEffect(() => {
-    if (started) void recheck();
-  }, [started, recheck]);
+    if ((!started && !checkStatus) || checked.current) return;
+    checked.current = true;
+    void recheck();
+  }, [started, checkStatus, recheck]);
+
+  // A list's check at page load can fail (Strapi restarting, a network blip). The first opening of the drawer then checks again, once, so the drawer is not
+  // left with a failure from before staff asked for it. A check that is still on its way is not repeated, and a later failure has Check again.
+  const openChecked = React.useRef(false);
+  React.useEffect(() => {
+    if (!started || openChecked.current) return;
+    openChecked.current = true;
+    if (statusFailed && status === null) void recheck();
+  }, [started, status, statusFailed, recheck]);
 
   const connection = React.useMemo(
     () =>
@@ -193,21 +223,32 @@ export const AssistantProvider = ({ children, started }: { children: React.React
     []
   );
 
+  // Set when staff press Stop or New chat, and cleared by the next send. After Stop, ai-client still processes the chunks it had already read: a run
+  // that ends in a draft call would run the page's draft tool and start the follow-up request by itself, or end in a request the server refuses and a
+  // red error. While it is set, the draft tools do nothing and an error is not shown, and the next send stops the chat once more first.
+  const stoppedRef = React.useRef(false);
+  const haltRef = React.useRef<() => void>(() => {});
+  // The browser's part of the two draft tools: a call to one is run here, and the card in the chat is its result. The list is made once, because
+  // useChat keeps the options of its first render.
+  const [draftTools] = React.useState(() => draftClientTools({ stopped: () => stoppedRef.current, halt: () => haltRef.current() }));
+
   const chat = useChat({
     connection,
     // A message sent while an answer is on its way is dropped, never queued out of sight. Send and the Ask about this buttons wait instead.
     queue: 'drop',
     onError: (error: Error) => {
-      // Stop ends the stream, and says nothing.
-      if (error?.name === 'AbortError') return;
+      // Stop ends the stream, and says nothing. A request that failed after Stop was not asked for by staff: it says nothing either.
+      if (error?.name === 'AbortError' || stoppedRef.current) return;
       setNotice(errorNotice(error));
       setFailedTurn({ question: asked.current });
       if ((error as { code?: unknown } | undefined)?.code === 'not_ready') void recheck();
     },
     onCustomEvent: (name: string) => setNote(customEventNote(name)),
+    tools: draftTools,
   });
 
   const { sendMessage, stop: stopChat, clear, setMessages } = chat;
+  haltRef.current = stopChat;
   const ready = status?.ready === true;
   const busy = chat.isLoading;
 
@@ -228,14 +269,17 @@ export const AssistantProvider = ({ children, started }: { children: React.React
     createSaveQueue({
       create: async (snapshot: ChatSnapshot) => savedRow((await clientRef.current.post<unknown>(CONVERSATION_PATHS.list, snapshot)).data),
       update: async (documentId: string, snapshot: ChatSnapshot) => savedRow((await clientRef.current.put<unknown>(CONVERSATION_PATHS.one(documentId), snapshot)).data),
-      onSaved: (row, { current }) => {
+      onSaved: (row, { current, replaced }) => {
         if (!mounted.current) return;
-        setChats((list) => withSavedChat(list, row));
+        // A chat that was saved again as a new one replaces the row of the chat that was gone.
+        setChats((list) => withSavedChat(replaced === undefined ? list : withoutSavedChat(list, replaced), row));
         // A chat that staff have already left is not the open one: its row is in the list, and nothing else changes.
         if (current) setOpenId(row.documentId);
         setHistoryError(null);
       },
-      onError: () => {
+      onError: (_error, { current }) => {
+        // What was being saved is not saved: the next save of this chat (a turn, or New chat) tries again.
+        if (current) savedKey.current = '';
         if (mounted.current) setHistoryError(HISTORY_ERRORS.save);
       },
     })
@@ -354,28 +398,36 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       setHistoryError(null);
       if (wasOpen) {
         opening.current += 1;
-        showChat(null, []);
+        // A turn that began while the delete was on its way stays on the screen. Its save creates a new chat.
+        if (busyRef.current) setOpenId(null);
+        else showChat(null, []);
       }
     },
     [queue, showChat, mounted]
   );
 
-  // When the assistant is ready for the first time, the list loads and the most recent chat is reopened, unless staff have begun something.
+  // When the assistant is ready and the drawer has been opened, for the first time, the list loads and the most recent chat is reopened, unless
+  // staff have begun something (typed a message, or pressed Ask about this).
   const loadedFirst = React.useRef(false);
   React.useEffect(() => {
-    if (!ready || loadedFirst.current) return;
+    if (!ready || !started || loadedFirst.current) return;
     loadedFirst.current = true;
     void (async () => {
       const list = await loadList();
       if (list && list.length > 0 && !acted.current && messagesRef.current.length === 0) await openChat(list[0].documentId);
     })();
-  }, [ready, loadList, openChat]);
+  }, [ready, started, loadList, openChat]);
 
   const send = React.useCallback(
-    async (text: string, source: MessageSource = 'box'): Promise<void> => {
+    async (text: string, source: MessageSource): Promise<void> => {
       // useChat would drop a send made while an answer is on its way. Nothing is changed for it: the box keeps its text.
       if (busyRef.current) return;
       acted.current = true;
+      // A run that Stop cut short can leave an interrupt behind, which would make ai-client refuse a normal message. Stopping again clears it.
+      if (stoppedRef.current) {
+        stopChat();
+        stoppedRef.current = false;
+      }
       dropOpenToolCalls();
       asked.current = { text, source };
       setFailedTurn(null);
@@ -384,10 +436,11 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       setDraft((current) => draftAfterSend(current, source));
       await sendMessage(text);
     },
-    [sendMessage, dropOpenToolCalls]
+    [sendMessage, stopChat, dropOpenToolCalls]
   );
 
   const stop = React.useCallback(() => {
+    stoppedRef.current = true;
     stopChat();
     dropOpenToolCalls();
   }, [stopChat, dropOpenToolCalls]);
@@ -395,6 +448,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
   const newChat = React.useCallback(() => {
     acted.current = true;
     opening.current += 1;
+    stoppedRef.current = true;
     stopChat();
     // What is on the screen is saved first, so an answer that was stopped stays in its chat. A question with no answer yet is not part of it.
     saveNow(withoutFailedTurn(withoutOpenToolCalls(messagesRef.current)));
@@ -416,7 +470,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
   const api = React.useMemo<AssistantApi>(
     () => ({
       status,
-      statusError,
+      statusFailed,
       ready,
       messages: chat.messages,
       busy,
@@ -430,7 +484,7 @@ export const AssistantProvider = ({ children, started }: { children: React.React
       recheck,
       history,
     }),
-    [status, statusError, ready, chat.messages, busy, notice, note, draft, send, stop, newChat, recheck, history]
+    [status, statusFailed, ready, chat.messages, busy, notice, note, draft, send, stop, newChat, recheck, history]
   );
 
   return <AssistantContext.Provider value={api}>{children}</AssistantContext.Provider>;

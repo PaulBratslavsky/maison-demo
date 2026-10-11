@@ -1,7 +1,7 @@
 import { AccessibleIcon, DesignSystemProvider, Tooltip, darkTheme, lightTheme } from '@strapi/design-system';
 import { useState, type ComponentType } from 'react';
 import { IntlProvider } from 'react-intl';
-import { MemoryRouter, NavLink, useLocation } from 'react-router-dom';
+import { MemoryRouter, NavLink, useLocation, useNavigationType } from 'react-router-dom';
 
 /**
  * Strapi 5.55.1's left menu, as far as Maison's menu icon depends on it, for the tests of the assistant's mount. The assistant is drawn by the
@@ -102,7 +102,14 @@ export const FakeLeftMenu = ({ links }: { links: MenuLink[] }) => {
 /** The address, so a test can see which page the admin is on, and that a click did not take them to another. */
 const Where = () => {
   const { pathname, search } = useLocation();
-  return <p data-testid="location">{`${pathname}${search}`}</p>;
+  // PUSH adds a history entry, REPLACE changes the current one, and POP is the first address or the Back button.
+  const how = useNavigationType();
+  return (
+    <>
+      <p data-testid="location">{`${pathname}${search}`}</p>
+      <p data-testid="navigation-type">{how}</p>
+    </>
+  );
 };
 
 /**

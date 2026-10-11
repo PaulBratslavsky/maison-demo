@@ -9,6 +9,7 @@
   "scripts": {
     "postinstall": "npm install --prefix strapi && npm install --prefix liff && node scripts/init-env.mjs",
     "dev": "node scripts/line-mode.mjs require-local && concurrently -k -n strapi,app -c magenta,green \"npm run develop --prefix strapi\" \"npm run dev --prefix liff\"",
+    "dev:offline": "node scripts/line-mode.mjs require-local && concurrently -k -n line,strapi,app -c yellow,magenta,green \"npm run line:stand-in\" \"AI_PROVIDER=openai-compatible AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=qwen3-14b-32k AI_CHAT_MODEL=qwen3-14b-32k AI_CHAT_BASE_URL=http://127.0.0.1:11434 MAISON_LINE_API_BASE_URL=http://127.0.0.1:4010 npm run develop --prefix strapi\" \"ANTHROPIC_API_KEY= AI_GATEWAY_API_KEY= npm run dev --prefix liff\"",
     "dev:strapi": "npm run develop --prefix strapi",
     "dev:app": "node scripts/line-mode.mjs require-local && npm run dev --prefix liff",
     "setup": "node --env-file=strapi/.env strapi/scripts/maison-setup.mjs",

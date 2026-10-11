@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { darkTheme, lightTheme } from '@strapi/design-system';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -177,11 +177,52 @@ const heldAnswer = () => {
   return { respond, finish: () => finish() };
 };
 
+/**
+ * A stream that has sent `events` and then stays open. When the request is aborted (Stop, or New chat), the stream fails with an abort error, as
+ * a real connection does. Without a signal it stays open for the whole test. `onStart` is called when the stream has sent its events.
+ */
+const openStream = (events: Array<Record<string, unknown>>, signal?: AbortSignal, onStart?: () => void) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
+        onStart?.();
+        signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+  );
+/** An answer that has begun with "Looking into it" and does not end. */
+const slow = (signal?: AbortSignal, onStart?: () => void) => openStream(answer('Looking into it').slice(0, 3), signal, onStart);
+/** An answer whose first text has come and whose tool call is cut in the middle of its arguments. */
+const midTool = (signal?: AbortSignal) =>
+  openStream(
+    [
+      event('RUN_STARTED'),
+      event('TEXT_MESSAGE_START', { messageId: 'm1', role: 'assistant' }),
+      event('TEXT_MESSAGE_CONTENT', { messageId: 'm1', delta: 'Looking. ' }),
+      event('TEXT_MESSAGE_END', { messageId: 'm1' }),
+      event('TOOL_CALL_START', { toolCallId: 'c1', toolCallName: 'list_requests', parentMessageId: 'm1' }),
+      event('TOOL_CALL_ARGS', { toolCallId: 'c1', delta: '{"sta' }),
+    ],
+    signal
+  );
+/** A run that has started and sent nothing else. */
+const silent = (signal?: AbortSignal) => openStream([event('RUN_STARTED')], signal);
+/** Makes `fetch` answer every chat request with `make(signal)`, so the stream ends when the request is aborted. */
+const answerWith = (make: (signal?: AbortSignal) => Response) => vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => make(init?.signal)));
+/**
+ * Lets the page finish what it does after a stand-in has answered. A test that proves something did NOT happen has no event to wait for, so it
+ * waits for a timer that is queued after every promise the page is already working through. Where there is an event to wait for, a test waits for it.
+ */
+const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+
 beforeEach(() => {
   localStorage.clear();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('before the chat', () => {
@@ -217,9 +258,17 @@ describe('before the chat', () => {
     expect(await screen.findByRole('textbox', { name: 'Chat message' })).toBeTruthy();
   });
 
-  it("says the assistant could not be checked, in the server's words, when the status call fails, with Check again", async () => {
-    world({ status: new Error('Forbidden') });
-    expect(await screen.findByText("Couldn't check the assistant: Forbidden")).toBeTruthy();
+  // Staff read a fixed text. What the fetch client said goes to the console, for whoever looks into it.
+  it('says the assistant could not be checked, in a fixed text, when the status call fails, with Check again, and logs the error', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      world({ status: new Error('Forbidden') });
+      expect(await screen.findByText("Couldn't check the assistant.")).toBeTruthy();
+      expect(screen.queryByText(/Forbidden/)).toBeNull();
+      expect(logged.mock.calls.some((call) => call.some((item) => item instanceof Error && item.message === 'Forbidden'))).toBe(true);
+    } finally {
+      logged.mockRestore();
+    }
     expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
@@ -532,19 +581,8 @@ describe('a turn', () => {
   it('stops an answer that is on its way with Stop, keeps what came, and shows no error', async () => {
     let started: () => void = () => {};
     const began = new Promise<void>((resolve) => (started = resolve));
-    const slow = (signal?: AbortSignal) =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-            started();
-            signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-          },
-        }),
-        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-      );
     world();
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+    answerWith((signal) => slow(signal, started));
     await screen.findByRole('textbox', { name: 'Chat message' });
 
     await userEvent.type(box(), 'Which visits are waiting?{Enter}');
@@ -685,6 +723,34 @@ describe('saved chats', () => {
     expect(rowOf('Which visits are waiting?').getAttribute('aria-current')).toBe('true');
   });
 
+  it('takes away the error of the last turn when another chat is opened: the error was about the chat that is left', async () => {
+    const failed = [event('RUN_STARTED'), event('RUN_ERROR', { message: 'Anthropic is busy. Try again in a minute.', code: '529' })];
+    world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')], chat: [() => stream(failed)] });
+    await shows('The answer to Newer chat');
+    await userEvent.type(box(), 'Another question{Enter}');
+    expect(await screen.findByText('Anthropic is busy. Try again in a minute.')).toBeTruthy();
+    await openSidebar();
+
+    await userEvent.click(rowOf('Older chat'));
+
+    expect(await shows('The answer to Older chat')).toBeTruthy();
+    expect(screen.queryByText('Anthropic is busy. Try again in a minute.')).toBeNull();
+  });
+
+  it('takes away the line about how the last turn ended when another chat is opened', async () => {
+    const stopped = [...answer('Part of an answer.').slice(0, 4), event('CUSTOM', { name: 'max_turns', value: {} }), event('RUN_FINISHED', { finishReason: 'stop' })];
+    world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')], chat: [() => stream(stopped)] });
+    await shows('The answer to Newer chat');
+    await ask('Another question', 'Part of an answer.');
+    expect(await screen.findByText('The assistant stopped after 6 steps. Ask a narrower question.')).toBeTruthy();
+    await openSidebar();
+
+    await userEvent.click(rowOf('Older chat'));
+
+    expect(await shows('The answer to Older chat')).toBeTruthy();
+    expect(screen.queryByText('The assistant stopped after 6 steps. Ask a narrower question.')).toBeNull();
+  });
+
   it('opens the chat that was chosen last when two are chosen one after the other: the answer that comes late is dropped', async () => {
     let answerFirst: () => void = () => {};
     world({ saved: [savedChat('c3', 'Newest chat'), savedChat('c2', 'Middle chat'), savedChat('c1', 'Oldest chat')] });
@@ -697,7 +763,8 @@ describe('saved chats', () => {
     await userEvent.click(rowOf('Middle chat'));
     await shows('The answer to Middle chat');
     answerFirst();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // There is no event for an answer that is dropped, so the test waits for the work the late answer starts.
+    await settle();
 
     expect(within(region()).getByText('The answer to Middle chat')).toBeTruthy();
     expect(within(region()).queryByText('The answer to Oldest chat')).toBeNull();
@@ -715,7 +782,8 @@ describe('saved chats', () => {
     await openSidebar();
 
     await userEvent.click(rowOf('Older chat'));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // There is no event for a chat that is not opened, so the test waits for the work the click starts.
+    await settle();
     expect(client.get).not.toHaveBeenCalledWith('/maison/conversations/c1');
 
     finishSave();
@@ -850,7 +918,8 @@ describe('saved chats', () => {
     it('does not save a chat again when nothing in it has changed', async () => {
       world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
       await shows('The answer to Which visits are waiting?');
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a save that does not happen.
+      await settle();
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
     });
@@ -905,18 +974,8 @@ describe('saved chats', () => {
     });
 
     it('saves the chat as it is when New chat stops an answer on its way: what had come stays in the chat it belongs to', async () => {
-      const slow = (signal?: AbortSignal) =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-              signal?.addEventListener('abort', () => controller.error(new DOMException('The operation was aborted.', 'AbortError')));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world();
-      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => slow(init?.signal)));
+      answerWith(slow);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
       await within(region()).findByText('Looking into it');
@@ -949,6 +1008,75 @@ describe('saved chats', () => {
       expect(within(region()).queryByText('Fine.')).toBeNull();
     });
 
+    // The save goes to the chat it was made for, so a saved chat is updated and no second chat is made.
+    it('updates the saved chat it leaves, and creates no second chat, when New chat stops an answer on its way', async () => {
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      answerWith(slow);
+      await shows('The answer to Which visits are waiting?');
+      await userEvent.type(box(), 'Another question{Enter}');
+      await within(region()).findByText('Looking into it');
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+
+      await waitFor(() => expect(client.put).toHaveBeenCalledTimes(1));
+      expect(client.put.mock.calls[0][0]).toBe('/maison/conversations/c1');
+      expect(client.put.mock.calls[0][1].messages).toHaveLength(4);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    // What is saved holds no tool call that was cut off.
+    it('saves no cut-off tool call when New chat is pressed while a tool runs', async () => {
+      world();
+      answerWith(midTool);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await within(region()).findByRole('button', { name: /Tool: list_requests/ });
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+
+      await waitFor(() => expect(client.post).toHaveBeenCalled());
+      const saved = client.post.mock.calls.at(-1)?.[1].messages as Array<{ parts: Array<{ type: string }> }>;
+      expect(saved.map((message) => message.parts.map((part) => part.type))).toEqual([['text'], ['text']]);
+    });
+
+    // A question with no answer yet is not a chat.
+    it('saves nothing when New chat is pressed before the answer has begun', async () => {
+      world();
+      answerWith(silent);
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      await userEvent.type(box(), 'Which visits are waiting?{Enter}');
+      await screen.findByRole('status', { name: 'Assistant is replying' });
+
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      // The turn was never saved, so no event follows New chat. The empty chat is on the screen once New chat has been handled.
+      await screen.findByText('Ask Maison');
+      await settle();
+
+      expect(client.post).not.toHaveBeenCalled();
+      expect(client.put).not.toHaveBeenCalled();
+    });
+
+    // New chat takes precedence over a chat that was chosen and has not arrived yet.
+    it('keeps the empty chat that New chat made when the answer for a chat chosen just before arrives late', async () => {
+      let answerOlder: () => void = () => {};
+      world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
+      await shows('The answer to Newer chat');
+      const get = client.get.getMockImplementation() as (url: string) => Promise<unknown>;
+      client.get.mockImplementation((url: string) => (url === '/maison/conversations/c1' ? new Promise((resolve) => (answerOlder = () => resolve(get(url)))) : get(url)));
+      await openSidebar();
+      await userEvent.click(rowOf('Older chat'));
+      // With the sidebar open there are two buttons named "New chat". This one is the sidebar's.
+      await userEvent.click(within(sidebar()).getByRole('button', { name: 'New chat' }));
+      expect(await screen.findByText('Ask Maison')).toBeTruthy();
+
+      answerOlder();
+      // There is no event for an answer that is dropped.
+      await settle();
+
+      expect(screen.getByText('Ask Maison')).toBeTruthy();
+      expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
+    });
+
     it('leaves what staff have typed in the box', async () => {
       world({ chat: [() => stream(answer('Two visits wait.'))] });
       await screen.findByRole('textbox', { name: 'Chat message' });
@@ -966,6 +1094,48 @@ describe('saved chats', () => {
       await userEvent.click(rowOf('Older chat'));
       await shows('The answer to Older chat');
       expect(box().value).toBe('Not sent yet');
+    });
+
+    // A chat that was deleted elsewhere is saved again as a new chat, and the old row goes.
+    it('shows the chat once in the sidebar after a vanished chat is saved again as a new one', async () => {
+      const { rows } = world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [() => stream(answer('More.'))] });
+      await shows('The answer to Which visits are waiting?');
+      rows.splice(0, rows.length);
+      await ask('Tell me more', 'More.');
+      await waitFor(() => expect(client.post).toHaveBeenCalledTimes(1));
+      await openSidebar();
+      await waitFor(() => expect(titlesInSidebar()).toHaveLength(1));
+    });
+
+    // A save that failed is tried again by the next save of the same chat, which New chat makes.
+    it('saves a chat whose save failed when New chat is pressed afterwards', async () => {
+      const { rows } = world({ chat: [() => stream(answer('Two visits wait.'))] });
+      await screen.findByRole('textbox', { name: 'Chat message' });
+      client.post.mockRejectedValueOnce(new Error('Gateway timeout'));
+      await ask('Which visits are waiting?', 'Two visits wait.');
+      await screen.findByText("Couldn't save this chat.");
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      // The second save is the event to wait for: the failed chat is stored when New chat is pressed.
+      await waitFor(() => expect(rows).toHaveLength(1));
+      expect(rows).toHaveLength(1);
+    });
+
+    // A turn that begins while a delete is on its way stays on the screen.
+    it('keeps a turn that began while the open chat was being deleted', async () => {
+      let finishDelete: () => void = () => {};
+      world({ saved: [savedChat('c1', 'Which visits are waiting?')] });
+      answerWith(slow);
+      await shows('The answer to Which visits are waiting?');
+      const del = client.del.getMockImplementation() as (...args: any[]) => Promise<unknown>;
+      client.del.mockImplementation((...args: any[]) => new Promise((resolve) => (finishDelete = () => resolve(del(...args)))));
+      await openSidebar();
+      await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Which visits are waiting?' }));
+      await userEvent.type(box(), 'Another question{Enter}');
+      await within(region()).findByText('Looking into it');
+      finishDelete();
+      // The delete finishes when its row is gone from the list. The turn that began meanwhile must still be on the screen then.
+      await waitFor(() => expect(titlesInSidebar()).toEqual([]));
+      expect(within(region()).queryByText('Another question')).not.toBeNull();
     });
   });
 
@@ -1020,12 +1190,33 @@ describe('saved chats', () => {
       await openSidebar();
 
       await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Which visits are waiting?' }));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a delete that does not start yet.
+      await settle();
       expect(client.del).not.toHaveBeenCalled();
 
       finishSave(undefined);
       await waitFor(() => expect(client.del).toHaveBeenCalledExactlyOnceWith('/maison/conversations/c1'));
       expect(screen.queryByText("Couldn't save this chat.")).toBeNull();
+    });
+
+    // Deleting the open chat takes precedence over a chat that was chosen and has not arrived yet.
+    it('keeps the empty screen after the open chat is deleted when the answer for a chat chosen just before arrives late', async () => {
+      let answerOlder: () => void = () => {};
+      world({ saved: [savedChat('c2', 'Newer chat'), savedChat('c1', 'Older chat')] });
+      await shows('The answer to Newer chat');
+      const get = client.get.getMockImplementation() as (url: string) => Promise<unknown>;
+      client.get.mockImplementation((url: string) => (url === '/maison/conversations/c1' ? new Promise((resolve) => (answerOlder = () => resolve(get(url)))) : get(url)));
+      await openSidebar();
+      await userEvent.click(rowOf('Older chat'));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete chat: Newer chat' }));
+      expect(await screen.findByText('Ask Maison')).toBeTruthy();
+
+      answerOlder();
+      // There is no event for an answer that is dropped.
+      await settle();
+
+      expect(screen.getByText('Ask Maison')).toBeTruthy();
+      expect(within(region()).queryByText('The answer to Older chat')).toBeNull();
     });
 
     it('says so, and keeps the row, when the chat could not be deleted', async () => {
@@ -1056,15 +1247,6 @@ describe('saved chats', () => {
 
   describe('while an answer comes', () => {
     it('switches off the sidebar: its rows, New chat and the trash buttons', async () => {
-      const slow = () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
       world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [slow] });
       await shows('The answer to Which visits are waiting?');
       await openSidebar();
@@ -1088,15 +1270,6 @@ describe('saved chats', () => {
         </>
       );
     };
-    const slow = () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            for (const item of answer('Looking into it').slice(0, 3)) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-          },
-        }),
-        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-      );
     const { rows, show } = world({ saved: [savedChat('c1', 'Which visits are waiting?')], chat: [slow], mount: false });
     show(
       <>
@@ -1178,7 +1351,7 @@ describe('the drawer', () => {
       world();
       await screen.findByRole('textbox', { name: 'Chat message' });
       const declarations = declarationsOf(drawer());
-      expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': '90vw' });
+      expect(declarations).toMatchObject({ position: 'fixed', top: '0', right: '0', bottom: '0', width: '600px', 'max-width': 'calc(90vw - 1px)' });
     });
 
     // The design system makes every box a border box (`box-sizing: border-box` for `*`, in the global style of its provider), and the admin draws it. In
@@ -1476,6 +1649,21 @@ describe('the drawer', () => {
       expect(onClose).toHaveBeenCalledOnce();
     });
 
+    // The list stays open when the focus moves on, so the first Escape is for the list wherever the focus is.
+    it('closes only the list of tools when the focus is in the text box, and the drawer with the next Escape', async () => {
+      const onClose = await open();
+      await userEvent.click(screen.getByRole('button', { name: /^Tools \(/ }));
+      box().focus();
+      expect(screen.getByRole('dialog', { name: 'Tools' })).toBeTruthy();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'Tools' })).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      await userEvent.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('works while the assistant is being checked, and when it is not set up: the focus is on the drawer then', async () => {
       const onClose = vi.fn();
       world({ status: NOT_SET_UP, mount: false }).show(<Drawer onClose={onClose} />);
@@ -1521,8 +1709,9 @@ describe('the drawer', () => {
 
     it('is there when the check failed, with Check again', async () => {
       const onClose = vi.fn();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
       world({ status: new Error('Forbidden'), mount: false }).show(<Drawer onClose={onClose} />);
-      await screen.findByText("Couldn't check the assistant: Forbidden");
+      await screen.findByText("Couldn't check the assistant.");
       await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }));
       expect(onClose).toHaveBeenCalledOnce();
     });
@@ -1537,7 +1726,7 @@ describe('the drawer', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
       expect(declarationsOf(drawer()).width).toBe('960px');
-      expect(declarationsOf(drawer())['max-width']).toBe('90vw');
+      expect(declarationsOf(drawer())['max-width']).toBe('calc(90vw - 1px)');
       expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
       // Expand does not open the list of saved chats, and no list shows.
       expect(savedList().hasAttribute('inert')).toBe(true);
@@ -1715,15 +1904,15 @@ describe('the drawer', () => {
       expect(declarationsOf(chatColumn()).flex).toBe('1 1 960px');
     });
 
-    // jsdom has no layout, so the limit is held as what the browser is asked for: the drawer is at most 90vw wide however wide it asks to be, the list is
-    // 260px and cannot shrink, and the chat column may shrink, so it gives up the difference and the list keeps its width.
-    it('is held at 90vw when the width it asks for would pass that, and the chat column is what gives up the difference', async () => {
+    // jsdom has no layout, so the limit is held as what the browser is asked for: the drawer is at most 90vw wide, border included, however wide it asks to be, the list is
+    // 260px and cannot shrink, and the chat column may shrink, so it has less width and the list keeps its width.
+    it('is held at 90vw when the width it asks for would pass that, and the chat column is what has less width', async () => {
       world({ saved: chats() });
       await shows('The answer to Any complaints this week?');
       await userEvent.click(screen.getByRole('button', { name: 'Expand the assistant' }));
       await userEvent.click(screen.getByRole('button', { name: 'History' }));
 
-      expect(declarationsOf(drawer())).toMatchObject({ width: '1220px', 'max-width': '90vw' });
+      expect(declarationsOf(drawer())).toMatchObject({ width: '1220px', 'max-width': 'calc(90vw - 1px)' });
       const column = declarationsOf(chatColumn());
       expect(column.flex).toMatch(/^1 1 960px$/);
       expect(column['min-width']).toBe('0');
@@ -1879,7 +2068,8 @@ describe('the drawer', () => {
           </AssistantProvider>
         );
       }
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // There is no event for a status check or a save that does not happen.
+      await settle();
 
       expect(within(region()).getByText('Which visits are waiting?')).toBeTruthy();
       expect(within(region()).getByText('Two visits wait.')).toBeTruthy();
@@ -1891,25 +2081,8 @@ describe('the drawer', () => {
     });
 
     it('keeps an answer that arrives while it is closed, and shows it when it opens', async () => {
-      let finish: () => void = () => {};
-      const encoder = new TextEncoder();
-      const send = (controller: ReadableStreamDefaultController<Uint8Array>, events: Array<Record<string, unknown>>) => {
-        for (const item of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`));
-      };
-      const slow = () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              send(controller, [event('RUN_STARTED'), event('TEXT_MESSAGE_START', { messageId: 'slow', role: 'assistant' }), event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: 'Looking into it' })]);
-              finish = () => {
-                send(controller, [event('TEXT_MESSAGE_CONTENT', { messageId: 'slow', delta: ' and found two visits.' }), event('TEXT_MESSAGE_END', { messageId: 'slow' }), event('RUN_FINISHED', { finishReason: 'stop' })]);
-                controller.close();
-              };
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-        );
-      const { show } = world({ chat: [slow], mount: false });
+      const held = heldAnswer();
+      const { show } = world({ chat: [held.respond], mount: false });
       const view = show(<Drawer open />);
       await screen.findByRole('textbox', { name: 'Chat message' });
       await userEvent.type(box(), 'Which visits are waiting?{Enter}');
@@ -1920,8 +2093,9 @@ describe('the drawer', () => {
           <Drawer open={false} />
         </AssistantProvider>
       );
-      finish();
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      held.finish();
+      // The turn ends while the drawer is closed, and the chat is saved at the end of a turn: that save is the event to wait for.
+      await waitFor(() => expect(client.post).toHaveBeenCalledTimes(1));
       view.rerender(
         <AssistantProvider started>
           <Drawer open />

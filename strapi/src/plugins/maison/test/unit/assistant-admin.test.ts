@@ -4,6 +4,8 @@ import {
   CUSTOM_EVENT,
   STARTERS,
   adminTokenFrom,
+  askButtonState,
+  askMessage,
   askTabState,
   canSend,
   composerButtons,
@@ -21,6 +23,7 @@ import {
   toolResultOf,
   withoutFailedTurn,
   withoutOpenToolCalls,
+  type AskItem,
   type ErrorNotice,
   type MessageLike,
   type PartLike,
@@ -101,16 +104,15 @@ describe('isStatus', () => {
 
 describe('askTabState', () => {
   it('is loading until the status answers, with no error', () => {
-    expect(askTabState(null, null)).toEqual({ kind: 'loading' });
+    expect(askTabState(null, false)).toEqual({ kind: 'loading' });
   });
 
-  it('says the assistant could not be checked, with the error, when the status call failed and there is no status', () => {
-    expect(askTabState(null, 'Forbidden')).toEqual({ kind: 'failed', text: "Couldn't check the assistant: Forbidden" });
-    expect(askTabState(null, 'The answer was not a status.')).toEqual({ kind: 'failed', text: "Couldn't check the assistant: The answer was not a status." });
+  it('says the assistant could not be checked, in a fixed text that holds none of the error, when the status call failed and there is no status', () => {
+    expect(askTabState(null, true)).toEqual({ kind: 'failed', text: "Couldn't check the assistant." });
   });
 
   it("shows the server's reason, and no text box, when the assistant is not ready", () => {
-    expect(askTabState({ ready: false, reason: 'The assistant works with Anthropic only. AI_PROVIDER is set to openai.' }, null)).toEqual({
+    expect(askTabState({ ready: false, reason: 'The assistant works with Anthropic only. AI_PROVIDER is set to openai.' }, false)).toEqual({
       kind: 'not-ready',
       text: 'The assistant works with Anthropic only. AI_PROVIDER is set to openai.',
     });
@@ -118,11 +120,11 @@ describe('askTabState', () => {
 
   it('is the chat, with the model and the tools, when the assistant is ready', () => {
     const tools = [{ name: 'list_requests', label: 'Visit requests' }];
-    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools }, null)).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools });
+    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools }, false)).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools });
   });
 
   it('keeps showing a status it has when a later check failed', () => {
-    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools: [] }, 'Failed to fetch')).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools: [] });
+    expect(askTabState({ ready: true, model: 'claude-sonnet-5-5', tools: [] }, true)).toEqual({ kind: 'chat', model: 'claude-sonnet-5-5', tools: [] });
   });
 });
 
@@ -780,5 +782,64 @@ describe('composerButtons', () => {
         for (const ready of [true, false]) expect(composerButtons({ text, busy, ready }).sendDisabled).toBe(!canSend({ text, busy, ready }));
       }
     }
+  });
+});
+
+describe('askMessage', () => {
+  it('names a request by its reference', () => {
+    expect(askMessage({ kind: 'request', reference: 'APT-4821' })).toBe('Tell me about request APT-4821.');
+  });
+
+  it('names a question by its reference', () => {
+    expect(askMessage({ kind: 'question', reference: 'Q-4821' })).toBe('Tell me about question Q-4821.');
+  });
+
+  it('names an inquiry by its documentId, which is the only reference it has', () => {
+    expect(askMessage({ kind: 'inquiry', documentId: 'hxq1m6n0v2r8kc4tj9p3zwb5' })).toBe('Tell me about inquiry hxq1m6n0v2r8kc4tj9p3zwb5.');
+  });
+
+  // The chat looks the item up itself. Even if a whole row were passed by mistake, none of it may reach the message.
+  it.each([
+    ['request', { kind: 'request', reference: 'APT-4821', customer: 'line:U4af…88', note: 'Please call me.' }],
+    ['question', { kind: 'question', reference: 'Q-4821', customer: 'line:U4af…88', question: 'Is it waterproof?' }],
+    ['inquiry', { kind: 'inquiry', documentId: 'hxq1m6n0v2r8kc4tj9p3zwb5', customer: 'line:U4af…88', message: 'Where is my order?' }],
+  ])('holds only the reference, even when given a whole %s row', (_kind, row) => {
+    const message = askMessage(row as AskItem);
+    expect(message).not.toContain('line:');
+    expect(message).not.toContain('Please call me');
+    expect(message).not.toContain('waterproof');
+    expect(message).not.toContain('Where is my order');
+    expect(message).toMatch(/^Tell me about (request|question|inquiry) \S+\.$/);
+  });
+});
+
+describe('askButtonState', () => {
+  it('shows nothing without a chat: an admin who may not use the assistant has none', () => {
+    expect(askButtonState(null)).toEqual({ show: false, disabled: false });
+  });
+
+  it('shows nothing while the assistant is not ready, busy or not', () => {
+    expect(askButtonState({ ready: false, busy: false })).toEqual({ show: false, disabled: false });
+    expect(askButtonState({ ready: false, busy: true })).toEqual({ show: false, disabled: false });
+  });
+
+  it('shows an enabled button once the assistant is ready', () => {
+    expect(askButtonState({ ready: true, busy: false })).toEqual({ show: true, disabled: false });
+  });
+
+  // The chat drops a message sent while an answer comes, so a click then would do nothing. The button waits.
+  it('waits while the assistant is answering: shown, but disabled', () => {
+    expect(askButtonState({ ready: true, busy: true })).toEqual({ show: true, disabled: true });
+  });
+});
+
+describe('a message that Ask about this sends', () => {
+  // Ask about this sends a message the page wrote, so the staff member's half-written message stays in the box, as it does for a quick question.
+  it('leaves the text box as it was', () => {
+    expect(draftAfterSend('half a message', 'ask')).toBe('half a message');
+  });
+
+  it('is not put back into the box after a failed turn: staff did not type it', () => {
+    expect(draftAfterFailure({ draft: '', question: { text: 'Tell me about request APT-4821.', source: 'ask' } })).toBe('');
   });
 });

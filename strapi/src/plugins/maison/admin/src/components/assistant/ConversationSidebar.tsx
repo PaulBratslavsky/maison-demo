@@ -7,7 +7,7 @@ import { HISTORY_WIDTH } from './drawerWidth';
 
 /**
  * The history sidebar, copied from strapi-plugin-tanstack-ai 1.6.0 (`ConversationSidebar.tsx`): 260px wide when open, and closed it
- * collapses to no width instead of leaving the page, so opening it is a width change and not a jump in the layout. At the top is New chat,
+ * collapses to no width instead of leaving the page, so opening it is a width change and not a sudden change in the layout. At the top is New chat,
  * under it the list of this admin's chats, newest first, each row a title and a trash button that shows on hover or keyboard focus.
  * Without "Manage history": Maison has no page for it.
  *
@@ -21,7 +21,7 @@ import { HISTORY_WIDTH } from './drawerWidth';
  * - The open chat's row says so to screen readers (`aria-current`), and each trash button names its chat.
  */
 
-const SidebarRoot = styled.div<{ $open: boolean }>`
+const SidebarRoot = styled.aside<{ $open: boolean }>`
   box-sizing: border-box;
   width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};
   min-width: ${({ $open }) => ($open ? `${HISTORY_WIDTH}px` : '0px')};

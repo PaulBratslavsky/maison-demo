@@ -39,9 +39,9 @@ describe('SetupNotice', () => {
   });
 
   it('has no title when it is given none, and no empty heading', () => {
-    renderInTheme(<SetupNotice onCheckAgain={() => {}}>Couldn't check the assistant: Forbidden</SetupNotice>);
+    renderInTheme(<SetupNotice onCheckAgain={() => {}}>Couldn't check the assistant.</SetupNotice>);
     expect(screen.queryByRole('heading')).toBeNull();
-    expect(screen.getByText("Couldn't check the assistant: Forbidden")).toBeTruthy();
+    expect(screen.getByText("Couldn't check the assistant.")).toBeTruthy();
   });
 
   it('draws a failed check in the danger colour, and the other notice in grey', () => {

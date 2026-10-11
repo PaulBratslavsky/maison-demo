@@ -88,7 +88,7 @@ export const ToolBox = ({ box }: { box: ToolBoxModel }) => {
       <Header type="button" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span aria-hidden="true">{open ? '▼' : '▶'}</span>
         <span>Tool: {box.name}</span>
-        {box.state === 'running' ? <Spinner aria-label="running" /> : <Status $failed={failed}>{box.status}</Status>}
+        {box.state === 'running' ? <Spinner role="progressbar" aria-label="running" /> : <Status $failed={failed}>{box.status}</Status>}
       </Header>
       {open && <Content>{box.body}</Content>}
     </Frame>

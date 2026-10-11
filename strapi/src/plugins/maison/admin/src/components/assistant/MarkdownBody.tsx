@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { memo, type ComponentProps } from 'react';
 
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,7 +10,7 @@ import { safeLink } from '../../assistant';
  * The assistant's answer, drawn from Markdown: paragraphs, lists, tables, code, quotes and links. Copied from strapi-plugin-tanstack-ai
  * 1.6.0 (`MarkdownBody` in `MessageList.tsx`), with these changes.
  * - The four tints that were literal black overlays are theme colours, so inline code, code blocks and table headers show in the dark theme.
- * - Lists have their markers and headings their weight. The design system's global style takes both away (`list-style: none`, `font: unset`).
+ * - Lists have their markers and headings their weight. The design system's global style removes both (`list-style: none`, `font: unset`).
  * - Tables. The reference keeps every cell on one line, which is right for a chat the width of a page and wrong for a drawer. Here a header cell stays
  *   on one line, and a body cell wraps its text between words, in a column between 7rem and 22rem wide: a short value (a date, a reference, a masked
  *   customer) keeps its line, and a long text wraps inside its column. A word is broken only when it is longer than the column can be (`overflow-wrap:
@@ -55,6 +55,18 @@ const Body = styled.div`
     opacity: 0.85;
   }
   a { color: ${({ theme }) => theme.colors.primary600}; }
+  /* remark-gfm marks the heading of a footnote section "sr-only": it is for screen readers. The design system has no rule for the class, so it is hidden here. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   table {
     border-collapse: collapse;
     font-size: 0.9em;
@@ -91,7 +103,7 @@ const TableScroll = styled.div`
   overscroll-behavior-x: contain;
 `;
 
-/** A table in an answer, in its own scroll box. react-markdown hands its own `node` to a custom component, which is left out so it does not land on the element. */
+/** A table in an answer, in its own scroll box. react-markdown passes its own `node` to a custom component, which is left out so it does not land on the element. */
 const MarkdownTable = ({ node: _node, ...props }: ComponentProps<'table'> & { node?: unknown }) => (
   <TableScroll>
     <table {...props} />
@@ -100,7 +112,7 @@ const MarkdownTable = ({ node: _node, ...props }: ComponentProps<'table'> & { no
 
 /**
  * A link in an answer. Only an `http:` or `https:` address is a link: it opens in a new tab and gives the page no way back to its window.
- * Anything else is its text, as plain text. react-markdown hands its own `node` to a custom component, which is left out here so it does not
+ * Anything else is its text, as plain text. react-markdown passes its own `node` to a custom component, which is left out here so it does not
  * land on the element as an attribute.
  */
 const MarkdownLink = ({ href, children, node: _node, ...props }: ComponentProps<'a'> & { node?: unknown }) => {
@@ -115,11 +127,13 @@ const MarkdownLink = ({ href, children, node: _node, ...props }: ComponentProps<
 
 const components = { a: MarkdownLink, table: MarkdownTable } as ComponentProps<typeof Markdown>['components'];
 
-export const MarkdownBody = ({ text }: { text: string }) => (
+/** Memoized: parsing Markdown is the costly part of a streamed answer, and its only prop is a string. An answer whose text did not change is not parsed again. */
+export const MarkdownBody = memo(({ text }: { text: string }) => (
   // `data-message-part` is a hook for tests: it lets a check read the rendered answer and nothing else in the message.
   <Body data-message-part="text">
     <Markdown remarkPlugins={[remarkGfm]} components={components} disallowedElements={['img']}>
       {text}
     </Markdown>
   </Body>
-);
+));
+MarkdownBody.displayName = 'MarkdownBody';

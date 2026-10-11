@@ -79,7 +79,7 @@ const eventsOf = async (body: unknown): Promise<Doc[]> =>
     .filter((block) => block.startsWith('data: '))
     .map((block) => JSON.parse(block.slice('data: '.length)));
 
-/** The seven read tools with the labels staff read, in the order the chat offers them. */
+/** The seven read tools and the two draft tools, with the labels staff read, in the order the chat offers them. */
 const ALL_TOOLS = [
   { name: 'list_requests', label: 'Visit requests' },
   { name: 'list_questions', label: 'Customer questions' },
@@ -88,6 +88,8 @@ const ALL_TOOLS = [
   { name: 'search_knowledge', label: 'Product knowledge' },
   { name: 'search_products', label: 'Product search' },
   { name: 'view_product', label: 'Product details' },
+  { name: 'draft_reply', label: 'Draft a LINE reply' },
+  { name: 'draft_answer', label: 'Draft an answer' },
 ];
 /** A Koa context whose admin may do only these actions. */
 const ctxFor = (...granted: string[]) => fakeCtx({ state: { userAbility: { can: (action: string) => granted.includes(action) }, user: { id: 7 } } });
@@ -115,7 +117,7 @@ describe('assistant.status', () => {
   it('leaves out the catalog tools that disabledTools names, as the chat does: the list is never every tool the plugin has', async () => {
     const ctx = fakeCtx();
     await world({ config: { disabledTools: ['search_products', 'view_product'] } }).controller.status(ctx);
-    expect(ctx.body.tools.map((tool: Doc) => tool.name)).toEqual(['list_requests', 'list_questions', 'list_inquiries', 'inquiry_counts', 'search_knowledge']);
+    expect(ctx.body.tools.map((tool: Doc) => tool.name)).toEqual(['list_requests', 'list_questions', 'list_inquiries', 'inquiry_counts', 'search_knowledge', 'draft_reply', 'draft_answer']);
   });
 
   it('lists no tools when the context has no ability at all', async () => {

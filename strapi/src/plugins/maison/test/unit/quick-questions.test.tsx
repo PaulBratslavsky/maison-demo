@@ -115,8 +115,8 @@ describe('QuickQuestions', () => {
       expect(declarationsOf(group())['white-space']).toBeUndefined();
     });
 
-    // The chat column is a column of the top bar, the list, these and the text box. When the window is short, the list gives up height and these do not.
-    it('does not shrink: when the window is short the message list gives up height, and the buttons keep theirs', () => {
+    // The chat column is a column of the top bar, the list, these and the text box. When the window is short, the list has less height and these do not.
+    it('does not shrink: when the window is short the message list has less height, and the buttons keep theirs', () => {
       renderInTheme(<QuickQuestions onAsk={() => {}} canAsk={() => true} />);
       expect(declarationsOf(group()).flex).toBe('0 0 auto');
     });

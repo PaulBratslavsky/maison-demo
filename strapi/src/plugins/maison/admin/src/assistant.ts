@@ -1,7 +1,9 @@
+import type { PageDraft } from './drafts';
+
 /**
  * What the assistant's drawer decides, apart from React: its quick questions, the state it shows, the notices under the messages, when
- * Send works, the line for each tool call, what stays in the chat after Stop or a failed turn, what happens to the text
- * box, and where the admin's token is. The components read these, and the unit tests hold them.
+ * Send works, the line for each tool call, which draft calls are cards and what a card is titled, what stays in the chat after Stop or a
+ * failed turn, what happens to the text box, and where the admin's token is. The components read these, and the unit tests hold them.
  */
 
 /** The assistant's two routes, served under /maison. */
@@ -52,10 +54,13 @@ export type AskTabState =
   | { kind: 'not-ready'; text: string }
   | { kind: 'chat'; model: string; tools: ToolInfo[] };
 
+/** What staff read when the check fails. It holds none of the error: the fetch client's own text goes to the console. */
+export const STATUS_CHECK_FAILED = "Couldn't check the assistant.";
+
 /** A status the drawer already has is kept when a later check fails: the chat stays as it was. */
-export const askTabState = (status: AssistantStatus | null, statusError: string | null): AskTabState => {
+export const askTabState = (status: AssistantStatus | null, statusFailed: boolean): AskTabState => {
   if (status) return status.ready ? { kind: 'chat', model: status.model, tools: status.tools } : { kind: 'not-ready', text: status.reason };
-  if (statusError) return { kind: 'failed', text: `Couldn't check the assistant: ${statusError}` };
+  if (statusFailed) return { kind: 'failed', text: STATUS_CHECK_FAILED };
   return { kind: 'loading' };
 };
 
@@ -80,8 +85,8 @@ export interface ErrorNotice {
 }
 
 // These two texts are the server's own (CHAT_TOO_LONG_TEXT and SOMETHING_WRONG_TEXT in server/src/assistant/errors.ts).
-// A unit test holds them to it.
-const SOMETHING_WRONG = 'Something went wrong. Try again.';
+// A unit test holds them to it. drafts.ts also shows SOMETHING_WRONG, when a failed load of the item a draft is for has no message.
+export const SOMETHING_WRONG = 'Something went wrong. Try again.';
 const CHAT_TOO_LONG = 'This chat is long. Start a new chat.';
 
 /** A 401 on the chat request means the admin's session ended while the page was open. Strapi's own sign-in shows only for requests made through its fetch client, and the chat is a plain fetch, so the page says what to do. */
@@ -302,6 +307,8 @@ export const TOOL_NOTES: Record<string, string> = {
   search_knowledge: 'Searches the product knowledge Maison wrote for customers.',
   search_products: 'Finds products, with prices and stock.',
   view_product: "Shows one product's details.",
+  draft_reply: 'Writes a draft reply to an inquiry. You read it, edit it and send it yourself.',
+  draft_answer: 'Writes a draft answer to a customer question. You read it, edit it and send it yourself.',
 };
 
 /** The line for a tool in the list of tools, or null for a tool with none. */
@@ -331,20 +338,21 @@ export interface MessageLike {
 const partsOfMessage = (message: MessageLike): readonly PartLike[] => message.parts as readonly PartLike[];
 
 /**
- * The parts of a message the chat draws: text with something in it, and a tool call that has a line. Thinking, a tool's result
- * (its call's line already reports it), and any other part are not drawn. The messages and the working line both read this,
- * so what counts as an answer is decided in one place.
+ * The parts of a message the chat draws: text with something in it, a tool call that has a line, and a draft call that is a card.
+ * Thinking, a tool's result (its call's line, or its card, already reports it), and any other part are not drawn. The messages and
+ * the working line both read this, so what counts as an answer is decided in one place. A message that holds only a draft card
+ * counts: left out, it would look like a turn that failed with nothing to read, and be taken away.
  */
 export const drawableParts = (parts: readonly PartLike[]): PartLike[] =>
   parts.filter((part) => {
     if (part.type === 'text') return typeof part.content === 'string' && part.content.trim() !== '';
-    return part.type === 'tool-call' && toolLineOf(part, toolResultOf(parts, part.id)) !== null;
+    return part.type === 'tool-call' && (toolLineOf(part, toolResultOf(parts, part.id)) !== null || draftOf(part, parts) !== null);
   });
 
 /**
  * Whether the chat says the assistant is working: it is answering, and its message has nothing drawn yet, because it holds no
- * part at all, or only thinking, or because the last message is still the staff member's. Once text or a tool line is on the
- * screen, that is the sign of work.
+ * part at all, or only thinking, or because the last message is still the staff member's. Once text, a tool line or a draft card
+ * is on the screen, that is the sign of work.
  */
 export const showsWorking = (busy: boolean, messages: readonly MessageLike[]): boolean => {
   if (!busy) return false;
@@ -415,8 +423,8 @@ export const withoutFailedTurn = <M extends MessageLike>(messages: M[]): M[] => 
   return messages.slice(0, end);
 };
 
-/** Where a message came from: typed in the text box, or one of the starter buttons. */
-export type MessageSource = 'box' | 'starter';
+/** Where a message came from: typed in the text box, one of the quick questions, or Ask about this on a row of the Maison page. */
+export type MessageSource = 'box' | 'starter' | 'ask';
 
 /** The last question staff sent, kept so a failed turn can put it back. */
 export interface SentQuestion {
@@ -424,13 +432,13 @@ export interface SentQuestion {
   source: MessageSource;
 }
 
-/** The text box after a send. What was in the box is sent from the box, so it is emptied. A starter sends its own text and leaves the box as it was. */
+/** The text box after a send. What was in the box is sent from the box, so it is emptied. A message the page writes itself (a quick question, Ask about this) leaves the box as it was. */
 export const draftAfterSend = (draft: string, source: MessageSource): string => (source === 'box' ? '' : draft);
 
 /**
  * The text box after a turn failed. A question staff typed goes back into the box, when the box is empty, so they don't retype
- * it. A starter doesn't (staff did not type it, and its button is a click away), and a box with text in it is left alone. Stop is
- * not a failure and never gets here.
+ * it. A message the page wrote doesn't (staff did not type it, and its button is a click away), and a box with text in it is left alone.
+ * Stop is not a failure and never gets here.
  */
 export const draftAfterFailure = ({ draft, question }: { draft: string; question: SentQuestion | null }): string =>
   question?.source === 'box' && draft.trim() === '' ? question.text : draft;
@@ -450,6 +458,40 @@ export const composerButtons = ({ text, busy, ready }: { text: string; busy: boo
   sendDisabled: !canSend({ text, busy, ready }),
   showStop: busy,
 });
+
+/** What a row's Ask about this is about: a request or a question by its reference, an inquiry by its documentId, the only reference it has. */
+export type AskItem =
+  | { kind: 'request'; reference: string }
+  | { kind: 'question'; reference: string }
+  | { kind: 'inquiry'; documentId: string };
+
+/**
+ * The one message Ask about this sends. It names the item and nothing else: the chat looks the item up itself, so nothing about the customer
+ * is in the message.
+ */
+export const askMessage = (item: AskItem): string => {
+  switch (item.kind) {
+    case 'request':
+      return `Tell me about request ${item.reference}.`;
+    case 'question':
+      return `Tell me about question ${item.reference}.`;
+    case 'inquiry':
+      return `Tell me about inquiry ${item.documentId}.`;
+  }
+};
+
+/** What the chat tells the page about itself: whether the assistant is set up, and whether an answer is on its way. */
+export interface ChatReport {
+  ready: boolean;
+  busy: boolean;
+}
+
+/**
+ * Ask about this on a row: shown once the assistant is ready, and waiting while it answers, because the chat drops a message sent while an
+ * answer comes, so a click then would do nothing. With no chat (the admin may not use the assistant, or it has not loaded) it shows nothing.
+ */
+export const askButtonState = (chat: ChatReport | null): { show: boolean; disabled: boolean } =>
+  chat !== null && chat.ready ? { show: true, disabled: chat.busy } : { show: false, disabled: false };
 
 /**
  * The admin's token, as the page's own requests send it. Strapi keeps it in localStorage, written as a JSON string (a bare
@@ -477,4 +519,85 @@ export const adminTokenFrom = ({ stored, cookie, cookieName }: { stored: string 
   } catch {
     return value;
   }
+};
+
+/** The names of the two draft tools, as the server offers them. A test holds them equal to `DRAFT_TOOL_NAMES` in `server/src/assistant/tools.ts`. */
+export const DRAFT_TOOLS = { reply: 'draft_reply', answer: 'draft_answer' } as const;
+
+/** A draft the chat shows as a card: the tool call it came from, and what Use this draft hands to the page. */
+export interface DraftCardModel {
+  callId: string;
+  draft: PageDraft;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** What the model passed to a tool: the parsed `input` once it is complete, else the raw `arguments` text, parsed as JSON. */
+const inputOf = (part: PartLike): Record<string, unknown> | null => {
+  if (isRecord(part.input)) return part.input;
+  if (typeof part.arguments !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(part.arguments);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The draft a `tool-call` part shows as a card, or null when it shows none. A card is drawn only for a draft tool whose state is `complete`
+ * with an `output`: the page's own `show` has run, which happens only for a call that passed the server's schema. `input-complete` is not
+ * enough, since the browser sets it from the streamed arguments before the server has checked them. A call the server refused (a text of
+ * 2,500 characters, a bad reference) has the state `error`, and its `output` holds `{ error }`: no card. A `tool-result` part in `error` for the
+ * same call also gives no card.
+ */
+export const draftOf = (part: PartLike, parts: readonly PartLike[]): DraftCardModel | null => {
+  if (part.type !== 'tool-call') return null;
+  if (part.name !== DRAFT_TOOLS.reply && part.name !== DRAFT_TOOLS.answer) return null;
+  if (part.state !== 'complete') return null;
+  if (part.output === undefined || part.output === null) return null;
+  if (isRecord(part.output) && 'error' in part.output) return null;
+  if (toolResultOf(parts, part.id)?.state === 'error') return null;
+
+  const input = inputOf(part);
+  if (!input || typeof input.text !== 'string') return null;
+  if (part.name === DRAFT_TOOLS.reply) {
+    const { documentId } = input;
+    return typeof documentId === 'string' && documentId !== '' ? { callId: part.id, draft: { kind: 'reply', documentId, text: input.text } } : null;
+  }
+  const { reference } = input;
+  return typeof reference === 'string' && reference !== '' ? { callId: part.id, draft: { kind: 'answer', reference, text: input.text } } : null;
+};
+
+/** "2026-10-06T10:12:00+09:00" as "2026-10-06 10:12": the boutique's own clock, as the server wrote it. Anything else is shown as it came. */
+const receivedLabel = (receivedAt: string): string =>
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(receivedAt) ? receivedAt.slice(0, 16).replace('T', ' ') : receivedAt;
+
+/** The inquiry with this documentId from the chat's latest lookup of it: the newest message first, and the newest part of a message first. */
+const lookedUp = (documentId: string, messages: ReadonlyArray<{ parts: readonly PartLike[] }>): { customer: string; receivedAt: string } | null => {
+  for (const message of [...messages].reverse()) {
+    for (const part of [...message.parts].reverse()) {
+      if (part.type !== 'tool-call' || part.name !== 'list_inquiries' || part.state === 'error') continue;
+      // The answer is on the call, or only in its tool-result part, as a JSON string (see outputOf).
+      const output = outputOf(part, toolResultOf(message.parts, part.id));
+      const rows: unknown = isRecord(output) ? output.inquiries : null;
+      if (!Array.isArray(rows)) continue;
+      const row = rows.find((candidate: unknown) => isRecord(candidate) && candidate.documentId === documentId);
+      if (isRecord(row) && typeof row.customer === 'string' && typeof row.receivedAt === 'string') {
+        return { customer: row.customer, receivedAt: row.receivedAt };
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * The words over a draft card, which name the item so a wrong item shows before the dialog opens. A reply: "Draft reply on LINE:
+ * line:U4af…88, received 2026-10-06 10:12", from the chat's latest lookup of that documentId, or the documentId alone when the chat has none
+ * (a documentId the model made up, or took from text in an inquiry). An answer: "Draft answer for Q-4821": the reference names the item.
+ */
+export const cardTitle = (draft: PageDraft, messages: ReadonlyArray<{ parts: readonly PartLike[] }>): string => {
+  if (draft.kind === 'answer') return `Draft answer for ${draft.reference}`;
+  const found = lookedUp(draft.documentId, messages);
+  return found ? `Draft reply on LINE: ${found.customer}, received ${receivedLabel(found.receivedAt)}` : `Draft reply on LINE: ${draft.documentId}`;
 };
