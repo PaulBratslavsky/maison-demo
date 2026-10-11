@@ -4,7 +4,10 @@ import { Sparkle } from '@strapi/icons';
 import type { UIMessage } from '@tanstack/ai-client';
 import styled from 'styled-components';
 
-import { drawableParts, followsNewest, showsToolWait, showsWorking, toolBoxOf, toolResultOf, type PartLike } from '../../assistant';
+import { cardTitle, draftOf, drawableParts, followsNewest, showsToolWait, showsWorking, toolBoxOf, toolResultOf, type PartLike } from '../../assistant';
+import { canUseDraft } from '../../drafts';
+import { DraftCard } from './DraftCard';
+import { useDraftLink } from './draftLink';
 import { EmptyState } from './EmptyState';
 import { MarkdownBody } from './MarkdownBody';
 import { ToolBox } from './ToolBox';
@@ -16,6 +19,7 @@ import { ToolBox } from './ToolBox';
  * What differs from the reference, on purpose:
  * - The parts of a message are drawn in the order they arrived: text, a tool box, more text. The reference joins all the text and puts
  *   the boxes after it.
+ * - A draft the assistant wrote is drawn as a card in its bubble, in the order it arrived, like a tool box. A message that holds only a card is drawn.
  * - A message with nothing to draw is not drawn, so a turn that failed or is still thinking leaves no empty bubble.
  * - The waiting dots come from `showsWorking`, and show once in their own row, which also covers the wait before the first words come.
  * - The list follows the newest message only while the reader is at the bottom: no smooth scrolling and no scrollIntoView.
@@ -146,15 +150,32 @@ const WaitSpinner = styled.span`
   }
 `;
 
+/** What a message with no draft card gets for its titles: the same empty list every time, so the message's memo holds. */
+const NO_TITLES: readonly string[] = [];
+
+/**
+ * The titles of the draft cards in a message, in the order of the cards. A title names the item from the chat's latest lookup of it, which can
+ * be in an earlier message, so it is worked out here, where all the messages are known, and handed to the row. A message with no card gets the shared
+ * empty list.
+ */
+const titlesOf = (message: UIMessage, messages: readonly UIMessage[]): readonly string[] => {
+  const parts = message.parts as readonly PartLike[];
+  const cards = parts.flatMap((part) => draftOf(part, parts) ?? []);
+  return cards.length === 0 ? NO_TITLES : cards.map((card) => cardTitle(card.draft, messages));
+};
+
 /**
  * One message of the chat. It is memoized on the message object: the chat library replaces only the message that changed, so while an answer
- * streams in, the messages before it keep their identity and are not drawn again.
+ * streams in, the messages before it keep their identity and are not drawn again. A message with a draft card is drawn again with the list, since
+ * its title can depend on a later lookup.
  */
-const MessageRow = memo(({ message, toolWait }: { message: UIMessage; toolWait: boolean }) => {
+const MessageRow = memo(({ message, toolWait, titles }: { message: UIMessage; toolWait: boolean; titles: readonly string[] }) => {
+  const { access, openDraft } = useDraftLink();
   const parts = message.parts as readonly PartLike[];
   const drawn = drawableParts(parts);
   if (drawn.length === 0) return null;
   const fromStaff = message.role === 'user';
+  let cards = 0;
 
   return (
     // `data-message-role` is a hook for tests, as in the reference: it lets a check read one side of the chat.
@@ -168,6 +189,12 @@ const MessageRow = memo(({ message, toolWait }: { message: UIMessage; toolWait: 
         <Role $isUser={fromStaff}>{fromStaff ? 'You' : 'Assistant'}</Role>
         {drawn.map((part, partIndex) => {
           if (part.type === 'text') return fromStaff ? <StaffText key={partIndex}>{part.content}</StaffText> : <MarkdownBody key={partIndex} text={part.content} />;
+          const card = draftOf(part, parts);
+          if (card) {
+            const title = titles[cards] ?? cardTitle(card.draft, []);
+            cards += 1;
+            return <DraftCard key={part.id} model={card} title={title} canUse={canUseDraft(card.draft, access)} onUse={openDraft} />;
+          }
           const box = toolBoxOf(part, toolResultOf(parts, part.id));
           return box ? <ToolBox key={part.id} box={box} /> : null;
         })}
@@ -227,7 +254,7 @@ export const MessageList = ({ messages, busy }: MessageListProps) => {
       {messages.length === 0 && <EmptyState />}
 
       {messages.map((message, index) => (
-        <MessageRow key={message.id} message={message} toolWait={toolWait && index === messages.length - 1} />
+        <MessageRow key={message.id} message={message} toolWait={toolWait && index === messages.length - 1} titles={titlesOf(message, messages)} />
       ))}
 
       {working && (

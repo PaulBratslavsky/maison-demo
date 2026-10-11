@@ -1,7 +1,9 @@
+import type { PageDraft } from './drafts';
+
 /**
  * What the assistant's drawer decides, apart from React: its quick questions, the state it shows, the notices under the messages, when
- * Send works, the line for each tool call, what stays in the chat after Stop or a failed turn, what happens to the text
- * box, and where the admin's token is. The components read these, and the unit tests hold them.
+ * Send works, the line for each tool call, which draft calls are cards and what a card is titled, what stays in the chat after Stop or a
+ * failed turn, what happens to the text box, and where the admin's token is. The components read these, and the unit tests hold them.
  */
 
 /** The assistant's two routes, served under /maison. */
@@ -336,20 +338,21 @@ export interface MessageLike {
 const partsOfMessage = (message: MessageLike): readonly PartLike[] => message.parts as readonly PartLike[];
 
 /**
- * The parts of a message the chat draws: text with something in it, and a tool call that has a line. Thinking, a tool's result
- * (its call's line already reports it), and any other part are not drawn. The messages and the working line both read this,
- * so what counts as an answer is decided in one place.
+ * The parts of a message the chat draws: text with something in it, a tool call that has a line, and a draft call that is a card.
+ * Thinking, a tool's result (its call's line, or its card, already reports it), and any other part are not drawn. The messages and
+ * the working line both read this, so what counts as an answer is decided in one place. A message that holds only a draft card
+ * counts: left out, it would look like a turn that failed with nothing to read, and be taken away.
  */
 export const drawableParts = (parts: readonly PartLike[]): PartLike[] =>
   parts.filter((part) => {
     if (part.type === 'text') return typeof part.content === 'string' && part.content.trim() !== '';
-    return part.type === 'tool-call' && toolLineOf(part, toolResultOf(parts, part.id)) !== null;
+    return part.type === 'tool-call' && (toolLineOf(part, toolResultOf(parts, part.id)) !== null || draftOf(part, parts) !== null);
   });
 
 /**
  * Whether the chat says the assistant is working: it is answering, and its message has nothing drawn yet, because it holds no
- * part at all, or only thinking, or because the last message is still the staff member's. Once text or a tool line is on the
- * screen, that is the sign of work.
+ * part at all, or only thinking, or because the last message is still the staff member's. Once text, a tool line or a draft card
+ * is on the screen, that is the sign of work.
  */
 export const showsWorking = (busy: boolean, messages: readonly MessageLike[]): boolean => {
   if (!busy) return false;
@@ -516,4 +519,85 @@ export const adminTokenFrom = ({ stored, cookie, cookieName }: { stored: string 
   } catch {
     return value;
   }
+};
+
+/** The names of the two draft tools, as the server offers them. A test holds them equal to `DRAFT_TOOL_NAMES` in `server/src/assistant/tools.ts`. */
+export const DRAFT_TOOLS = { reply: 'draft_reply', answer: 'draft_answer' } as const;
+
+/** A draft the chat shows as a card: the tool call it came from, and what Use this draft hands to the page. */
+export interface DraftCardModel {
+  callId: string;
+  draft: PageDraft;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** What the model passed to a tool: the parsed `input` once it is complete, else the raw `arguments` text, parsed as JSON. */
+const inputOf = (part: PartLike): Record<string, unknown> | null => {
+  if (isRecord(part.input)) return part.input;
+  if (typeof part.arguments !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(part.arguments);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The draft a `tool-call` part shows as a card, or null when it shows none. A card is drawn only for a draft tool whose state is `complete`
+ * with an `output`: the page's own `show` has run, which happens only for a call that passed the server's schema. `input-complete` is not
+ * enough, since the browser sets it from the streamed arguments before the server has checked them. A call the server refused (a text of
+ * 2,500 characters, a bad reference) has the state `error`, and its `output` holds `{ error }`: no card. A `tool-result` part in `error` for the
+ * same call also gives no card.
+ */
+export const draftOf = (part: PartLike, parts: readonly PartLike[]): DraftCardModel | null => {
+  if (part.type !== 'tool-call') return null;
+  if (part.name !== DRAFT_TOOLS.reply && part.name !== DRAFT_TOOLS.answer) return null;
+  if (part.state !== 'complete') return null;
+  if (part.output === undefined || part.output === null) return null;
+  if (isRecord(part.output) && 'error' in part.output) return null;
+  if (toolResultOf(parts, part.id)?.state === 'error') return null;
+
+  const input = inputOf(part);
+  if (!input || typeof input.text !== 'string') return null;
+  if (part.name === DRAFT_TOOLS.reply) {
+    const { documentId } = input;
+    return typeof documentId === 'string' && documentId !== '' ? { callId: part.id, draft: { kind: 'reply', documentId, text: input.text } } : null;
+  }
+  const { reference } = input;
+  return typeof reference === 'string' && reference !== '' ? { callId: part.id, draft: { kind: 'answer', reference, text: input.text } } : null;
+};
+
+/** "2026-10-06T10:12:00+09:00" as "2026-10-06 10:12": the boutique's own clock, as the server wrote it. Anything else is shown as it came. */
+const receivedLabel = (receivedAt: string): string =>
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(receivedAt) ? receivedAt.slice(0, 16).replace('T', ' ') : receivedAt;
+
+/** The inquiry with this documentId from the chat's latest lookup of it: the newest message first, and the newest part of a message first. */
+const lookedUp = (documentId: string, messages: ReadonlyArray<{ parts: readonly PartLike[] }>): { customer: string; receivedAt: string } | null => {
+  for (const message of [...messages].reverse()) {
+    for (const part of [...message.parts].reverse()) {
+      if (part.type !== 'tool-call' || part.name !== 'list_inquiries' || part.state === 'error') continue;
+      // The answer is on the call, or only in its tool-result part, as a JSON string (see outputOf).
+      const output = outputOf(part, toolResultOf(message.parts, part.id));
+      const rows: unknown = isRecord(output) ? output.inquiries : null;
+      if (!Array.isArray(rows)) continue;
+      const row = rows.find((candidate: unknown) => isRecord(candidate) && candidate.documentId === documentId);
+      if (isRecord(row) && typeof row.customer === 'string' && typeof row.receivedAt === 'string') {
+        return { customer: row.customer, receivedAt: row.receivedAt };
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * The words over a draft card, which name the item so a wrong item shows before the dialog opens. A reply: "Draft reply on LINE:
+ * line:U4af…88, received 2026-10-06 10:12", from the chat's latest lookup of that documentId, or the documentId alone when the chat has none
+ * (a documentId the model made up, or took from text in an inquiry). An answer: "Draft answer for Q-4821": the reference names the item.
+ */
+export const cardTitle = (draft: PageDraft, messages: ReadonlyArray<{ parts: readonly PartLike[] }>): string => {
+  if (draft.kind === 'answer') return `Draft answer for ${draft.reference}`;
+  const found = lookedUp(draft.documentId, messages);
+  return found ? `Draft reply on LINE: ${found.customer}, received ${receivedLabel(found.receivedAt)}` : `Draft reply on LINE: ${draft.documentId}`;
 };

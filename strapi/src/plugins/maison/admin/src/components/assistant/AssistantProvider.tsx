@@ -36,6 +36,7 @@ import {
   type ChatSnapshot,
   type SavedChatRow,
 } from '../../conversations';
+import { DRAFT_CLIENT_TOOLS } from '../../assistant-client-tools';
 import { useMounted } from '../../useMounted';
 
 /**
@@ -225,6 +226,9 @@ export const AssistantProvider = ({
       if ((error as { code?: unknown } | undefined)?.code === 'not_ready') void recheck();
     },
     onCustomEvent: (name: string) => setNote(customEventNote(name)),
+    // The browser's part of the two draft tools: a call to one is run here, and the card in the chat is its result. The list is made once, because
+    // useChat keeps the options of its first render.
+    tools: DRAFT_CLIENT_TOOLS,
   });
 
   const { sendMessage, stop: stopChat, clear, setMessages } = chat;

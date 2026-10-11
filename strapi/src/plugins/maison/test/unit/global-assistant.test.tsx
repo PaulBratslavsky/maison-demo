@@ -3,9 +3,13 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { askTheChat, chatReport, pendingAsk, wantChatStatus } from '../../admin/src/askStore';
+import { pendingDraft, takeDraft } from '../../admin/src/draftStore';
+import assistantService from '../../server/src/services/assistant';
 import { GlobalAssistant } from '../../admin/src/components/assistant/GlobalAssistant';
 import { READY, answer, assistantWorld, event, getsOf, savedChat, stream } from './fake-assistant-world';
 import { declarationsOf } from './css';
+import { fakeStrapi } from './fake-strapi';
+import { fakeTextAdapter, textTurn, toolCallTurn } from './fake-text-adapter';
 import { renderInTheme } from './render';
 
 /*
@@ -452,6 +456,71 @@ describe('GlobalAssistant', () => {
       view.unmount();
 
       expect(chatReport()).toBeNull();
+    });
+  });
+
+  describe('a draft, from the model to Use this draft', () => {
+    const DRAFT = { documentId: 'inq4abc', text: 'Thank you for telling us.\nA member of our team will write to you today.' };
+    const MAY_REPLY = { canView: true, canReply: true, canRead: false, canAnswer: false };
+
+    /** The chat request goes to the server's own service, with a scripted model: the page runs the draft tool, and sends the follow-up. */
+    const withDraftingModel = () => {
+      const { adapter, requests } = fakeTextAdapter([toolCallTurn('draft_reply', DRAFT), textTurn('The draft is ready. Check the strap before you use it.')]);
+      const service = assistantService({ strapi: fakeStrapi({ config: { aiProvider: 'anthropic', aiApiKey: 'sk-ant-test' } }) });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: unknown, init?: RequestInit) =>
+          service.turn(await service.parseBody(JSON.parse(String(init?.body))), { ability: { can: () => true }, adminId: 1, responseController: new AbortController(), adapterFor: () => adapter })
+        )
+      );
+      return requests;
+    };
+    afterEach(() => takeDraft());
+
+    it('runs the draft tool in the page, shows the card with the sentence after it, and sends the follow-up by itself', async () => {
+      assistantWorld(client);
+      const requests = withDraftingModel();
+      renderInTheme(<GlobalAssistant access={MAY_REPLY} navigate={() => {}} />);
+
+      await userEvent.type(await openDrawer(), 'Draft a reply to inquiry inq4abc.{Enter}');
+
+      const card = await within(region()).findByRole('group', { name: 'Draft reply on LINE: inq4abc' });
+      expect(within(card).getByText(/Thank you for telling us/)).toBeTruthy();
+      expect(await within(region()).findByText('The draft is ready. Check the strap before you use it.')).toBeTruthy();
+      expect(requests).toHaveLength(2);
+      // The follow-up carried the page's result for the call.
+      expect(JSON.stringify(requests[1].messages.at(-1))).toContain('shown');
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull());
+      expect(Array.from(document.querySelectorAll('[role="alert"]')).filter((alert) => alert.textContent)).toEqual([]);
+    });
+
+    it('offers the draft to the page and takes the admin to the Inquiries tab when Use this draft is pressed, and the drawer stays open', async () => {
+      assistantWorld(client);
+      withDraftingModel();
+      const navigate = vi.fn();
+      renderInTheme(<GlobalAssistant access={MAY_REPLY} navigate={navigate} />);
+      await userEvent.type(await openDrawer(), 'Draft a reply to inquiry inq4abc.{Enter}');
+      await within(region()).findByText('The draft is ready. Check the strap before you use it.');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Use this draft' }));
+
+      expect(pendingDraft()).toEqual({ kind: 'reply', documentId: 'inq4abc', text: DRAFT.text });
+      expect(navigate).toHaveBeenCalledExactlyOnceWith('/plugins/maison?tab=inquiries');
+      expect(String(navigate.mock.calls[0][0])).not.toContain('Thank');
+      expect(drawer()).toBeTruthy();
+    });
+
+    it('is saved with the chat: the draft call and its result come back when the chat is reopened, and the card is there', async () => {
+      const { rows } = assistantWorld(client);
+      withDraftingModel();
+      renderInTheme(<GlobalAssistant access={MAY_REPLY} navigate={() => {}} />);
+      await userEvent.type(await openDrawer(), 'Draft a reply to inquiry inq4abc.{Enter}');
+      await within(region()).findByText('The draft is ready. Check the strap before you use it.');
+      await waitFor(() => expect(rows).toHaveLength(1));
+
+      const saved = JSON.stringify(rows[0].messages);
+      expect(saved).toContain('draft_reply');
+      expect(saved).toContain('"shown":true');
     });
   });
 

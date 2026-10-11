@@ -1,8 +1,11 @@
 import * as React from 'react';
 
 import { reportChat, takeAsk, useChatStatusWanted, usePendingAsk } from '../../askStore';
+import { offerDraft } from '../../draftStore';
+import { NO_DRAFT_ACCESS, draftPath, type DraftAccess, type PageDraft } from '../../drafts';
 import { AssistantProvider, useAssistant } from './AssistantProvider';
 import { ChatDrawer } from './ChatDrawer';
+import { DraftLinkProvider, type DraftLink } from './draftLink';
 import { Launcher } from './Launcher';
 
 /**
@@ -17,6 +20,9 @@ import { Launcher } from './Launcher';
  * - The provider asks the server nothing until the drawer has been opened once (`started`). This is on every admin page, and most pages never open it.
  * - The drawer's width is kept here, so it opens as wide as staff left it. Closing gives the focus back to the launcher.
  * - Ask about this, on a row of the Maison page, reaches the chat through `AskReceiver` below.
+ * - Use this draft, on a draft card, goes the other way: the draft is offered to the page (draftStore.ts) and the router's `navigate` takes the admin to
+ *   the tab that takes it. The drawer stays open. The host gives this component the router's `navigate` and the admin's draft permissions, since the
+ *   host has no router and no Strapi provider.
  */
 
 /**
@@ -56,7 +62,14 @@ const AskReceiver = ({ onAsk }: { onAsk: () => void }) => {
   return null;
 };
 
-export const GlobalAssistant = () => {
+interface GlobalAssistantProps {
+  /** Which drafts the admin may use: it decides which cards show Use this draft. */
+  access?: DraftAccess;
+  /** Strapi's router. Without it Use this draft offers the draft and goes nowhere. */
+  navigate?: (to: string) => void;
+}
+
+export const GlobalAssistant = ({ access = NO_DRAFT_ACCESS, navigate }: GlobalAssistantProps) => {
   const [open, setOpen] = React.useState(false);
   const [expanded, setExpanded] = React.useState(false);
   const [started, setStarted] = React.useState(false);
@@ -64,6 +77,18 @@ export const GlobalAssistant = () => {
   const [asks, setAsks] = React.useState(0);
   const checkStatus = useChatStatusWanted();
   const launcher = React.useRef<HTMLButtonElement>(null);
+  // What a draft card needs from outside the chat. The draft goes to the page's store first, so the page finds it when it draws, and then the router
+  // takes the admin there. The text is in the store and never in the address.
+  const draftLink = React.useMemo<DraftLink>(
+    () => ({
+      access,
+      openDraft: (draft: PageDraft) => {
+        offerDraft(draft);
+        navigate?.(draftPath(draft));
+      },
+    }),
+    [access, navigate]
+  );
   // Set when staff close the drawer, and used once the launcher is on the screen again.
   const returnsFocus = React.useRef(false);
 
@@ -74,34 +99,36 @@ export const GlobalAssistant = () => {
   }, [open]);
 
   return (
-    <AssistantProvider started={started} checkStatus={checkStatus}>
-      <AskReceiver
-        onAsk={() => {
-          setStarted(true);
-          setOpen(true);
-          setAsks((count) => count + 1);
-        }}
-      />
-      <Launcher
-        ref={launcher}
-        open={open}
-        onOpen={() => {
-          setStarted(true);
-          setOpen(true);
-        }}
-      />
-      {started && (
-        <ChatDrawer
-          open={open}
-          expanded={expanded}
-          focusSignal={asks}
-          onToggleExpanded={() => setExpanded((value) => !value)}
-          onClose={() => {
-            returnsFocus.current = true;
-            setOpen(false);
+    <DraftLinkProvider value={draftLink}>
+      <AssistantProvider started={started} checkStatus={checkStatus}>
+        <AskReceiver
+          onAsk={() => {
+            setStarted(true);
+            setOpen(true);
+            setAsks((count) => count + 1);
           }}
         />
-      )}
-    </AssistantProvider>
+        <Launcher
+          ref={launcher}
+          open={open}
+          onOpen={() => {
+            setStarted(true);
+            setOpen(true);
+          }}
+        />
+        {started && (
+          <ChatDrawer
+            open={open}
+            expanded={expanded}
+            focusSignal={asks}
+            onToggleExpanded={() => setExpanded((value) => !value)}
+            onClose={() => {
+              returnsFocus.current = true;
+              setOpen(false);
+            }}
+          />
+        )}
+      </AssistantProvider>
+    </DraftLinkProvider>
   );
 };

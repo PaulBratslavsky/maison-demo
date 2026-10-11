@@ -3,6 +3,7 @@ import { Suspense, lazy } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DefaultTheme } from 'styled-components';
 
+import { NO_DRAFT_ACCESS, type DraftAccess } from '../../drafts';
 import { AssistantBoundary } from './AssistantBoundary';
 
 /**
@@ -17,7 +18,8 @@ import { AssistantBoundary } from './AssistantBoundary';
  * So the icon holds nothing. It tells the host what Strapi's providers say and the host cannot read (the theme, the language and whether the
  * admin may use the assistant), and it keeps the host in place for as long as an icon is on the screen. The host's own React root has no
  * Strapi provider, which the chat does not need: it reads the theme and the language from what the icon tells it, and it calls the server with
- * `useFetchClient`, which does not read a provider. When no icon has been drawn for a short time, the admin has left the signed-in pages
+ * `useFetchClient`, which does not read a provider. The icon also tells the host which drafts the admin may use, and gives it the router's `navigate`,
+ * which is how Use this draft takes the admin to the Maison page: the host has no router of its own. When no icon has been drawn for a short time, the admin has left the signed-in pages
  * (they signed out), and the host removes the assistant and its chat.
  *
  * A failure inside the host, while drawing or while loading the chunk, would unmount the whole root and take the launcher with it. The root is
@@ -33,6 +35,10 @@ export interface HostEnvironment {
   allowed: boolean;
   theme: DefaultTheme;
   locale: string;
+  /** Which drafts the admin may use. Without it, none. */
+  access?: DraftAccess;
+  /** Strapi's router: takes the admin to an address inside the admin, such as `/plugins/maison?tab=inquiries`. Without it, Use this draft goes nowhere. */
+  navigate?: (to: string) => void;
 }
 
 const GlobalAssistant = lazy(() => import('./GlobalAssistant').then((module) => ({ default: module.GlobalAssistant })));
@@ -80,7 +86,7 @@ const draw = () => {
     <DesignSystemProvider theme={environment.theme} locale={environment.locale}>
       <AssistantBoundary>
         <Suspense fallback={null}>
-          <GlobalAssistant />
+          <GlobalAssistant access={environment.access ?? NO_DRAFT_ACCESS} navigate={environment.navigate} />
         </Suspense>
       </AssistantBoundary>
     </DesignSystemProvider>

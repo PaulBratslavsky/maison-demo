@@ -4,10 +4,12 @@ import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 import { IntlProvider } from 'react-intl';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { destroyHost } from '../../admin/src/components/assistant/assistantHost';
 import { MaisonMenuIcon } from '../../admin/src/components/assistant/MaisonMenuIcon';
-import { event, assistantWorld, getsOf } from './fake-assistant-world';
+import { pendingDraft, takeDraft } from '../../admin/src/draftStore';
+import { event, assistantWorld, getsOf, savedChat } from './fake-assistant-world';
 import { FakeAdmin, type MenuLink } from './fake-strapi-menu';
 import { renderInTheme } from './render';
 
@@ -23,6 +25,8 @@ vi.mock('@strapi/strapi/admin', () => ({ useFetchClient: () => client, useRBAC: 
 
 /** What `useRBAC` answers once it has checked: the flags of the permissions asked for. */
 const checked = (canUse: boolean) => ({ isLoading: false, allowedActions: { canUse }, permissions: [], error: undefined });
+/** What `useRBAC` answers for an admin who may use the assistant and hold exactly these other flags. */
+const checkedWith = (flags: Record<string, boolean>) => ({ isLoading: false, allowedActions: { canUse: true, ...flags }, permissions: [], error: undefined });
 /** What `useRBAC` answers before it has checked: loading, and every flag false, as in @strapi/admin's hook (hooks/useRBAC.mjs). */
 const checking = { isLoading: true, allowedActions: { canUse: false }, permissions: [], error: undefined };
 
@@ -155,8 +159,10 @@ describe('one chat, however many icons Strapi draws', () => {
     });
     renderInTheme(
       <IntlProvider locale="en" messages={{}}>
-        <MaisonMenuIcon data-icon="first" />
-        <MaisonMenuIcon data-icon="second" />
+        <MemoryRouter>
+          <MaisonMenuIcon data-icon="first" />
+          <MaisonMenuIcon data-icon="second" />
+        </MemoryRouter>
       </IntlProvider>
     );
     await launcher();
@@ -180,8 +186,10 @@ describe('one chat, however many icons Strapi draws', () => {
   it('keeps the same chat when the icon that looked after it goes and another takes over', async () => {
     const Pair = ({ showFirst }: { showFirst: boolean }) => (
       <IntlProvider locale="en" messages={{}}>
-        {showFirst && <MaisonMenuIcon key="first" />}
-        <MaisonMenuIcon key="second" />
+        <MemoryRouter>
+          {showFirst && <MaisonMenuIcon key="first" />}
+          <MaisonMenuIcon key="second" />
+        </MemoryRouter>
       </IntlProvider>
     );
     const view = renderInTheme(<Pair showFirst />);
@@ -412,5 +420,104 @@ describe('events stay inside the chat', () => {
     await userEvent.hover(within(menu()).getByRole('link', { name: 'Maison' }));
 
     expect(handlers.onPointerEnter).toHaveBeenCalled();
+  });
+});
+
+describe('Use this draft, from a card in the drawer', () => {
+  const DRAFT = { documentId: 'inq4abc', text: 'Thank you for telling us.\nA member of our team will write to you today.' };
+  const draftChat = [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'Draft a reply to inq4abc.' }] },
+    {
+      id: 'a1',
+      role: 'assistant',
+      parts: [
+        { type: 'tool-call', id: 'c1', name: 'draft_reply', arguments: JSON.stringify(DRAFT), input: DRAFT, state: 'complete', output: { shown: true } },
+        { type: 'tool-result', toolCallId: 'c1', state: 'complete', content: '{"shown":true}' },
+      ],
+    },
+  ];
+  const answerChat = [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'Draft an answer to Q-4821.' }] },
+    {
+      id: 'a1',
+      role: 'assistant',
+      parts: [
+        { type: 'tool-call', id: 'c2', name: 'draft_answer', arguments: '{}', input: { reference: 'Q-4821', text: 'Yes. A watch up to 42 mm fits.' }, state: 'complete', output: { shown: true } },
+        { type: 'tool-result', toolCallId: 'c2', state: 'complete', content: '{"shown":true}' },
+      ],
+    },
+  ];
+  const useButton = () => screen.findByRole('button', { name: 'Use this draft' });
+
+  afterEach(() => takeDraft());
+
+  it('takes a reply to the Inquiries tab of the Maison page, holds the draft in memory, and puts no text in the address', async () => {
+    rbac.use.mockReturnValue(checkedWith({ canView: true, canReply: true }));
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink(), contentManager]} path="/content-manager" />);
+    await openDrawer();
+
+    await userEvent.click(await useButton());
+
+    expect(where()).toBe('/plugins/maison?tab=inquiries');
+    expect(pendingDraft()).toEqual({ kind: 'reply', documentId: 'inq4abc', text: DRAFT.text });
+    expect(where()).not.toContain('Thank');
+    // The drawer stays open beside the page, with the chat as it was.
+    expect(screen.getByRole('complementary', { name: 'Maison assistant' })).toBeTruthy();
+    expect(within(region()).getByRole('group')).toBeTruthy();
+  });
+
+  it('takes an answer to the Questions tab', async () => {
+    rbac.use.mockReturnValue(checkedWith({ canRead: true, canAnswer: true }));
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft an answer', answerChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink()]} path="/content-manager" />);
+    await openDrawer();
+
+    await userEvent.click(await useButton());
+
+    expect(where()).toBe('/plugins/maison?tab=questions');
+    expect(pendingDraft()).toEqual({ kind: 'answer', reference: 'Q-4821', text: 'Yes. A watch up to 42 mm fits.' });
+  });
+
+  it('shows no button to an admin who may use the assistant but holds only one permission of the pair', async () => {
+    rbac.use.mockReturnValue(checkedWith({ canView: true }));
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink()]} />);
+    await openDrawer();
+
+    await within(region()).findByRole('group');
+    expect(screen.queryByRole('button', { name: 'Use this draft' })).toBeNull();
+  });
+
+  it('shows the button once the permissions have been checked, and not while the check is running', async () => {
+    let grant: () => void = () => {};
+    rbac.use.mockImplementation(() => {
+      const [granted, setGranted] = React.useState(false);
+      grant = () => setGranted(true);
+      return granted ? checkedWith({ canView: true, canReply: true }) : checked(true);
+    });
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink()]} />);
+    await openDrawer();
+    await within(region()).findByRole('group');
+    expect(screen.queryByRole('button', { name: 'Use this draft' })).toBeNull();
+
+    act(() => grant());
+
+    expect(await useButton()).toBeTruthy();
+  });
+
+  it('keeps working after the admin moves to another page: the navigate function is the router\'s, not one from a menu icon that has gone', async () => {
+    rbac.use.mockReturnValue(checkedWith({ canView: true, canReply: true }));
+    assistantWorld(client, { saved: [savedChat('c1', 'Draft a reply', draftChat)] });
+    renderInTheme(<FakeAdmin links={[maisonLink(), contentManager]} path="/" />);
+    await openDrawer();
+    await goTo('Content Manager');
+    await goTo('Maison');
+    await goTo('Content Manager');
+
+    await userEvent.click(await useButton());
+
+    expect(where()).toBe('/plugins/maison?tab=inquiries');
   });
 });
