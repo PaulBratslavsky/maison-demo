@@ -36,7 +36,7 @@ import {
   type ChatSnapshot,
   type SavedChatRow,
 } from '../../conversations';
-import { DRAFT_CLIENT_TOOLS } from '../../assistant-client-tools';
+import { draftClientTools } from '../../assistant-client-tools';
 import { useMounted } from '../../useMounted';
 
 /**
@@ -214,24 +214,32 @@ export const AssistantProvider = ({
     []
   );
 
+  // Set when staff press Stop or New chat, and cleared by the next send. After Stop, ai-client still processes the chunks it had already read: a run
+  // that ends in a draft call would run the page's draft tool and start the follow-up request by itself, or end in a request the server refuses and a
+  // red error. While it is set, the draft tools do nothing and an error is not shown, and the next send stops the chat once more first.
+  const stoppedRef = React.useRef(false);
+  const haltRef = React.useRef<() => void>(() => {});
+  // The browser's part of the two draft tools: a call to one is run here, and the card in the chat is its result. The list is made once, because
+  // useChat keeps the options of its first render.
+  const [draftTools] = React.useState(() => draftClientTools({ stopped: () => stoppedRef.current, halt: () => haltRef.current() }));
+
   const chat = useChat({
     connection,
     // A message sent while an answer is on its way is dropped, never queued out of sight. Send and the Ask about this buttons wait instead.
     queue: 'drop',
     onError: (error: Error) => {
-      // Stop ends the stream, and says nothing.
-      if (error?.name === 'AbortError') return;
+      // Stop ends the stream, and says nothing. A request that failed after Stop was not asked for by staff: it says nothing either.
+      if (error?.name === 'AbortError' || stoppedRef.current) return;
       setNotice(errorNotice(error));
       setFailedTurn({ question: asked.current });
       if ((error as { code?: unknown } | undefined)?.code === 'not_ready') void recheck();
     },
     onCustomEvent: (name: string) => setNote(customEventNote(name)),
-    // The browser's part of the two draft tools: a call to one is run here, and the card in the chat is its result. The list is made once, because
-    // useChat keeps the options of its first render.
-    tools: DRAFT_CLIENT_TOOLS,
+    tools: draftTools,
   });
 
   const { sendMessage, stop: stopChat, clear, setMessages } = chat;
+  haltRef.current = stopChat;
   const ready = status?.ready === true;
   const busy = chat.isLoading;
 
@@ -406,6 +414,11 @@ export const AssistantProvider = ({
       // useChat would drop a send made while an answer is on its way. Nothing is changed for it: the box keeps its text.
       if (busyRef.current) return;
       acted.current = true;
+      // A run that Stop cut short can leave an interrupt behind, which would make ai-client refuse a normal message. Stopping again clears it.
+      if (stoppedRef.current) {
+        stopChat();
+        stoppedRef.current = false;
+      }
       dropOpenToolCalls();
       asked.current = { text, source };
       setFailedTurn(null);
@@ -414,10 +427,11 @@ export const AssistantProvider = ({
       setDraft((current) => draftAfterSend(current, source));
       await sendMessage(text);
     },
-    [sendMessage, dropOpenToolCalls]
+    [sendMessage, stopChat, dropOpenToolCalls]
   );
 
   const stop = React.useCallback(() => {
+    stoppedRef.current = true;
     stopChat();
     dropOpenToolCalls();
   }, [stopChat, dropOpenToolCalls]);
@@ -425,6 +439,7 @@ export const AssistantProvider = ({
   const newChat = React.useCallback(() => {
     acted.current = true;
     opening.current += 1;
+    stoppedRef.current = true;
     stopChat();
     // What is on the screen is saved first, so an answer that was stopped stays in its chat. A question with no answer yet is not part of it.
     saveNow(withoutFailedTurn(withoutOpenToolCalls(messagesRef.current)));

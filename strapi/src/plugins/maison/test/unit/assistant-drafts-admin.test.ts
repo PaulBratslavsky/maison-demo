@@ -15,7 +15,7 @@ import {
   type MessageLike,
   type PartLike,
 } from '../../admin/src/assistant';
-import { DRAFT_CLIENT_TOOLS } from '../../admin/src/assistant-client-tools';
+import { DRAFT_CLIENT_TOOLS, draftClientTools } from '../../admin/src/assistant-client-tools';
 import type { PageDraft } from '../../admin/src/drafts';
 import { DRAFT_TOOL_NAMES, assistantTools } from '../../server/src/assistant/tools';
 import { inquiryView } from '../../server/src/assistant/views';
@@ -52,6 +52,31 @@ describe('the draft tools the page runs', () => {
       expect(tool.execute, tool.name).toBeTypeOf('function');
       await expect(Promise.resolve(tool.execute?.({} as never))).resolves.toEqual({ shown: true });
     }
+  });
+});
+
+describe('the draft tools of one chat', () => {
+  const guarded = (stopped: boolean) => {
+    const halt = vi.fn();
+    return { halt, tools: draftClientTools({ stopped: () => stopped, halt }) };
+  };
+
+  it('show the draft as the others do, while staff have not pressed Stop', async () => {
+    const { halt, tools } = guarded(false);
+    for (const tool of tools) await expect(Promise.resolve(tool.execute?.({} as never))).resolves.toEqual({ shown: true });
+    expect(halt).not.toHaveBeenCalled();
+  });
+
+  it('do nothing after Stop but stop the chat again, which makes ai-client drop the run: they never answer { shown: true }', async () => {
+    const { halt, tools } = guarded(true);
+    for (const tool of tools) {
+      await expect(Promise.resolve(tool.execute?.({} as never)), tool.name).resolves.toEqual({ shown: false });
+    }
+    expect(halt).toHaveBeenCalledTimes(tools.length);
+  });
+
+  it('are the same two tools as the ones without a guard', () => {
+    expect(draftClientTools({ stopped: () => false, halt: () => {} }).map((tool) => tool.name)).toEqual(DRAFT_CLIENT_TOOLS.map((tool) => tool.name));
   });
 });
 

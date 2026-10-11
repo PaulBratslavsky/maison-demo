@@ -303,7 +303,7 @@ describe("the README's account of Ask about this, drafts and Use this draft", ()
   });
 
   it('puts Ask about this, the draft card, Use this draft, the "Drafted by" line, the changed items and the roles in the checklist for the browser', () => {
-    for (const subject of ['Ask about this', 'It waits', 'Draft a reply', 'Use this draft', 'Drafted by the Maison assistant', 'Reset demo activity', 'Drafts and the roles', 'A reopened chat']) {
+    for (const subject of ['Ask about this', 'It waits', 'Draft a reply', 'Use this draft', 'Drafted by the Maison assistant', 'Reset demo activity', 'Drafts and the roles', 'A reopened chat', 'Stop on a draft']) {
       expect(checklist, subject).toContain(subject);
     }
   });

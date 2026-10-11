@@ -27,17 +27,16 @@ vi.mock('../../admin/src/assistant-client-tools', async () => {
     description: 'A draft tool whose page part waits for the test.',
     inputSchema: { type: 'object', properties: { documentId: { type: 'string' }, text: { type: 'string' } }, required: ['documentId', 'text'] },
   });
-  return {
-    DRAFT_CLIENT_TOOLS: [
-      definition.client(
-        () =>
-          new Promise((resolve) => {
-            held.entered += 1;
-            held.release = resolve;
-          })
-      ),
-    ],
-  };
+  const tools = () => [
+    definition.client(
+      () =>
+        new Promise((resolve) => {
+          held.entered += 1;
+          held.release = resolve;
+        })
+    ),
+  ];
+  return { DRAFT_CLIENT_TOOLS: tools(), draftClientTools: tools };
 });
 
 const DRAFT = { documentId: 'inq4abc', text: 'Thank you for telling us.' };

@@ -13,6 +13,25 @@ import { DRAFT_TOOLS } from './assistant';
  */
 const show = () => ({ shown: true });
 
+/**
+ * What the page tells the draft tools about Stop. After Stop, ai-client still processes the chunks it had already read. A run that ends in a draft
+ * call has the call, a snapshot of the messages and a RUN_FINISHED with the interrupt, which arrive one after another, so a Stop that lands between
+ * the arrival and the processing leaves the interrupt to be processed afterwards. Running the tool then would send the follow-up request by itself.
+ * - `stopped` says whether staff have pressed Stop (or New chat) since they last sent a message.
+ * - `halt` stops the chat again. Called from inside a tool, it makes ai-client drop the tool's result and send no follow-up.
+ */
+export interface DraftGuard {
+  stopped: () => boolean;
+  halt: () => void;
+}
+
+/** The tool's page part: it shows the draft, unless staff have pressed Stop, when it does nothing and drops the run. */
+const showUnlessStopped = (guard: DraftGuard) => () => {
+  if (!guard.stopped()) return show();
+  guard.halt();
+  return { shown: false };
+};
+
 const draftReply = toolDefinition({
   name: DRAFT_TOOLS.reply,
   description: 'Shows staff a draft reply to an inquiry. It sends nothing.',
@@ -33,4 +52,11 @@ const draftAnswer = toolDefinition({
   },
 });
 
+/** The client tools of one chat, which do nothing once staff have pressed Stop. */
+export const draftClientTools = (guard: DraftGuard) => {
+  const run = showUnlessStopped(guard);
+  return [draftReply.client(run), draftAnswer.client(run)];
+};
+
+/** The same tools with no Stop to look at, for a test that runs them without a provider. */
 export const DRAFT_CLIENT_TOOLS = [draftReply.client(show), draftAnswer.client(show)];
